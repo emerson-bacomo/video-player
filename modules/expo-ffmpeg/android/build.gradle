@@ -1,0 +1,49 @@
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+
+group = 'expo.modules.ffmpeg'
+version = '1.0.0'
+
+def getKotlinVersion() {
+  return rootProject.ext.has('kotlinVersion') ? rootProject.ext.get('kotlinVersion') : '2.0.20'
+}
+
+android {
+  compileSdkVersion project.findProperty('compileSdkVersion')?.toInteger() ?: 34
+  ndkVersion "27.1.12297006" // Explicitly use a version found on the system to avoid 27.0 corruption
+  namespace "expo.modules.ffmpeg"
+
+  defaultConfig {
+    minSdkVersion project.findProperty('minSdkVersion')?.toInteger() ?: 21
+    targetSdkVersion project.findProperty('targetSdkVersion')?.toInteger() ?: 34
+
+    externalNativeBuild {
+      cmake {
+        cppFlags "-std=c++17 -fexceptions -frtti"
+        arguments "-DANDROID_STL=c++_shared"
+      }
+    }
+
+    ndk {
+      // abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
+      abiFilters 'arm64-v8a'
+    }
+  }
+
+  externalNativeBuild {
+    cmake {
+      path "CMakeLists.txt"
+    }
+  }
+
+  sourceSets {
+    main {
+      jniLibs.srcDirs = ['libs']
+    }
+  }
+}
+
+dependencies {
+  implementation project(':expo-modules-core')
+  implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:${getKotlinVersion()}"
+}

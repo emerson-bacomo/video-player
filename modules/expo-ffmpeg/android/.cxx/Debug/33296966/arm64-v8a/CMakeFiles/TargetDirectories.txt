@@ -1,0 +1,3 @@
+C:/Users/User/Downloads/video-player/modules/expo-ffmpeg/android/.cxx/Debug/33296966/arm64-v8a/CMakeFiles/expo-ffmpeg.dir
+C:/Users/User/Downloads/video-player/modules/expo-ffmpeg/android/.cxx/Debug/33296966/arm64-v8a/CMakeFiles/edit_cache.dir
+C:/Users/User/Downloads/video-player/modules/expo-ffmpeg/android/.cxx/Debug/33296966/arm64-v8a/CMakeFiles/rebuild_cache.dir

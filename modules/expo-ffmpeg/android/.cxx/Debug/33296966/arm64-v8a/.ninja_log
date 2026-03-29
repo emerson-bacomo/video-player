@@ -1,0 +1,10 @@
+# ninja log v5
+0	34409	7956230280865386	CMakeFiles/expo-ffmpeg.dir/C_/Users/User/Downloads/video-player/modules/expo-ffmpeg/common/cpp/ExpoFFmpegModule.cpp.o	ddd065cd777aef68
+34958	39505	7956230326732929	../../../../build/intermediates/cxx/Debug/33296966/obj/arm64-v8a/libexpo-ffmpeg.so	e171d446caa58c91
+63	669	7956237459527086	../../../../build/intermediates/cxx/Debug/33296966/obj/arm64-v8a/libexpo-ffmpeg.so	e171d446caa58c91
+51	2124	7965013922722878	CMakeFiles/expo-ffmpeg.dir/C_/Users/User/Downloads/video-player/modules/expo-ffmpeg/common/cpp/ExpoFFmpegModule.cpp.o	ddd065cd777aef68
+2124	2288	7965013924463952	../../../../build/intermediates/cxx/Debug/33296966/obj/arm64-v8a/libexpo-ffmpeg.so	e171d446caa58c91
+111	3112	7965068075886265	CMakeFiles/expo-ffmpeg.dir/C_/Users/User/Downloads/video-player/modules/expo-ffmpeg/common/cpp/ExpoFFmpegModule.cpp.o	ddd065cd777aef68
+3115	3295	7965068077866221	../../../../build/intermediates/cxx/Debug/33296966/obj/arm64-v8a/libexpo-ffmpeg.so	e171d446caa58c91
+89	2177	7965102323538607	CMakeFiles/expo-ffmpeg.dir/C_/Users/User/Downloads/video-player/modules/expo-ffmpeg/common/cpp/ExpoFFmpegModule.cpp.o	ddd065cd777aef68
+2178	2412	7965102325924735	../../../../build/intermediates/cxx/Debug/33296966/obj/arm64-v8a/libexpo-ffmpeg.so	e171d446caa58c91

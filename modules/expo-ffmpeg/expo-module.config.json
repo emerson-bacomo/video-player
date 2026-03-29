@@ -1,0 +1,8 @@
+{
+  "name": "expo-ffmpeg",
+  "platforms": ["android"],
+  "android": {
+    "package": "expo.modules.ffmpeg",
+    "modules": ["expo.modules.ffmpeg.ExpoFFmpegModule"]
+  }
+}
