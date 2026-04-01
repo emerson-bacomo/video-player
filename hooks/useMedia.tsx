@@ -2,7 +2,9 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library";
 import React, { createContext, useContext, useEffect, useState } from "react";
 // @ts-ignore - local module
+import { LoadingTask } from "@/components/LoadingStatus";
 import ExpoFFmpeg from "../modules/expo-ffmpeg";
+
 import {
     getAlbums,
     getAllPlaybackData,
@@ -30,7 +32,7 @@ export interface VideoMedia {
     isPlaceholder?: boolean;
 }
 
-export type SortBy = "name" | "date" | "duration";
+export type SortBy = "name" | "date" | "duration" | "episode";
 export type SortOrder = "asc" | "desc";
 
 export interface Album {
@@ -42,13 +44,6 @@ export interface Album {
     lastModified?: number;
     hasNew?: boolean;
     isPlaceholder?: boolean;
-}
-
-export interface LoadingTask {
-    id?: string;
-    label: string;
-    detail: string;
-    isImportant: boolean;
 }
 
 export interface MediaContextType {
@@ -103,7 +98,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
     const MAX_CONCURRENT_THUMBNAILS = 3;
 
     const [albumSort, setAlbumSort] = useState<{ by: SortBy; order: SortOrder }>({ by: "date", order: "desc" });
-    const [videoSort, setVideoSort] = useState<{ by: SortBy; order: SortOrder }>({ by: "name", order: "asc" });
+    const [videoSort, setVideoSort] = useState<{ by: SortBy; order: SortOrder }>({ by: "episode", order: "asc" });
 
     const [permissionResponse, requestPermission] = MediaLibrary.usePermissions();
 
@@ -310,7 +305,12 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
     const loadDataFromDB = async () => {
         try {
             console.log("[Media] Loading initial data from DB...");
-            setLoadingTask({ label: "Loading Library", detail: "Reading cached data from database...", isImportant: true });
+            const lastSync = getLastSyncTimestamp();
+            setLoadingTask({
+                label: "Loading Library",
+                detail: "Reading cached data from database...",
+                isImportant: lastSync === 0,
+            });
             const cachedAlbums = getAlbums();
             if (cachedAlbums.length > 0) {
                 setAlbums(cachedAlbums);
@@ -332,8 +332,9 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
 
     const performSmartSync = async (forceDeep = false, isImportant = true) => {
         try {
-            setLoadingTask({ label: "Scanning Media", detail: "Checking for new videos...", isImportant });
             const lastSync = getLastSyncTimestamp();
+            const shouldBeImportant = isImportant && lastSync === 0; // Only auto show status on initial sync
+            setLoadingTask({ label: "Scanning Media", detail: "Checking for new videos...", isImportant: shouldBeImportant });
 
             // Fast check: get the single most recent asset in the whole library
             const { assets: latestAssets } = await MediaLibrary.getAssetsAsync({

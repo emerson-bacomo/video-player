@@ -5,11 +5,26 @@ import { useMedia } from "../hooks/useMedia";
 
 import { cn } from "../lib/utils";
 
-export const LoadingStatus = () => {
+export interface LoadingTask {
+    id?: string;
+    label: string;
+    detail: string;
+    isImportant: boolean;
+}
+
+export interface LoadingStatusProps {
+    task?: LoadingTask | null;
+}
+
+export const LoadingStatus: React.FC<LoadingStatusProps> = ({ task: manualTask = null }) => {
     const { loadingTask, manualRefresh } = useMedia();
     const screenWidth = Dimensions.get("window").width;
+    const MENU_OFFSET = 40;
+    const ARROW_HEIGHT = 10;
+    const ARROW_WIDTH = 16;
+
     const [taskToDisplay, setTaskToDisplay] = useState(loadingTask);
-    const [isVisible, setIsVisible] = useState(true);
+    const [isVisible, setIsVisible] = useState(false);
     const [isExpanded, setIsExpanded] = useState(false);
     const [canExpand, setCanExpand] = useState(false);
     const [iconX, setIconX] = useState<number>(screenWidth - 60);
@@ -26,10 +41,15 @@ export const LoadingStatus = () => {
     const globalTargetX = (screenWidth - tooltipWidth) / 2;
     const leftOffset = globalTargetX - iconX;
 
+    const effectiveTask = manualTask || loadingTask;
+
     useEffect(() => {
-        if (loadingTask) {
-            setTaskToDisplay(loadingTask);
-            if (loadingTask.isImportant) {
+        if (effectiveTask) {
+            setTaskToDisplay({
+                ...effectiveTask,
+                isImportant: effectiveTask.isImportant ?? false,
+            });
+            if (effectiveTask.isImportant) {
                 setIsVisible(true);
             }
             Animated.timing(fadeAnim, {
@@ -44,9 +64,10 @@ export const LoadingStatus = () => {
                 useNativeDriver: true,
             }).start(() => {
                 setTaskToDisplay(null);
+                setIsVisible(false);
             });
         }
-    }, [isVisible, loadingTask]);
+    }, [isVisible, effectiveTask, manualTask]);
 
     const toggleVisible = () => setIsVisible(!isVisible);
     const toggleExpanded = () => {
@@ -92,8 +113,9 @@ export const LoadingStatus = () => {
                         transform: [{ translateY: fadeAnim.interpolate({ inputRange: [0, 1], outputRange: [-10, 0] }) }],
                         left: leftOffset,
                         width: tooltipWidth,
+                        top: MENU_OFFSET,
                     }}
-                    className="absolute top-10 z-50"
+                    className="absolute z-50"
                     pointerEvents="box-none"
                 >
                     {/* The Triangle Arrow - Positioned to point globally at the icon */}
@@ -103,18 +125,18 @@ export const LoadingStatus = () => {
                             height: 0,
                             backgroundColor: "transparent",
                             borderStyle: "solid",
-                            borderLeftWidth: 8,
-                            borderRightWidth: 8,
-                            borderBottomWidth: 10,
+                            borderLeftWidth: ARROW_WIDTH / 2,
+                            borderRightWidth: ARROW_WIDTH / 2,
+                            borderBottomWidth: ARROW_HEIGHT,
                             borderLeftColor: "transparent",
                             borderRightColor: "transparent",
                             borderBottomColor: "#18181b",
                             position: "absolute",
-                            top: -10,
+                            top: -ARROW_HEIGHT,
                             // The icon is at global iconX + iconWidth/2.
                             // The tooltip box is at globalTargetX.
-                            // Arrow should be at (iconX + iconWidth/2) - globalTargetX - 8 (half arrow width)
-                            left: iconX + iconWidth / 2 - globalTargetX - 8,
+                            // Arrow should be at (iconX + iconWidth/2) - globalTargetX - halfWidth
+                            left: iconX + iconWidth / 2 - globalTargetX - ARROW_WIDTH / 2,
                         }}
                     />
 
