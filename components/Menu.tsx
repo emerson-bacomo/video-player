@@ -1,0 +1,314 @@
+import { useTheme } from "@/context/ThemeContext";
+import { cn } from "@/utils/cn";
+import React, { createContext, useContext, useLayoutEffect, useRef, useState } from "react";
+import {
+    Dimensions,
+    DimensionValue,
+    GestureResponderEvent,
+    TouchableOpacity,
+    TouchableOpacityProps,
+    TouchableWithoutFeedback,
+    View,
+} from "react-native";
+import Modal from "react-native-modal";
+
+type MenuVariant = "POPUP" | "MODAL";
+
+interface MenuContextType {
+    visible: boolean;
+    setVisible: (v: boolean) => void;
+    triggerRef: React.RefObject<View>;
+    menuLayout: {
+        top: number;
+        left: number;
+        right: number;
+        triggerX: number;
+        triggerY: number;
+        triggerWidth: number;
+        triggerHeight: number;
+        autoAnchor: "left" | "right" | "center";
+    };
+    variant: MenuVariant;
+    anchorHorizontal?: "left" | "right" | "center";
+    horizontalScreenFill: boolean;
+    maxWidth: DimensionValue | "fit-content";
+    updateLayout: () => Promise<void>;
+    triggerElement: React.ReactElement<TouchableOpacityProps> | null;
+    children: React.ReactNode;
+    closeMenu: () => void;
+}
+
+const MenuContext = createContext<MenuContextType | null>(null);
+
+const MENU_OFFSET = 16;
+const ARROW_HEIGHT = 10;
+const ARROW_WIDTH = 16;
+const ARROW_MARGIN = MENU_OFFSET - ARROW_HEIGHT;
+
+export const Menu = ({
+    children,
+    variant = "POPUP",
+    anchorHorizontal,
+    horizontalScreenFill = false,
+    maxWidth = 400,
+    visible: controlledVisible,
+    onClose,
+}: {
+    children: React.ReactNode;
+    variant?: MenuVariant;
+    anchorHorizontal?: "left" | "right" | "center";
+    horizontalScreenFill?: boolean;
+    maxWidth?: DimensionValue | "fit-content";
+    visible?: boolean;
+    onClose?: () => void;
+}) => {
+    const [internalVisible, setInternalVisible] = useState(false);
+    const [menuLayout, setMenuLayout] = useState({
+        top: 0,
+        left: 16,
+        right: 16,
+        triggerX: 0,
+        triggerY: 0,
+        triggerWidth: 0,
+        triggerHeight: 0,
+        autoAnchor: "center" as "left" | "right" | "center",
+    });
+    const triggerRef = useRef<View>(null);
+    const visible = controlledVisible ?? internalVisible;
+    const setVisible = (nextVisible: boolean) => {
+        if (controlledVisible === undefined) {
+            setInternalVisible(nextVisible);
+        }
+        if (!nextVisible) {
+            onClose?.();
+        }
+    };
+
+    const updateLayout = () => {
+        return new Promise<void>((resolve) => {
+            triggerRef.current?.measure((_x, _y, width, height, pageX, pageY) => {
+                if (pageX !== 0 || pageY !== 0) {
+                    const screenWidth = Dimensions.get("window").width;
+                    const triggerCenterX = pageX + width / 2;
+                    let autoAnchor: "left" | "right" | "center" = "center";
+
+                    if (triggerCenterX > screenWidth * 0.6) autoAnchor = "right";
+                    else if (triggerCenterX < screenWidth * 0.4) autoAnchor = "left";
+
+                    setMenuLayout({
+                        top: pageY + height + MENU_OFFSET,
+                        left: 16,
+                        right: 16,
+                        triggerX: pageX,
+                        triggerY: pageY,
+                        triggerWidth: width,
+                        triggerHeight: height,
+                        autoAnchor,
+                    });
+                }
+                resolve();
+            });
+        });
+    };
+
+    useLayoutEffect(() => {
+        if (visible) {
+            updateLayout(); // So that the measurements happen before paint and there won't be flicker
+        }
+    }, [visible, children]);
+
+    const triggerElement = React.Children.toArray(children).find(
+        (child) => React.isValidElement(child) && child.type === Trigger,
+    ) as React.ReactElement<TouchableOpacityProps> | null;
+
+    return (
+        <MenuContext.Provider
+            value={{
+                visible,
+                setVisible,
+                triggerRef: triggerRef as React.RefObject<View>,
+                menuLayout,
+                variant,
+                anchorHorizontal,
+                horizontalScreenFill,
+                maxWidth,
+                updateLayout,
+                triggerElement: triggerElement || null,
+                children,
+                closeMenu: () => setVisible(false),
+            }}
+        >
+            <View>{children}</View>
+        </MenuContext.Provider>
+    );
+};
+
+const Trigger = ({ children, ...props }: TouchableOpacityProps) => {
+    const context = useContext(MenuContext);
+    if (!context) throw new Error("Trigger must be used within Menu");
+
+    const open = async () => {
+        await context.updateLayout?.();
+        context.setVisible(true);
+    };
+
+    return (
+        <TouchableOpacity
+            ref={context.triggerRef as any}
+            {...props}
+            onPress={(e: GestureResponderEvent) => {
+                open();
+                props.onPress?.(e);
+            }}
+        >
+            {children}
+        </TouchableOpacity>
+    );
+};
+
+const Item = ({ children, onPress, ...props }: TouchableOpacityProps) => {
+    const context = useContext(MenuContext);
+    if (!context) throw new Error("Item must be used within Menu");
+
+    return (
+        <TouchableOpacity
+            {...props}
+            onPress={(e) => {
+                onPress?.(e);
+                context.closeMenu();
+            }}
+        >
+            {children}
+        </TouchableOpacity>
+    );
+};
+
+const Content = ({ children, className }: { children: React.ReactNode; className?: string }) => {
+    const context = useContext(MenuContext);
+    if (!context) throw new Error("Content must be used within Menu");
+    const { theme } = useTheme();
+
+    const { visible, setVisible, menuLayout, variant, anchorHorizontal, horizontalScreenFill, maxWidth, triggerElement } =
+        context;
+
+    const screenWidth = Dimensions.get("window").width;
+    const finalAnchor = anchorHorizontal || menuLayout.autoAnchor;
+
+    return (
+        <Modal
+            isVisible={visible}
+            onBackdropPress={() => setVisible(false)}
+            onBackButtonPress={() => setVisible(false)}
+            backdropOpacity={0.6}
+            animationIn="fadeIn"
+            animationOut="fadeOut"
+            animationInTiming={150}
+            animationOutTiming={150}
+            backdropTransitionInTiming={150}
+            backdropTransitionOutTiming={150}
+            style={{ margin: 0 }}
+        >
+            <View className="flex-1">
+                {variant === "POPUP" && (
+                    <>
+                        <View
+                            style={{
+                                position: "absolute",
+                                top: menuLayout.triggerY,
+                                left: menuLayout.triggerX,
+                            }}
+                        >
+                            <TouchableWithoutFeedback onPress={() => setVisible(false)}>
+                                <View>
+                                    {triggerElement && (
+                                        <TouchableOpacity
+                                            activeOpacity={triggerElement.props.activeOpacity}
+                                            className={triggerElement.props.className}
+                                            style={triggerElement.props.style}
+                                            onPress={() => setVisible(false)}
+                                        >
+                                            {triggerElement.props.children}
+                                        </TouchableOpacity>
+                                    )}
+                                </View>
+                            </TouchableWithoutFeedback>
+                        </View>
+
+                        {/* Positioned Content */}
+                        <View
+                            pointerEvents="none"
+                            style={{
+                                position: "absolute",
+                                top: menuLayout.top - ARROW_WIDTH / 2 + 1,
+                                left: menuLayout.triggerX + menuLayout.triggerWidth / 2 - ARROW_WIDTH / 2,
+                                zIndex: 55,
+                            }}
+                        >
+                            <View
+                                style={{
+                                    width: ARROW_WIDTH,
+                                    height: ARROW_WIDTH,
+                                    backgroundColor: theme.menu,
+                                    transform: [{ rotate: "45deg" }],
+                                    borderTopWidth: 1,
+                                    borderLeftWidth: 1,
+                                    borderColor: theme.border,
+                                }}
+                            />
+                        </View>
+
+                        <View
+                            style={{
+                                position: "absolute",
+                                top: menuLayout.top,
+                                ...(horizontalScreenFill
+                                    ? { left: 16, right: 16 }
+                                    : finalAnchor === "left"
+                                      ? { left: Math.max(16, menuLayout.triggerX) }
+                                      : finalAnchor === "right"
+                                        ? {
+                                              right: Math.max(
+                                                  16,
+                                                  screenWidth - (menuLayout.triggerX + menuLayout.triggerWidth),
+                                              ),
+                                          }
+                                        : { left: 16, right: 16 }),
+                                alignSelf:
+                                    finalAnchor === "right" ? "flex-end" : finalAnchor === "center" ? "center" : "flex-start",
+                            }}
+                        >
+                            <View
+                                className={cn("rounded-2xl shadow-2xl border", className)}
+                                style={{
+                                    maxWidth: maxWidth === "fit-content" ? undefined : maxWidth,
+                                    backgroundColor: theme.menu,
+                                    borderColor: theme.border,
+                                }}
+                            >
+                                <View className="rounded-2xl overflow-hidden" style={{ zIndex: 60 }}>
+                                    {children}
+                                </View>
+                            </View>
+                        </View>
+                    </>
+                )}
+
+                {variant === "MODAL" && (
+                    <View className="flex-1 justify-center items-center px-6">
+                        <View
+                            onStartShouldSetResponder={() => true}
+                            className={cn("rounded-2xl shadow-2xl overflow-hidden w-full max-w-sm border", className)}
+                            style={{ backgroundColor: theme.menu, borderColor: theme.border }}
+                        >
+                            {children}
+                        </View>
+                    </View>
+                )}
+            </View>
+        </Modal>
+    );
+};
+
+Menu.Trigger = Trigger;
+Menu.Item = Item;
+Menu.Content = Content;

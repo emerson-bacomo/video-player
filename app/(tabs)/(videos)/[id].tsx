@@ -1,30 +1,69 @@
-import { VideoItemInfoModal } from "@/components/VideoItemInfoModal";
-import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import { StatusBar } from "expo-status-bar";
-import { Calendar, ChevronLeft, Clock, Film, Hash, SortAsc } from "lucide-react-native";
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
-import { FlatList, RefreshControl, Text, TouchableOpacity, View } from "react-native";
+import { AlbumItemDetailsModal } from "@/components/AlbumItemDetailsModal";
+import { Header } from "@/components/Header";
 import { LoadingStatus } from "@/components/LoadingStatus";
 import { PrefixFilterMenu } from "@/components/PrefixFilterMenu";
 import { SortMenu } from "@/components/SortMenu";
+import { ThemedSafeAreaView } from "@/components/Themed";
 import { VideoItem } from "@/components/VideoItem";
+import { VideoItemInfoModal } from "@/components/VideoItemInfoModal";
+import { useTheme } from "@/context/ThemeContext";
 import { useMedia } from "@/hooks/useMedia";
 import { extractEpisode, extractPrefix } from "@/utils/videoUtils";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import { Calendar, Clock, Film, Hash, Info, LucideIcon, SortAsc } from "lucide-react-native";
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { FlatList, RefreshControl, Text, TouchableOpacity, View } from "react-native";
 
 const AlbumVideosScreen = () => {
-    const { id, title, assetCount } = useLocalSearchParams<{ id: string; title: string; assetCount?: string }>();
-    const { videos, loadingTask, fetchVideosInAlbum, videoSort, setVideoSort, refreshPlaybackProgress } = useMedia() as any;
+    const { id, title } = useLocalSearchParams<{ id: string; title: string }>();
+    const {
+        videos,
+        loadingTask,
+        fetchVideosInAlbum,
+        videoSort,
+        setVideoSort,
+        refreshPlaybackProgress,
+        currentAlbum,
+        setCurrentAlbum,
+    } = useMedia();
     const REFRESH_TASK_ID = "albumVideosRefresh";
     const [selectedVideoId, setSelectedVideoId] = React.useState<string | null>(null);
-    const selectedVideo = React.useMemo(() => videos.find((v: any) => v.id === selectedVideoId), [videos, selectedVideoId]);
+    const selectedVideo = React.useMemo(() => videos.find((v) => v.id === selectedVideoId), [videos, selectedVideoId]);
+    const [showAlbumInfo, setShowAlbumInfo] = React.useState(false);
+    const { theme } = useTheme();
+
+    // Clear focus natively when routing backward so FFMPEG falls back to global priorities
+    useEffect(() => {
+        return () => {
+            setCurrentAlbum?.(null);
+        };
+    }, []);
+
+    const currentAlbumData = useMemo(() => {
+        return {
+            id,
+            title: title || currentAlbum?.title || "",
+            assetCount: currentAlbum?.assetCount || videos.length,
+            thumbnail: currentAlbum?.thumbnail,
+            lastModified: currentAlbum?.lastModified || 0,
+        };
+    }, [id, title, currentAlbum, videos.length]);
 
     // 1. Pre-calculate metadata (prefix, episode) to avoid expensive regex during sorting/filtering
+    // 1. Efficient metadata caching — Reactive to thumbnail updates but optimized via Ref Map
+    const metadataCacheRef = useRef(new Map<string, { prefix: string; episode: number }>());
     const videosWithMetadata = useMemo(() => {
-        return videos.map((v: any) => ({
-            ...v,
-            prefix: extractPrefix(v.filename),
-            episode: extractEpisode(v.filename),
-        }));
+        return videos.map((v) => {
+            const cached = metadataCacheRef.current.get(v.id);
+            if (cached) {
+                return { ...v, prefix: cached.prefix, episode: cached.episode };
+            }
+            const prefix = extractPrefix(v.filename);
+            const episode = extractEpisode(v.filename);
+            metadataCacheRef.current.set(v.id, { prefix, episode });
+            return { ...v, prefix, episode };
+        });
     }, [videos]);
 
     // Filtering State
@@ -33,16 +72,17 @@ const AlbumVideosScreen = () => {
 
     // 2. Prefix Calculation
     const prefixOptions = useMemo(() => {
+        if (videosWithMetadata.length === 0) return [];
         const counts: Record<string, number> = {};
-        videosWithMetadata.forEach((v: any) => {
+        videosWithMetadata.forEach((v) => {
             counts[v.prefix] = (counts[v.prefix] || 0) + 1;
         });
 
         return Object.entries(counts)
-            .filter(([_, count]) => count > 1) // Only show groupings
+            .filter(([_, count]) => count > 1)
             .map(([label, count]) => ({ label, count }))
             .sort((a, b) => a.label.localeCompare(b.label));
-    }, [videosWithMetadata]);
+    }, [videosWithMetadata]); // Keep reactive to list changes
 
     // Sorting State
     const deferredVideoSort = useDeferredValue(videoSort);
@@ -53,12 +93,12 @@ const AlbumVideosScreen = () => {
 
         // 1. Filter - Use deferred value to prevent blocking the UI thread during menu taps
         if (deferredPrefixes.length > 0) {
-            result = result.filter((v: any) => deferredPrefixes.includes(v.prefix));
+            result = result.filter((v) => deferredPrefixes.includes(v.prefix));
         }
 
         // 2. Sort
         const { by, order } = deferredVideoSort;
-        result.sort((a: any, b: any) => {
+        result.sort((a, b) => {
             let comparison = 0;
             if (by === "episode") {
                 // Group by prefix first
@@ -87,7 +127,7 @@ const AlbumVideosScreen = () => {
         [],
     );
 
-    const videoSortOptions: { label: string; value: "name" | "date" | "duration" | "episode"; icon: any }[] = [
+    const videoSortOptions: { label: string; value: "name" | "date" | "duration" | "episode"; icon: LucideIcon }[] = [
         { label: "Episode", value: "episode", icon: Hash },
         { label: "Date", value: "date", icon: Calendar },
         { label: "Name", value: "name", icon: SortAsc },
@@ -96,7 +136,7 @@ const AlbumVideosScreen = () => {
 
     const onRefresh = () => {
         if (id) {
-            fetchVideosInAlbum({ id, title: title || "", assetCount: parseInt(assetCount || "0") }, true, REFRESH_TASK_ID);
+            fetchVideosInAlbum({ id, title: title || "" }, true, REFRESH_TASK_ID);
         }
     };
 
@@ -130,29 +170,21 @@ const AlbumVideosScreen = () => {
 
     useEffect(() => {
         if (id) {
-            fetchVideosInAlbum({ id, title: title || "", assetCount: parseInt(assetCount || "12") }, false);
+            fetchVideosInAlbum({ id, title: title || "" }, false);
         }
     }, [id, videoSort]);
 
-
     return (
-        <View className="flex-1 bg-black">
+        <ThemedSafeAreaView className="flex-1">
             <StatusBar style="light" />
 
-            <View className="px-4 pt-14 pb-4 flex-row items-center justify-between border-b border-zinc-900 gap-4">
+            <Header>
                 <View className="flex-row items-center flex-1 gap-3">
-                    <TouchableOpacity
-                        onPress={() => (router.canGoBack() ? router.back() : router.push("/(tabs)/(videos)"))}
-                        hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
-                    >
-                        <ChevronLeft size={20} color="white" />
-                    </TouchableOpacity>
-                    <Text className="text-white text-2xl font-bold flex-1" numberOfLines={1}>
-                        {title}
-                    </Text>
+                    <Header.Back onPress={() => (router.canGoBack() ? router.back() : router.push("/(tabs)/(videos)"))} />
+                    <Header.Title title={currentAlbumData.title} subtitle={`${currentAlbumData.assetCount} Videos`} />
                 </View>
 
-                <View className="flex-row items-center gap-2">
+                <Header.Actions>
                     <LoadingStatus
                         task={
                             selectedPrefixes !== deferredPrefixes || videoSort !== deferredVideoSort
@@ -167,16 +199,20 @@ const AlbumVideosScreen = () => {
                         onClearAll={handleClearFilters}
                     />
                     <SortMenu currentSort={videoSort} onSortChange={setVideoSort} options={videoSortOptions} />
-                </View>
-            </View>
+                    <TouchableOpacity
+                        onPress={() => setShowAlbumInfo(true)}
+                        className="w-10 h-10 items-center justify-center rounded-full bg-zinc-800/50"
+                    >
+                        <Info size={20} color={theme.text} />
+                    </TouchableOpacity>
+                </Header.Actions>
+            </Header>
 
             <FlatList
                 data={loadingTask?.id === REFRESH_TASK_ID ? skeletonData : processedVideos}
                 keyExtractor={(item) => item.id}
                 numColumns={2}
-                renderItem={({ item }: { item: any }) => (
-                    <VideoItem item={item} setSelectedVideoId={setSelectedVideoId} />
-                )}
+                renderItem={({ item }: { item: any }) => <VideoItem item={item} setSelectedVideoId={setSelectedVideoId} />}
                 initialNumToRender={10}
                 maxToRenderPerBatch={10}
                 windowSize={5}
@@ -201,7 +237,14 @@ const AlbumVideosScreen = () => {
                 onClose={() => setSelectedVideoId(null)}
                 onPlay={onPlayVideo}
             />
-        </View>
+
+            <AlbumItemDetailsModal
+                visible={showAlbumInfo}
+                album={currentAlbumData}
+                onClose={() => setShowAlbumInfo(false)}
+                hideOpenFolderAction={true}
+            />
+        </ThemedSafeAreaView>
     );
 };
 

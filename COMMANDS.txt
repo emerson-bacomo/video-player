@@ -1,0 +1,2 @@
+- Build standalone apk
+    cd android; .\gradlew assembleRelease; cd ..;

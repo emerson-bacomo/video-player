@@ -1,21 +1,28 @@
+import { Button } from "@/components/Button";
+import { Header } from "@/components/Header";
+import { LoadingStatus } from "@/components/LoadingStatus";
+import { useMedia } from "@/hooks/useMedia";
+import { Orientation, useSettings } from "@/hooks/useSettings";
 import { Directory } from "expo-file-system";
 import { StatusBar } from "expo-status-bar";
-import { FolderOpen, Info, Monitor, Smartphone } from "lucide-react-native";
-import React from "react";
+import { ChevronDown, ChevronRight, FolderOpen, Info, Monitor, Palette, Smartphone, Sun } from "lucide-react-native";
+import React, { useState } from "react";
 import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from "react-native";
-import { Button } from "../../components/Button";
-import { useMedia } from "../../hooks/useMedia";
-import { Orientation, useSettings } from "../../hooks/useSettings";
+import { ThemedSafeAreaView, ThemedCard } from "@/components/Themed";
+import { useTheme } from "@/context/ThemeContext";
+import { router } from "expo-router";
 
 const SettingsScreen = () => {
     const { settings, updateSettings, loading: settingsLoading } = useSettings();
     const { regenerateAllThumbnails, resetEverything } = useMedia();
+    const { theme, switchPreset, activePresetId, presets } = useTheme();
+    const [themeDropdownOpen, setThemeDropdownOpen] = useState(false);
 
     if (settingsLoading) {
         return (
-            <View className="flex-1 bg-black justify-center items-center">
-                <ActivityIndicator size="large" color="#ffffff" />
-            </View>
+            <ThemedSafeAreaView className="flex-1">
+                <ActivityIndicator size="large" color={theme.primary} />
+            </ThemedSafeAreaView>
         );
     }
 
@@ -32,33 +39,41 @@ const SettingsScreen = () => {
 
     const OrientationOption = ({ label, value, icon: Icon }: { label: string; value: Orientation; icon: any }) => (
         <TouchableOpacity
-            className={`flex-1 flex-row items-center justify-center p-4 rounded-xl border gap-2 ${
-                settings.defaultOrientation === value ? "bg-blue-600 border-blue-500" : "bg-zinc-900 border-zinc-800"
-            }`}
+            className={`flex-1 flex-row items-center justify-center p-4 rounded-xl border gap-2`}
+            style={{ 
+              backgroundColor: settings.defaultOrientation === value ? theme.primary : theme.card,
+              borderColor: settings.defaultOrientation === value ? theme.primary : theme.border
+            }}
             onPress={() => updateSettings({ defaultOrientation: value })}
         >
-            <Icon size={18} color="white" />
-            <Text className="text-white font-semibold">{label}</Text>
+            <Icon size={18} color={settings.defaultOrientation === value ? "white" : theme.text} />
+            <Text style={{ color: settings.defaultOrientation === value ? "white" : theme.text }} className="font-semibold">{label}</Text>
         </TouchableOpacity>
     );
 
     return (
-        <View className="flex-1 bg-black">
+        <ThemedSafeAreaView className="flex-1">
             <StatusBar style="light" />
 
-            <View className="px-4 pt-14 pb-4 border-b border-zinc-900">
-                <Text className="text-white text-2xl font-bold">Settings</Text>
-            </View>
+            <Header>
+                <Header.Title title="Settings" subtitle="Personalize your experience" />
+                <Header.Actions>
+                    <LoadingStatus />
+                </Header.Actions>
+            </Header>
 
             <ScrollView className="flex-1 px-4 py-6">
+                {/* Developer Options */}
                 <View className="mb-8">
                     <Text className="text-zinc-500 text-sm font-bold uppercase tracking-wider mb-4">Developer Options</Text>
-                    <View className="bg-zinc-900 rounded-2xl p-4 border border-zinc-800">
-                        <Text className="text-white font-semibold mb-2">Thumbnail Management</Text>
+                    <ThemedCard className="p-4">
+                        <Text style={{ color: theme.text }} className="font-semibold mb-2">Thumbnail Management</Text>
                         <Button
                             title="Regenerate All Thumbnails"
-                            className="bg-zinc-800 p-4 rounded-xl border border-zinc-700"
-                            textClassName="text-blue-400 font-bold"
+                            className="p-4 rounded-xl border"
+                            style={{ backgroundColor: theme.background, borderColor: theme.border }}
+                            textClassName="font-bold"
+                            textStyle={{ color: theme.primary }}
                             onPress={async (setLoading) => {
                                 try {
                                     setLoading(true);
@@ -70,7 +85,7 @@ const SettingsScreen = () => {
                         />
                         <View className="h-px bg-zinc-800 my-4" />
 
-                        <Text className="text-white font-semibold mb-2">Database Management</Text>
+                        <Text style={{ color: theme.text }} className="font-semibold mb-2">Database Management</Text>
                         <Button
                             title="Reset Media Database"
                             className="bg-red-900/20 p-4 rounded-xl border border-red-900/30"
@@ -87,46 +102,127 @@ const SettingsScreen = () => {
                         <Text className="text-zinc-500 text-xs mt-3">
                             Wipes all cached folder/video data, playback history, and thumbnails.
                         </Text>
-                    </View>
+                    </ThemedCard>
                 </View>
 
+                {/* Clipping */}
                 <View className="mb-8">
                     <Text className="text-zinc-500 text-sm font-bold uppercase tracking-wider mb-4">Clipping</Text>
-                    <View className="bg-zinc-900 rounded-2xl p-4 border border-zinc-800">
-                        <Text className="text-white font-semibold mb-2">Clip Destination Folder</Text>
+                    <ThemedCard className="p-4">
+                        <Text style={{ color: theme.text }} className="font-semibold mb-2">Clip Destination Folder</Text>
                         <TouchableOpacity
-                            className="bg-zinc-800 p-4 rounded-xl border border-zinc-700 flex-row items-center justify-between"
+                            className="p-4 rounded-xl border flex-row items-center justify-between"
+                            style={{ backgroundColor: theme.background, borderColor: theme.border }}
                             onPress={pickDirectory}
                         >
-                            <Text className="text-white flex-1 mr-2" numberOfLines={1}>
+                            <Text style={{ color: theme.text }} className="flex-1 mr-2" numberOfLines={1}>
                                 {settings.clipDestination || "Select folder..."}
                             </Text>
-                            <FolderOpen size={20} color="#3b82f6" />
+                            <FolderOpen size={20} color={theme.primary} />
                         </TouchableOpacity>
                         <Text className="text-zinc-500 text-xs mt-3">
                             Videos will be saved to this folder in your media library.
                         </Text>
-                    </View>
+                    </ThemedCard>
                 </View>
 
+                {/* Theming */}
+                <View className="mb-8">
+                    <Text className="text-zinc-500 text-sm font-bold uppercase tracking-wider mb-4">Theming</Text>
+                    <ThemedCard className="p-4">
+                        <TouchableOpacity
+                            className="p-4 rounded-xl border flex-row items-center justify-between mb-3"
+                            style={{ backgroundColor: theme.background, borderColor: theme.border }}
+                            onPress={() => router.push("/theme-editor")}
+                        >
+                            <View className="flex-row items-center gap-3">
+                                <Palette size={20} color={theme.primary} />
+                                <Text style={{ color: theme.text }} className="font-semibold">Theme Editor</Text>
+                            </View>
+                            <ChevronRight size={20} color={theme.secondary} />
+                        </TouchableOpacity>
+
+                        <View
+                            className="rounded-xl border overflow-hidden"
+                            style={{ backgroundColor: theme.background, borderColor: theme.border }}
+                        >
+                            <TouchableOpacity
+                                className="p-4 flex-row items-center justify-between"
+                                onPress={() => setThemeDropdownOpen((prev) => !prev)}
+                            >
+                                <View className="flex-row items-center gap-3">
+                                    <Sun size={20} color={theme.primary} />
+                                    <View>
+                                        <Text style={{ color: theme.text }} className="font-semibold">
+                                            Theme Preset
+                                        </Text>
+                                        <Text className="text-zinc-500 text-xs mt-1">
+                                            {presets.find((preset: any) => preset.id === activePresetId)?.name || "Choose theme"}
+                                        </Text>
+                                    </View>
+                                </View>
+                                <ChevronDown
+                                    size={18}
+                                    color={theme.secondary}
+                                    style={{ transform: [{ rotate: themeDropdownOpen ? "180deg" : "0deg" }] }}
+                                />
+                            </TouchableOpacity>
+
+                            {themeDropdownOpen && (
+                                <View style={{ borderTopWidth: 1, borderTopColor: theme.border }}>
+                                    {presets.map((preset: any) => (
+                                        <TouchableOpacity
+                                            key={preset.id}
+                                            className="px-4 py-3.5 flex-row items-center justify-between"
+                                            style={{ backgroundColor: preset.id === activePresetId ? theme.card : theme.background }}
+                                            onPress={() => {
+                                                switchPreset(preset.id);
+                                                setThemeDropdownOpen(false);
+                                            }}
+                                        >
+                                            <View className="flex-row items-center gap-3">
+                                                <View
+                                                    className="w-2 h-2 rounded-full"
+                                                    style={{ backgroundColor: preset.id === activePresetId ? theme.primary : "#52525b" }}
+                                                />
+                                                <Text
+                                                    style={{ color: preset.id === activePresetId ? theme.primary : theme.text }}
+                                                    className="font-medium"
+                                                >
+                                                    {preset.name}
+                                                </Text>
+                                            </View>
+                                            {preset.is_system === 1 && (
+                                                <Text className="text-[10px] bg-zinc-800 text-zinc-400 px-1.5 py-0.5 rounded">SYSTEM</Text>
+                                            )}
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+                            )}
+                        </View>
+                    </ThemedCard>
+                </View>
+
+                {/* Playback */}
                 <View className="mb-8">
                     <Text className="text-zinc-500 text-sm font-bold uppercase tracking-wider mb-4">Playback</Text>
-                    <View className="bg-zinc-900 rounded-2xl p-4 border border-zinc-800">
-                        <Text className="text-white font-semibold mb-4">Default Orientation</Text>
+                    <ThemedCard className="p-4">
+                        <Text style={{ color: theme.text }} className="font-semibold mb-4">Default Orientation</Text>
                         <View className="flex-row gap-2">
                             <OrientationOption label="Portrait" value="portrait" icon={Smartphone} />
                             <OrientationOption label="Landscape" value="landscape" icon={Monitor} />
                             <OrientationOption label="System" value="auto" icon={Info} />
                         </View>
                         <Text className="text-zinc-500 text-xs mt-4">Override system orientation when starting a video.</Text>
-                    </View>
+                    </ThemedCard>
                 </View>
 
-                <View className="bg-zinc-900/50 rounded-2xl p-6 border border-zinc-800/50 items-center">
+                {/* About */}
+                <ThemedCard className="p-6 items-center mb-10">
                     <Text className="text-zinc-500 text-xs">Video Player Expo v1.0.0</Text>
-                </View>
+                </ThemedCard>
             </ScrollView>
-        </View>
+        </ThemedSafeAreaView>
     );
 };
 

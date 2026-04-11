@@ -1,21 +1,25 @@
 import { Tabs } from "expo-router";
 import { Film, Settings } from "lucide-react-native";
 import React from "react";
+import { useTheme } from "@/context/ThemeContext";
 
 export default function TabLayout() {
+    const { theme } = useTheme();
+
     return (
         <Tabs
             screenOptions={{
                 headerShown: false,
                 tabBarStyle: {
-                    backgroundColor: "#000000",
-                    borderTopColor: "#424255ff",
+                    backgroundColor: theme.background,
+                    borderTopColor: theme.border,
+                    borderTopWidth: 1,
                     height: 60,
                     paddingBottom: 8,
                     paddingTop: 8,
                 },
-                tabBarActiveTintColor: "#3b82f6",
-                tabBarInactiveTintColor: "#71717a",
+                tabBarActiveTintColor: theme.tabActive,
+                tabBarInactiveTintColor: theme.tabInactive,
             }}
         >
             <Tabs.Screen

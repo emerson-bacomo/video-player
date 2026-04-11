@@ -3,7 +3,7 @@ import React from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import { SortBy, SortOrder } from "../hooks/useMedia";
 import { cn } from "../utils/cn";
-import { BaseMenu } from "./BaseMenu";
+import { Menu } from "./Menu";
 
 interface SortMenuProps {
     currentSort: { by: SortBy; order: SortOrder };
@@ -15,17 +15,17 @@ export const SortMenu = ({ currentSort, onSortChange, options }: SortMenuProps) 
     const CurrentIcon = options.find((o) => o.value === currentSort.by)?.icon || SortAsc;
 
     return (
-        <BaseMenu variant="POPUP">
-            <BaseMenu.Trigger
+        <Menu variant="POPUP">
+            <Menu.Trigger
                 activeOpacity={0.7}
                 className="flex-row items-center bg-zinc-900 p-2 rounded-full border border-zinc-800 gap-1.5"
             >
                 <CurrentIcon size={18} color="#3b82f6" />
                 <ArrowUpDown size={12} color="#71717a" />
-            </BaseMenu.Trigger>
+            </Menu.Trigger>
 
-            <BaseMenu.Content>
-                <View className="px-4 py-3 border-b border-zinc-800 bg-zinc-900/50">
+            <Menu.Content>
+                <View className="px-4 py-3 border-b border-zinc-800">
                     <Text className="text-zinc-500 font-bold text-[10px] uppercase tracking-widest">Sort By</Text>
                 </View>
 
@@ -62,7 +62,7 @@ export const SortMenu = ({ currentSort, onSortChange, options }: SortMenuProps) 
                         </TouchableOpacity>
                     );
                 })}
-            </BaseMenu.Content>
-        </BaseMenu>
+            </Menu.Content>
+        </Menu>
     );
 };

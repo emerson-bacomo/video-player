@@ -1,0 +1,17 @@
+{
+  "name": "Default Dark",
+  "colors": {
+    "background": "#000000",
+    "text": "#ffffff",
+    "primary": "#3b82f6",
+    "secondary": "#71717a",
+    "border": "#202029",
+    "card": "#121212",
+    "menu": "#121212",
+    "accent": "#f59e0b",
+    "error": "#ef4444",
+    "success": "#10b981",
+    "tabActive": "#3b82f6",
+    "tabInactive": "#71717a"
+  }
+}

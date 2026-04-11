@@ -3,17 +3,18 @@ import { ActivityIndicator, Text, TouchableOpacity, TouchableOpacityProps, View 
 
 import { cn } from "../lib/utils";
 
-interface ButtonProps extends Omit<TouchableOpacityProps, "onPress"> {
+export interface ButtonProps extends Omit<TouchableOpacityProps, "onPress"> {
     title: string;
     onPress: (setLoading: React.Dispatch<React.SetStateAction<boolean>>) => void;
     textClassName?: string;
+    textStyle?: any;
 }
 
 /**
  * A premium button component that handles its own internal loading state.
  * When loading, it displays a darkening overlay and a centered activity indicator.
  */
-export const Button = ({ title, onPress, className, textClassName, ...props }: ButtonProps) => {
+export const Button = ({ title, onPress, className, textClassName, textStyle, ...props }: ButtonProps) => {
     const [isLoading, setIsLoading] = useState(false);
 
     const handlePress = async () => {
@@ -28,7 +29,9 @@ export const Button = ({ title, onPress, className, textClassName, ...props }: B
             className={cn("relative overflow-hidden items-center justify-center", className)}
             {...props}
         >
-            <Text className={cn("text-white font-bold text-base", textClassName)}>{title}</Text>
+            <Text className={cn("text-white font-bold text-base", textClassName)} style={textStyle}>
+                {title}
+            </Text>
 
             {isLoading && (
                 <View className="absolute inset-0 bg-black/30 justify-center items-center z-10">

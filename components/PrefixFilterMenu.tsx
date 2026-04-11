@@ -2,7 +2,7 @@ import { Check, ListFilter, RotateCcw } from "lucide-react-native";
 import React from "react";
 import { ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { cn } from "../utils/cn";
-import { BaseMenu } from "./BaseMenu";
+import { Menu } from "./Menu";
 
 interface PrefixFilterMenuProps {
     options: { label: string; count: number }[];
@@ -15,8 +15,8 @@ export const PrefixFilterMenu = ({ options, selectedOptions, onOptionToggle, onC
     const hasFilters = selectedOptions.length > 0;
 
     return (
-        <BaseMenu variant="POPUP" anchorHorizontal="center" horizontalScreenFill={true} maxWidth="fit-content">
-            <BaseMenu.Trigger
+        <Menu variant="POPUP" anchorHorizontal="center" horizontalScreenFill={true} maxWidth="fit-content">
+            <Menu.Trigger
                 activeOpacity={0.7}
                 className={cn(
                     "flex-row items-center p-2 rounded-full border gap-1.5",
@@ -29,10 +29,10 @@ export const PrefixFilterMenu = ({ options, selectedOptions, onOptionToggle, onC
                         <Text className="text-white text-[10px] font-bold">{selectedOptions.length}</Text>
                     </View>
                 )}
-            </BaseMenu.Trigger>
+            </Menu.Trigger>
 
-            <BaseMenu.Content>
-                <View className="flex-row items-center justify-between px-5 h-14 border-b border-zinc-800 bg-zinc-900/50">
+            <Menu.Content>
+                <View className="flex-row items-center justify-between px-5 h-14 border-b border-zinc-800">
                     <Text className="text-zinc-500 font-bold text-[10px] uppercase tracking-widest">Filter by Prefix</Text>
 
                     {hasFilters && (
@@ -66,8 +66,8 @@ export const PrefixFilterMenu = ({ options, selectedOptions, onOptionToggle, onC
                         ))
                     )}
                 </ScrollView>
-            </BaseMenu.Content>
-        </BaseMenu>
+            </Menu.Content>
+        </Menu>
     );
 };
 
