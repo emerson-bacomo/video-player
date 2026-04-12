@@ -3,6 +3,7 @@ import React from "react";
 import { ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { cn } from "../utils/cn";
 import { Menu } from "./Menu";
+import { Icon } from "./Icon";
 
 interface PrefixFilterMenuProps {
     options: { label: string; count: number }[];
@@ -20,28 +21,28 @@ export const PrefixFilterMenu = ({ options, selectedOptions, onOptionToggle, onC
                 activeOpacity={0.7}
                 className={cn(
                     "flex-row items-center p-2 rounded-full border gap-1.5",
-                    hasFilters ? "bg-blue-600/20 border-blue-500/50" : "bg-zinc-900 border-zinc-800",
+                    hasFilters ? "bg-primary/20 border-primary/50" : "bg-card border-border",
                 )}
             >
-                <ListFilter size={18} color={hasFilters ? "#3b82f6" : "#71717a"} />
+                <Icon icon={ListFilter} size={18} className={hasFilters ? "text-primary" : "text-secondary"} />
                 {hasFilters && (
-                    <View className="bg-blue-500 rounded-full px-1.5 min-w-[18px] h-[18px] items-center justify-center">
+                    <View className="bg-primary rounded-full px-1.5 min-w-[18px] h-[18px] items-center justify-center">
                         <Text className="text-white text-[10px] font-bold">{selectedOptions.length}</Text>
                     </View>
                 )}
             </Menu.Trigger>
 
             <Menu.Content>
-                <View className="flex-row items-center justify-between px-5 h-14 border-b border-zinc-800">
-                    <Text className="text-zinc-500 font-bold text-[10px] uppercase tracking-widest">Filter by Prefix</Text>
+                <View className="flex-row items-center justify-between px-5 h-14 border-b border-border">
+                    <Text className="text-secondary font-bold text-[10px] uppercase tracking-widest">Filter by Prefix</Text>
 
                     {hasFilters && (
                         <TouchableOpacity
                             onPress={onClearAll}
-                            className="flex-row items-center gap-1.5 bg-blue-600/10 px-2.5 py-1.5 rounded-full border border-blue-500/20"
+                            className="flex-row items-center gap-1.5 bg-primary/10 px-2.5 py-1.5 rounded-full border border-primary/20"
                         >
-                            <RotateCcw size={10} color="#3b82f6" />
-                            <Text className="text-blue-500 text-[10px] font-bold">Clear All</Text>
+                            <Icon icon={RotateCcw} size={10} className="text-primary" />
+                            <Text className="text-primary text-[10px] font-bold">Clear All</Text>
                         </TouchableOpacity>
                     )}
                 </View>
@@ -53,7 +54,7 @@ export const PrefixFilterMenu = ({ options, selectedOptions, onOptionToggle, onC
                 >
                     {options.length === 0 ? (
                         <View className="px-4 py-10 items-center">
-                            <Text className="text-zinc-600 text-sm text-center italic">No common patterns detected</Text>
+                            <Text className="text-secondary text-sm text-center italic">No common patterns detected</Text>
                         </View>
                     ) : (
                         options.map((option) => (
@@ -75,28 +76,30 @@ const OptionItem = React.memo(({ option, isSelected, onToggle }: any) => {
     return (
         <TouchableOpacity
             activeOpacity={0.7}
-            className={cn("flex-row items-center justify-between px-5 py-4", isSelected ? "bg-blue-600/5" : "active:bg-zinc-800")}
+            className={cn("flex-row items-center justify-between px-5 py-4", isSelected ? "bg-primary/5" : "active:bg-card")}
             onPress={() => onToggle(option.label)}
         >
             <View className="flex-row items-center gap-4 flex-1">
                 <View
                     className={cn(
                         "w-5 h-5 rounded-md border items-center justify-center",
-                        isSelected ? "bg-blue-500 border-blue-500" : "border-zinc-700 bg-zinc-800",
+                        isSelected ? "bg-primary border-primary" : "border-border bg-card",
                     )}
                 >
-                    {isSelected && <Check size={14} color="white" />}
+                    {isSelected && <Icon icon={Check} size={14} className="text-white" />}
                 </View>
                 <Text
-                    className={cn("text-sm font-semibold flex-1", isSelected ? "text-blue-500" : "text-zinc-300")}
+                    className={cn("text-sm font-semibold flex-1", isSelected ? "text-primary" : "text-text")}
                     numberOfLines={1}
                 >
                     {option.label}
                 </Text>
             </View>
-            <View className="bg-zinc-800/80 px-2 py-1 rounded-lg ml-3 border border-zinc-700/50">
-                <Text className="text-zinc-500 text-[11px] font-bold">{option.count}</Text>
+            <View className="bg-card/80 px-2 py-1 rounded-lg ml-3 border border-border/50">
+                <Text className="text-secondary text-[11px] font-bold">{option.count}</Text>
             </View>
         </TouchableOpacity>
     );
 });
+
+OptionItem.displayName = "OptionItem";

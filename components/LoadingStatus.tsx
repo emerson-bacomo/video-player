@@ -74,12 +74,12 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ task: manualTask =
         } else {
             fadeAnim.value = withTiming(0, { duration: 250 });
         }
-    }, [taskToDisplay]);
+    }, [taskToDisplay, isLoadingVisible, setIsLoadingVisible, fadeAnim]);
 
     // Animate when user manually toggles visibility
     useEffect(() => {
         fadeAnim.value = withTiming(isLoadingVisible && !!taskToDisplay ? 1 : 0, { duration: 200 });
-    }, [isLoadingVisible]);
+    }, [isLoadingVisible, taskToDisplay, fadeAnim]);
 
     const toggleVisible = () => setIsLoadingVisible((prev) => !prev);
     const toggleExpanded = () => {

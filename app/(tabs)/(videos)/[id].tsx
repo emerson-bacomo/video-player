@@ -6,14 +6,15 @@ import { SortMenu } from "@/components/SortMenu";
 import { ThemedSafeAreaView } from "@/components/Themed";
 import { VideoItem } from "@/components/VideoItem";
 import { VideoItemInfoModal } from "@/components/VideoItemInfoModal";
-import { useTheme } from "@/context/ThemeContext";
 import { useMedia } from "@/hooks/useMedia";
+import { useTheme } from "@/context/ThemeContext";
 import { extractEpisode, extractPrefix } from "@/utils/videoUtils";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { Calendar, Clock, Film, Hash, Info, LucideIcon, SortAsc } from "lucide-react-native";
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, RefreshControl, Text, TouchableOpacity, View } from "react-native";
+import { Icon } from "@/components/Icon";
 
 const AlbumVideosScreen = () => {
     const { id, title } = useLocalSearchParams<{ id: string; title: string }>();
@@ -27,11 +28,11 @@ const AlbumVideosScreen = () => {
         currentAlbum,
         setCurrentAlbum,
     } = useMedia();
+    const { colors } = useTheme();
     const REFRESH_TASK_ID = "albumVideosRefresh";
     const [selectedVideoId, setSelectedVideoId] = React.useState<string | null>(null);
     const selectedVideo = React.useMemo(() => videos.find((v) => v.id === selectedVideoId), [videos, selectedVideoId]);
     const [showAlbumInfo, setShowAlbumInfo] = React.useState(false);
-    const { theme } = useTheme();
 
     // Clear focus natively when routing backward so FFMPEG falls back to global priorities
     useEffect(() => {
@@ -203,7 +204,7 @@ const AlbumVideosScreen = () => {
                         onPress={() => setShowAlbumInfo(true)}
                         className="w-10 h-10 items-center justify-center rounded-full bg-zinc-800/50"
                     >
-                        <Info size={20} color={theme.text} />
+                        <Icon icon={Info} size={20} className="text-text" />
                     </TouchableOpacity>
                 </Header.Actions>
             </Header>
@@ -218,13 +219,13 @@ const AlbumVideosScreen = () => {
                 windowSize={5}
                 removeClippedSubviews={true}
                 refreshControl={
-                    <RefreshControl refreshing={false} onRefresh={onRefresh} tintColor="#ffffff" colors={["#3b82f6"]} />
+                    <RefreshControl refreshing={false} onRefresh={onRefresh} tintColor={colors.text} colors={[colors.primary]} />
                 }
                 ListEmptyComponent={
                     loadingTask ? null : (
                         <View className="flex-1 justify-center items-center py-20">
-                            <Film size={64} color="#27272a" />
-                            <Text className="text-zinc-500 mt-4 text-center">No videos in this folder</Text>
+                            <Icon icon={Film} size={64} className="text-border/50" />
+                            <Text className="text-secondary mt-4 text-center">No videos in this folder</Text>
                         </View>
                     )
                 }

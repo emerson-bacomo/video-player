@@ -16,7 +16,7 @@ export const Skeleton = ({ className, style }: { className?: string, style?: any
       -1,
       false
     );
-  }, []);
+  }, [progress]);
 
   const animatedStyle = useAnimatedStyle(() => {
     return {

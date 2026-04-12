@@ -1,4 +1,3 @@
-import { useTheme } from "@/context/ThemeContext";
 import { router } from "expo-router";
 import { Calendar, Folder, Info } from "lucide-react-native";
 import React from "react";
@@ -14,8 +13,6 @@ interface AlbumItemDetailsModalProps {
 }
 
 export const AlbumItemDetailsModal = ({ visible, album, onClose, hideOpenFolderAction }: AlbumItemDetailsModalProps) => {
-    const { theme } = useTheme();
-
     if (!album) return null;
 
     return (
@@ -25,41 +22,39 @@ export const AlbumItemDetailsModal = ({ visible, album, onClose, hideOpenFolderA
                     {album.thumbnail ? (
                         <Image
                             source={{ uri: album.thumbnail }}
-                            className="w-32 aspect-video rounded-xl"
-                            style={{ backgroundColor: theme.card }}
+                            className="w-32 aspect-video rounded-xl bg-card"
                         />
                     ) : (
                         <View
-                            className="w-32 aspect-video rounded-xl justify-center items-center"
-                            style={{ backgroundColor: theme.card, borderWidth: 1, borderColor: theme.border }}
+                            className="w-32 aspect-video rounded-xl justify-center items-center bg-card border border-border"
                         >
-                            <Folder size={24} color={theme.primary} />
+                            <Folder size={24} className="text-primary" />
                         </View>
                     )}
                     <View className="flex-1">
                         <Text className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">
                             Folder Metadata
                         </Text>
-                        <Text style={{ color: theme.text }} className="text-xl font-bold">
+                        <Text className="text-text text-xl font-bold">
                             {album.title}
                         </Text>
                     </View>
                 </View>
 
-                <View style={{ borderBottomWidth: 1, borderColor: theme.border }} />
+                <View className="border-b border-border" />
             </View>
 
             <View className="flex flex-col gap-6 p-6 pt-0">
                 <ScrollView className="max-h-[250px]" contentContainerStyle={{ gap: 24, paddingBottom: 12 }}>
                     <View className="flex-row items-center gap-4">
                         <View className="w-8 h-8 rounded-full items-center justify-center bg-zinc-800">
-                            <Folder size={16} color={theme.primary} />
+                            <Folder size={16} className="text-primary" />
                         </View>
                         <View>
-                            <Text style={{ color: theme.secondary }} className="text-[10px] uppercase font-bold tracking-wider">
+                            <Text className="text-secondary text-[10px] uppercase font-bold tracking-wider">
                                 Folder Contents
                             </Text>
-                            <Text style={{ color: theme.text }} className="text-sm">
+                            <Text className="text-text text-sm">
                                 {album.assetCount || 0} Videos
                             </Text>
                         </View>
@@ -67,13 +62,13 @@ export const AlbumItemDetailsModal = ({ visible, album, onClose, hideOpenFolderA
 
                     <View className="flex-row items-center gap-4">
                         <View className="w-8 h-8 rounded-full items-center justify-center bg-zinc-800">
-                            <Calendar size={16} color={theme.primary} />
+                            <Calendar size={16} className="text-primary" />
                         </View>
                         <View>
-                            <Text style={{ color: theme.secondary }} className="text-[10px] uppercase font-bold tracking-wider">
+                            <Text className="text-secondary text-[10px] uppercase font-bold tracking-wider">
                                 Last Added / Modified
                             </Text>
-                            <Text style={{ color: theme.text }} className="text-sm">
+                            <Text className="text-text text-sm">
                                 {new Date(album.lastModified || 0).toLocaleDateString(undefined, {
                                     year: "numeric",
                                     month: "short",
@@ -87,13 +82,13 @@ export const AlbumItemDetailsModal = ({ visible, album, onClose, hideOpenFolderA
 
                     <View className="flex-row items-center gap-4">
                         <View className="w-8 h-8 rounded-full items-center justify-center bg-zinc-800">
-                            <Info size={16} color={theme.primary} />
+                            <Info size={16} className="text-primary" />
                         </View>
                         <View>
-                            <Text style={{ color: theme.secondary }} className="text-[10px] uppercase font-bold tracking-wider">
+                            <Text className="text-secondary text-[10px] uppercase font-bold tracking-wider">
                                 Directory Info
                             </Text>
-                            <Text style={{ color: theme.text }} className="text-xs mt-1 leading-5">
+                            <Text className="text-text text-xs mt-1 leading-5">
                                 Approx. Video-Only Storage:{" "}
                                 {album.assetCount * 45 >= 1000
                                     ? `${((album.assetCount * 45) / 1024).toFixed(2)} GB`
@@ -105,7 +100,7 @@ export const AlbumItemDetailsModal = ({ visible, album, onClose, hideOpenFolderA
 
                 {(!hideOpenFolderAction) && (
                     <>
-                        <View style={{ borderBottomWidth: 1, borderColor: theme.border }} />
+                        <View className="border-b border-border" />
 
                         <View className="pb-8">
                             <ThemedButton

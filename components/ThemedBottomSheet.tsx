@@ -1,9 +1,32 @@
-import { useTheme } from "@/context/ThemeContext";
-import { BottomSheetBackdrop, BottomSheetBackdropProps, BottomSheetModal, BottomSheetView } from "@gorhom/bottom-sheet";
+import {
+    BottomSheetBackdrop,
+    BottomSheetBackdropProps,
+    BottomSheetModalProps,
+    BottomSheetView,
+    BottomSheetModal as GBottomSheetModal,
+} from "@gorhom/bottom-sheet";
+import { cssInterop } from "nativewind";
 import React, { useCallback } from "react";
-import { Dimensions, StyleSheet } from "react-native";
+import { Dimensions } from "react-native";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
+
+// 1. Define the interface for our new interop props
+interface StyledBottomSheetModalProps extends BottomSheetModalProps {
+    backgroundClassName?: string;
+    handleIndicatorClassName?: string;
+}
+
+// 2. Create a typed version of the component that includes the interop props
+const BottomSheetModal = GBottomSheetModal as React.ForwardRefExoticComponent<
+    StyledBottomSheetModalProps & React.RefAttributes<GBottomSheetModal>
+>;
+
+// 3. Enable Tailwind classes for BottomSheetModal's inner styles at runtime
+cssInterop(BottomSheetModal, {
+    backgroundClassName: "backgroundStyle",
+    handleIndicatorClassName: "handleIndicatorStyle",
+});
 
 interface ThemedBottomSheetProps {
     isVisible: boolean;
@@ -12,8 +35,7 @@ interface ThemedBottomSheetProps {
 }
 
 export const ThemedBottomSheet = ({ isVisible, children, onClose }: ThemedBottomSheetProps) => {
-    const { theme } = useTheme();
-    const bottomSheetModalRef = React.useRef<BottomSheetModal>(null);
+    const bottomSheetModalRef = React.useRef<GBottomSheetModal>(null);
 
     React.useEffect(() => {
         if (isVisible) {
@@ -37,16 +59,10 @@ export const ThemedBottomSheet = ({ isVisible, children, onClose }: ThemedBottom
             maxDynamicContentSize={SCREEN_HEIGHT * 0.8}
             onDismiss={onClose}
             backdropComponent={renderBackdrop}
-            backgroundStyle={{ backgroundColor: theme.card }}
-            handleIndicatorStyle={{ backgroundColor: theme.secondary, width: 40 }}
+            backgroundClassName="bg-card"
+            handleIndicatorClassName="bg-secondary w-10"
         >
-            <BottomSheetView style={styles.contentContainer}>{children}</BottomSheetView>
+            <BottomSheetView className="pb-5">{children}</BottomSheetView>
         </BottomSheetModal>
     );
 };
-
-const styles = StyleSheet.create({
-    contentContainer: {
-        paddingBottom: 20,
-    },
-});

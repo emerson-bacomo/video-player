@@ -8,28 +8,31 @@ import "../global.css";
 import { MediaProvider } from "../hooks/useMedia";
 import { initDB } from "../utils/db";
 
-function ThemeWrapper({ children }: { children: React.ReactNode }) {
+function InnerRoot() {
     const { themeVars } = useTheme();
-    return <View style={[{ flex: 1 }, themeVars]}>{children}</View>;
+    return (
+        <View className="bg-background flex-1" style={[themeVars]}>
+            <BottomSheetModalProvider>
+                <MediaProvider>
+                    <Stack screenOptions={{ headerShown: false }}>
+                        <Stack.Screen name="(tabs)" />
+                        <Stack.Screen name="player" />
+                    </Stack>
+                </MediaProvider>
+            </BottomSheetModalProvider>
+        </View>
+    );
 }
 
 export default function RootLayout() {
     useEffect(() => {
         initDB();
     }, []);
+
     return (
         <GestureHandlerRootView style={{ flex: 1 }}>
             <ThemeProvider>
-                <BottomSheetModalProvider>
-                    <ThemeWrapper>
-                        <MediaProvider>
-                            <Stack screenOptions={{ headerShown: false }}>
-                                <Stack.Screen name="(tabs)" />
-                                <Stack.Screen name="player" />
-                            </Stack>
-                        </MediaProvider>
-                    </ThemeWrapper>
-                </BottomSheetModalProvider>
+                <InnerRoot />
             </ThemeProvider>
         </GestureHandlerRootView>
     );

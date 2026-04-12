@@ -14,12 +14,12 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Alert, ScrollView, Text, TouchableOpacity, View } from "react-native";
 
 const ThemeEditor = () => {
-    const { theme, updateTheme, previewTheme, switchPreset, activePresetId, presets, refreshPresets } = useTheme();
+    const { colors, theme, updateTheme, previewTheme, switchPreset, activePresetId, presets, refreshPresets } = useTheme();
     const router = useRouter();
     const [editingProp, setEditingProp] = useState<keyof ThemeColors | null>(null);
     const [resetTarget, setResetTarget] = useState<keyof ThemeColors | null>(null);
-    const [draftColors, setDraftColors] = useState<ThemeColors>(theme);
-    const [savedColors, setSavedColors] = useState<ThemeColors>(theme);
+    const [draftColors, setDraftColors] = useState<ThemeColors>(colors);
+    const [savedColors, setSavedColors] = useState<ThemeColors>(colors);
 
     useEffect(() => {
         const activePreset = presets.find((preset) => preset.id === activePresetId);

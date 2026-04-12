@@ -1,7 +1,6 @@
 import React from 'react';
 import { View, Text } from 'react-native';
 import { Database } from 'lucide-react-native';
-import { useTheme } from '@/context/ThemeContext';
 import { ThemedButton } from './Themed';
 
 interface EmptyAlbumStateProps {
@@ -10,21 +9,18 @@ interface EmptyAlbumStateProps {
 }
 
 export const EmptyAlbumState = ({ loading, onScan }: EmptyAlbumStateProps) => {
-    const { theme } = useTheme();
-
     if (loading) return null;
 
     return (
         <View className="flex-1 justify-center items-center py-20 px-10">
             <View 
-                style={{ backgroundColor: theme.card, borderColor: theme.border }}
-                className="w-20 h-20 rounded-full items-center justify-center mb-6 border"
+                className="w-20 h-20 rounded-full items-center justify-center mb-6 border bg-card border-border"
             >
-                <Database size={32} color={theme.primary} />
+                <Database size={32} className="text-primary" />
             </View>
-            <Text style={{ color: theme.text }} className="text-lg font-bold mb-2 text-center">No Media Found</Text>
-            <Text style={{ color: theme.secondary }} className="text-center mb-8 leading-5">
-                We couldn't find any videos on your device. Ensure you've granted gallery access.
+            <Text className="text-lg font-bold mb-2 text-center text-text">No Media Found</Text>
+            <Text className="text-center mb-8 leading-5 text-secondary">
+                We couldn&apos;t find any videos on your device. Ensure you&apos;ve granted gallery access.
             </Text>
             <ThemedButton
                 title="Scan Device"

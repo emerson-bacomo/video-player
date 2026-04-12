@@ -1,4 +1,3 @@
-import { useTheme } from "@/context/ThemeContext";
 import { Calendar, Clock, Film, Info, Play } from "lucide-react-native";
 import React from "react";
 import { Image, ScrollView, Text, TouchableOpacity, View } from "react-native";
@@ -12,8 +11,6 @@ interface VideoInfoModalProps {
 }
 
 export const VideoItemInfoModal: React.FC<VideoInfoModalProps> = ({ visible, video, onClose, onPlay }) => {
-    const { theme } = useTheme();
-
     if (!video) return null;
 
     return (
@@ -23,39 +20,37 @@ export const VideoItemInfoModal: React.FC<VideoInfoModalProps> = ({ visible, vid
                     {video.thumbnail ? (
                         <Image
                             source={{ uri: video.thumbnail }}
-                            className="w-32 aspect-video rounded-xl"
-                            style={{ backgroundColor: theme.card }}
+                            className="w-32 aspect-video rounded-xl bg-card"
                         />
                     ) : (
                         <View
-                            className="w-32 aspect-video rounded-xl justify-center items-center"
-                            style={{ backgroundColor: theme.card, borderWidth: 1, borderColor: theme.border }}
+                            className="w-32 aspect-video rounded-xl justify-center items-center bg-card border border-border"
                         >
-                            <Film size={24} color={theme.primary} />
+                            <Film size={24} className="text-primary" />
                         </View>
                     )}
                     <View className="flex-1">
                         <Text className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">Video Info</Text>
-                        <Text style={{ color: theme.text }} className="text-xl font-bold">
+                        <Text className="text-text text-xl font-bold">
                             {video.filename}
                         </Text>
                     </View>
                 </View>
 
-                <View style={{ borderBottomWidth: 1, borderColor: theme.border }} />
+                <View className="border-b border-border" />
             </View>
 
             <View className="flex flex-col gap-6 p-6 pt-0">
                 <ScrollView className="max-h-[250px]" contentContainerStyle={{ gap: 24, paddingBottom: 12 }}>
                     <View className="flex-row items-center gap-4">
                         <View className="w-8 h-8 rounded-full items-center justify-center bg-zinc-800">
-                            <Clock size={16} color={theme.primary} />
+                            <Clock size={16} className="text-primary" />
                         </View>
                         <View>
-                            <Text style={{ color: theme.secondary }} className="text-[10px] uppercase font-bold tracking-wider">
+                            <Text className="text-secondary text-[10px] uppercase font-bold tracking-wider">
                                 Total Duration
                             </Text>
-                            <Text style={{ color: theme.text }} className="text-sm">
+                            <Text className="text-text text-sm">
                                 {Math.floor((video.duration || 0) / 60)}:
                                 {Math.floor((video.duration || 0) % 60)
                                     .toString()
@@ -66,13 +61,13 @@ export const VideoItemInfoModal: React.FC<VideoInfoModalProps> = ({ visible, vid
 
                     <View className="flex-row items-center gap-4">
                         <View className="w-8 h-8 rounded-full items-center justify-center bg-zinc-800">
-                            <Calendar size={16} color={theme.primary} />
+                            <Calendar size={16} className="text-primary" />
                         </View>
                         <View>
-                            <Text style={{ color: theme.secondary }} className="text-[10px] uppercase font-bold tracking-wider">
+                            <Text className="text-secondary text-[10px] uppercase font-bold tracking-wider">
                                 Date Added
                             </Text>
-                            <Text style={{ color: theme.text }} className="text-sm">
+                            <Text className="text-text text-sm">
                                 {new Date(video.creationTime || 0).toLocaleDateString(undefined, {
                                     year: "numeric",
                                     month: "short",
@@ -86,13 +81,13 @@ export const VideoItemInfoModal: React.FC<VideoInfoModalProps> = ({ visible, vid
 
                     <View className="flex-row items-center gap-4">
                         <View className="w-8 h-8 rounded-full items-center justify-center bg-zinc-800">
-                            <Info size={16} color={theme.primary} />
+                            <Info size={16} className="text-primary" />
                         </View>
                         <View>
-                            <Text style={{ color: theme.secondary }} className="text-[10px] uppercase font-bold tracking-wider">
+                            <Text className="text-secondary text-[10px] uppercase font-bold tracking-wider">
                                 Properties
                             </Text>
-                            <Text style={{ color: theme.text }} className="text-xs mt-1 leading-5">
+                            <Text className="text-text text-xs mt-1 leading-5">
                                 Resolution: {video.width}x{video.height}
                                 {"\n"}
                                 Estimated Size:{" "}
@@ -104,7 +99,7 @@ export const VideoItemInfoModal: React.FC<VideoInfoModalProps> = ({ visible, vid
                     </View>
                 </ScrollView>
 
-                <View style={{ borderBottomWidth: 1, borderColor: theme.border }} />
+                <View className="border-b border-border" />
 
                 <View className="pb-8">
                     <TouchableOpacity

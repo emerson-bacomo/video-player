@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { vars } from 'nativewind';
 import * as db from '@/utils/db';
 import defaultTheme from '@/constants/theme.json';
@@ -19,6 +19,7 @@ export interface ThemeColors {
 }
 
 interface ThemeContextType {
+  colors: ThemeColors;
   theme: ThemeColors;
   updateTheme: (newColors: ThemeColors) => Promise<void>;
   previewTheme: (newColors: ThemeColors) => void;
@@ -31,6 +32,12 @@ interface ThemeContextType {
 
 export const ThemeContext = createContext<ThemeContextType | null>(null);
 
+const hexToRgb = (hex: string) => {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (!result) return '0 0 0';
+  return `${parseInt(result[1], 16)} ${parseInt(result[2], 16)} ${parseInt(result[3], 16)}`;
+};
+
 const normalizeTheme = (colors: Partial<ThemeColors>): ThemeColors => ({
   ...defaultTheme.colors,
   ...colors,
@@ -38,7 +45,7 @@ const normalizeTheme = (colors: Partial<ThemeColors>): ThemeColors => ({
 });
 
 export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
-  const [theme, setThemeState] = useState<ThemeColors>(normalizeTheme(defaultTheme.colors));
+  const [colors, setColorsState] = useState<ThemeColors>(normalizeTheme(defaultTheme.colors));
   const [activePresetId, setActivePresetId] = useState<number | null>(null);
   const [presets, setPresets] = useState<any[]>([]);
 
@@ -47,10 +54,9 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
     setPresets(allPresets);
     const active = allPresets.find((p: any) => p.is_active === 1);
     if (active) {
-      setThemeState(normalizeTheme(JSON.parse(active.config)));
+      setColorsState(normalizeTheme(JSON.parse(active.config)));
       setActivePresetId(active.id);
     } else if (allPresets.length === 0) {
-      // First run: save default theme as system default and active
       const id = db.saveThemePreset(defaultTheme.name, JSON.stringify(defaultTheme.colors), 1, 1);
       setActivePresetId(Number(id));
       setPresets(db.getThemePresets());
@@ -61,38 +67,45 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
     refreshPresets();
   }, []);
 
-  const themeVars = vars({
-    '--color-background': theme.background,
-    '--color-text': theme.text,
-    '--color-primary': theme.primary,
-    '--color-secondary': theme.secondary,
-    '--color-border': theme.border,
-    '--color-card': theme.card,
-    '--color-menu': theme.menu,
-    '--color-accent': theme.accent,
-    '--color-error': theme.error,
-    '--color-success': theme.success,
-    '--color-tab-active': theme.tabActive,
-    '--color-tab-inactive': theme.tabInactive,
-  });
+  const themeVars = useMemo(() => {
+    return vars(
+      Object.entries(colors).reduce((acc, [key, value]) => {
+        const baseKey = key.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
+        const cssKey = `--color-${baseKey}`;
+        const rgbKey = `--color-${baseKey}-rgb`;
+        
+        acc[cssKey as any] = value;
+        acc[rgbKey as any] = hexToRgb(value);
+        return acc;
+      }, {} as any)
+    );
+  }, [colors]);
+
+  const theme = useMemo(() => {
+    return Object.keys(colors).reduce((acc, key) => {
+      const cssKey = `--color-${key.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase()}`;
+      acc[key as keyof ThemeColors] = `var(${cssKey})` as any;
+      return acc;
+    }, {} as ThemeColors);
+  }, [colors]);
 
   const updateTheme = async (newColors: ThemeColors) => {
     const normalized = normalizeTheme(newColors);
-    setThemeState(normalized);
+    setColorsState(normalized);
     if (activePresetId !== null) {
       db.updateThemePreset(activePresetId, JSON.stringify(normalized));
     }
   };
 
   const previewTheme = (newColors: ThemeColors) => {
-    setThemeState(normalizeTheme(newColors));
+    setColorsState(normalizeTheme(newColors));
   };
 
   const switchPreset = (id: number) => {
     const allPresets = db.getThemePresets();
     const preset = allPresets.find((p: any) => p.id === id);
     if (preset) {
-      setThemeState(normalizeTheme(JSON.parse(preset.config)));
+      setColorsState(normalizeTheme(JSON.parse(preset.config)));
       setActivePresetId(id);
       db.setActiveThemePreset(id);
       setPresets(allPresets.map(p => ({ ...p, is_active: p.id === id ? 1 : 0 })));
@@ -100,7 +113,7 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   return (
-    <ThemeContext.Provider value={{ theme, updateTheme, previewTheme, switchPreset, activePresetId, themeVars, refreshPresets, presets }}>
+    <ThemeContext.Provider value={{ colors, theme, updateTheme, previewTheme, switchPreset, activePresetId, themeVars, refreshPresets, presets }}>
       {children}
     </ThemeContext.Provider>
   );

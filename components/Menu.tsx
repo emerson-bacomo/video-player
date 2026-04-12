@@ -1,4 +1,3 @@
-import { useTheme } from "@/context/ThemeContext";
 import { cn } from "@/utils/cn";
 import React, { createContext, useContext, useLayoutEffect, useRef, useState } from "react";
 import {
@@ -36,6 +35,8 @@ interface MenuContextType {
     triggerElement: React.ReactElement<TouchableOpacityProps> | null;
     children: React.ReactNode;
     closeMenu: () => void;
+    onClose?: () => void;
+    shouldRender: boolean;
 }
 
 const MenuContext = createContext<MenuContextType | null>(null);
@@ -43,7 +44,6 @@ const MenuContext = createContext<MenuContextType | null>(null);
 const MENU_OFFSET = 16;
 const ARROW_HEIGHT = 10;
 const ARROW_WIDTH = 16;
-const ARROW_MARGIN = MENU_OFFSET - ARROW_HEIGHT;
 
 export const Menu = ({
     children,
@@ -63,6 +63,7 @@ export const Menu = ({
     onClose?: () => void;
 }) => {
     const [internalVisible, setInternalVisible] = useState(false);
+    const [shouldRender, setShouldRender] = useState(false);
     const [menuLayout, setMenuLayout] = useState({
         top: 0,
         left: 16,
@@ -75,12 +76,17 @@ export const Menu = ({
     });
     const triggerRef = useRef<View>(null);
     const visible = controlledVisible ?? internalVisible;
+
+    // Synchronize shouldRender with visible
+    useLayoutEffect(() => {
+        if (visible) {
+            setShouldRender(true);
+        }
+    }, [visible]);
+
     const setVisible = (nextVisible: boolean) => {
         if (controlledVisible === undefined) {
             setInternalVisible(nextVisible);
-        }
-        if (!nextVisible) {
-            onClose?.();
         }
     };
 
@@ -113,13 +119,20 @@ export const Menu = ({
 
     useLayoutEffect(() => {
         if (visible) {
-            updateLayout(); // So that the measurements happen before paint and there won't be flicker
+            updateLayout();
         }
     }, [visible, children]);
 
     const triggerElement = React.Children.toArray(children).find(
         (child) => React.isValidElement(child) && child.type === Trigger,
     ) as React.ReactElement<TouchableOpacityProps> | null;
+
+    const handleModalHide = () => {
+        setShouldRender(false);
+        if (!visible) {
+            onClose?.();
+        }
+    };
 
     return (
         <MenuContext.Provider
@@ -136,6 +149,8 @@ export const Menu = ({
                 triggerElement: triggerElement || null,
                 children,
                 closeMenu: () => setVisible(false),
+                onClose: handleModalHide,
+                shouldRender,
             }}
         >
             <View>{children}</View>
@@ -147,8 +162,8 @@ const Trigger = ({ children, ...props }: TouchableOpacityProps) => {
     const context = useContext(MenuContext);
     if (!context) throw new Error("Trigger must be used within Menu");
 
-    const open = async () => {
-        await context.updateLayout?.();
+    const open = () => {
+        context.updateLayout?.();
         context.setVisible(true);
     };
 
@@ -186,29 +201,44 @@ const Item = ({ children, onPress, ...props }: TouchableOpacityProps) => {
 const Content = ({ children, className }: { children: React.ReactNode; className?: string }) => {
     const context = useContext(MenuContext);
     if (!context) throw new Error("Content must be used within Menu");
-    const { theme } = useTheme();
 
-    const { visible, setVisible, menuLayout, variant, anchorHorizontal, horizontalScreenFill, maxWidth, triggerElement } =
-        context;
+    const {
+        visible,
+        setVisible,
+        menuLayout,
+        variant,
+        anchorHorizontal,
+        horizontalScreenFill,
+        maxWidth,
+        triggerElement,
+        onClose,
+        shouldRender,
+    } = context;
 
     const screenWidth = Dimensions.get("window").width;
     const finalAnchor = anchorHorizontal || menuLayout.autoAnchor;
 
+    if (!shouldRender) return null;
+
     return (
         <Modal
             isVisible={visible}
-            onBackdropPress={() => setVisible(false)}
+            hasBackdrop={false}
             onBackButtonPress={() => setVisible(false)}
-            backdropOpacity={0.6}
+            onModalHide={onClose}
             animationIn="fadeIn"
             animationOut="fadeOut"
-            animationInTiming={150}
-            animationOutTiming={150}
-            backdropTransitionInTiming={150}
-            backdropTransitionOutTiming={150}
+            animationInTiming={100}
+            animationOutTiming={100}
+            useNativeDriver={true}
             style={{ margin: 0 }}
         >
             <View className="flex-1">
+                {/* Manual Backdrop */}
+                <TouchableWithoutFeedback onPress={() => setVisible(false)}>
+                    <View className="absolute inset-0 bg-black/60" />
+                </TouchableWithoutFeedback>
+
                 {variant === "POPUP" && (
                     <>
                         <View
@@ -245,14 +275,11 @@ const Content = ({ children, className }: { children: React.ReactNode; className
                             }}
                         >
                             <View
+                                className="bg-menu border-t border-l border-border"
                                 style={{
                                     width: ARROW_WIDTH,
                                     height: ARROW_WIDTH,
-                                    backgroundColor: theme.menu,
                                     transform: [{ rotate: "45deg" }],
-                                    borderTopWidth: 1,
-                                    borderLeftWidth: 1,
-                                    borderColor: theme.border,
                                 }}
                             />
                         </View>
@@ -267,10 +294,7 @@ const Content = ({ children, className }: { children: React.ReactNode; className
                                       ? { left: Math.max(16, menuLayout.triggerX) }
                                       : finalAnchor === "right"
                                         ? {
-                                              right: Math.max(
-                                                  16,
-                                                  screenWidth - (menuLayout.triggerX + menuLayout.triggerWidth),
-                                              ),
+                                              right: Math.max(16, screenWidth - (menuLayout.triggerX + menuLayout.triggerWidth)),
                                           }
                                         : { left: 16, right: 16 }),
                                 alignSelf:
@@ -278,11 +302,9 @@ const Content = ({ children, className }: { children: React.ReactNode; className
                             }}
                         >
                             <View
-                                className={cn("rounded-2xl shadow-2xl border", className)}
+                                className={cn("rounded-2xl shadow-2xl border bg-menu border-border", className)}
                                 style={{
                                     maxWidth: maxWidth === "fit-content" ? undefined : maxWidth,
-                                    backgroundColor: theme.menu,
-                                    borderColor: theme.border,
                                 }}
                             >
                                 <View className="rounded-2xl overflow-hidden" style={{ zIndex: 60 }}>
@@ -297,8 +319,10 @@ const Content = ({ children, className }: { children: React.ReactNode; className
                     <View className="flex-1 justify-center items-center px-6">
                         <View
                             onStartShouldSetResponder={() => true}
-                            className={cn("rounded-2xl shadow-2xl overflow-hidden w-full max-w-sm border", className)}
-                            style={{ backgroundColor: theme.menu, borderColor: theme.border }}
+                            className={cn(
+                                "rounded-2xl shadow-2xl overflow-hidden w-full max-w-sm border bg-menu border-border",
+                                className,
+                            )}
                         >
                             {children}
                         </View>

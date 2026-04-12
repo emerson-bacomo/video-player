@@ -16,12 +16,12 @@ export const VideoItem = React.memo(({ item, setSelectedVideoId }: VideoItemProp
     if (item.isPlaceholder) {
         return (
             <View className="w-[46%] mx-[2%] mb-6">
-                <View className="w-full aspect-[16/10] bg-zinc-900 rounded-xl overflow-hidden border border-zinc-800 shadow-md mb-2">
+                <View className="w-full aspect-[16/10] bg-card rounded-xl overflow-hidden border border-border/50 shadow-md mb-2">
                     <Skeleton className="w-full h-full" />
                 </View>
                 <View className="px-1 gap-1.5">
-                    <Skeleton className="h-3.5 w-full rounded border border-zinc-800/50" />
-                    <Skeleton className="h-2.5 w-1/3 rounded border border-zinc-800/50" />
+                    <Skeleton className="h-3.5 w-full rounded border border-border/50" />
+                    <Skeleton className="h-2.5 w-1/3 rounded border border-border/50" />
                 </View>
             </View>
         );
@@ -49,7 +49,7 @@ export const VideoItem = React.memo(({ item, setSelectedVideoId }: VideoItemProp
         <View className="w-[46%] mx-[2%] mb-6">
             <TouchableOpacity
                 activeOpacity={0.8}
-                className="w-full aspect-[16/10] bg-zinc-900 rounded-xl overflow-hidden relative border border-zinc-800 shadow-md mb-2"
+                className="w-full aspect-[16/10] bg-card rounded-xl overflow-hidden relative border border-border shadow-md mb-2"
                 onPress={() =>
                     router.push({
                         pathname: "/player",
@@ -98,13 +98,15 @@ export const VideoItem = React.memo(({ item, setSelectedVideoId }: VideoItemProp
             </TouchableOpacity>
 
             <TouchableOpacity activeOpacity={0.7} onPress={() => setSelectedVideoId(item.id)} className="px-1">
-                <Text className="text-zinc-100 text-sm font-semibold mb-0.5" numberOfLines={1}>
+                <Text className="text-text text-sm font-semibold mb-0.5" numberOfLines={1}>
                     {item.filename}
                 </Text>
                 <View className="flex-row items-center justify-between">
-                    <Text className="text-zinc-500 text-[10px] font-medium uppercase tracking-tight">{timeDisplay}</Text>
+                    <Text className="text-secondary text-[10px] font-medium uppercase tracking-tight">{timeDisplay}</Text>
                 </View>
             </TouchableOpacity>
         </View>
     );
 });
+
+VideoItem.displayName = "VideoItem";

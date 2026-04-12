@@ -1,4 +1,3 @@
-import { useTheme } from "@/context/ThemeContext";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Dimensions, StyleSheet, Text, View } from "react-native";
@@ -111,8 +110,13 @@ const rgbToHsv = (r: number, g: number, b: number) => {
     return { h, s, v };
 };
 
-export const ColorPicker = ({ initialColor, onColorChange }: { initialColor: string; onColorChange: (color: string) => void }) => {
-    const { theme } = useTheme();
+export const ColorPicker = ({
+    initialColor,
+    onColorChange,
+}: {
+    initialColor: string;
+    onColorChange: (color: string) => void;
+}) => {
     const hsvRef = useRef<HSVColor>({ h: 0, s: 1, v: 1 });
     const [displayHex, setDisplayHex] = useState(initialColor.toUpperCase());
     const [currentHueColor, setCurrentHueColor] = useState("#ff0000");
@@ -177,7 +181,7 @@ export const ColorPicker = ({ initialColor, onColorChange }: { initialColor: str
     }));
 
     return (
-        <View style={[styles.container, { backgroundColor: theme.card }]}>
+        <View className="items-center gap-5 p-5 rounded-3xl bg-card">
             <GestureDetector gesture={svGesture}>
                 <View style={[styles.svArea, { backgroundColor: currentHueColor }]}>
                     <LinearGradient
@@ -208,18 +212,12 @@ export const ColorPicker = ({ initialColor, onColorChange }: { initialColor: str
                 </View>
             </GestureDetector>
 
-            <Text style={[styles.hexText, { color: theme.text }]}>{displayHex}</Text>
+            <Text className="text-lg font-mono font-bold text-text">{displayHex}</Text>
         </View>
     );
 };
 
 const styles = StyleSheet.create({
-    container: {
-        alignItems: "center",
-        gap: 20,
-        padding: 20,
-        borderRadius: 20,
-    },
     svArea: {
         width: PICKER_SIZE,
         height: PICKER_SIZE,
@@ -254,10 +252,5 @@ const styles = StyleSheet.create({
         borderColor: "white",
         position: "absolute",
         backgroundColor: "transparent",
-    },
-    hexText: {
-        fontSize: 18,
-        fontFamily: "monospace",
-        fontWeight: "bold",
     },
 });
