@@ -2,19 +2,21 @@ import { AlbumItem } from "@/components/AlbumItem";
 import { AlbumItemDetailsModal } from "@/components/AlbumItemDetailsModal";
 import { EmptyAlbumState } from "@/components/EmptyAlbumState";
 import { Header } from "@/components/Header";
+import { Icon } from "@/components/Icon";
 import { LoadingStatus } from "@/components/LoadingStatus";
 import { SortMenu } from "@/components/SortMenu";
 import { ThemedSafeAreaView } from "@/components/Themed";
-import { useMedia } from "@/hooks/useMedia";
 import { useTheme } from "@/context/ThemeContext";
+import { useMedia } from "@/hooks/useMedia";
 import { router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { Calendar, Clock, SortAsc } from "lucide-react-native";
+import { Calendar, Clock, Search, SortAsc } from "lucide-react-native";
 import React from "react";
-import { FlatList, RefreshControl } from "react-native";
+import { FlatList, RefreshControl, TouchableOpacity } from "react-native";
 
 const AlbumListScreen = () => {
-    const { albums, loadingTask, albumSort, setAlbumSort, fetchAlbums, requestPermissionAndFetch } = useMedia();
+    const { albums, loadingTask, albumSort, setAlbumSort, fetchAlbums, requestPermissionAndFetch, setIsSearchVisible } =
+        useMedia();
     const { colors } = useTheme();
     const REFRESH_TASK_ID = "albumListRefresh";
     const [selectedAlbumId, setSelectedAlbumId] = React.useState<string | null>(null);
@@ -39,7 +41,7 @@ const AlbumListScreen = () => {
                 onPress={() =>
                     router.push({
                         pathname: "/(tabs)/(videos)/[id]",
-                        params: { id: item.id, title: item.title },
+                        params: { id: item.id, title: item.displayName },
                     })
                 }
                 onLongPress={() => setSelectedAlbumId(item.id)}
@@ -56,6 +58,7 @@ const AlbumListScreen = () => {
 
                 <Header.Actions>
                     <LoadingStatus />
+                    <Header.SearchAction />
                     <SortMenu currentSort={albumSort} onSortChange={setAlbumSort} options={albumSortOptions} />
                 </Header.Actions>
             </Header>
@@ -67,7 +70,12 @@ const AlbumListScreen = () => {
                 columnWrapperStyle={{ justifyContent: "space-between", paddingHorizontal: 16 }}
                 renderItem={renderAlbum}
                 refreshControl={
-                    <RefreshControl refreshing={false} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} />
+                    <RefreshControl
+                        refreshing={false}
+                        onRefresh={onRefresh}
+                        tintColor={colors.primary}
+                        colors={[colors.primary]}
+                    />
                 }
                 ListEmptyComponent={<EmptyAlbumState loading={!!loadingTask} onScan={requestPermissionAndFetch} />}
                 contentContainerStyle={{ paddingTop: 22, paddingBottom: 22 }}

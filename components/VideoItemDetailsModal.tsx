@@ -10,7 +10,7 @@ interface VideoInfoModalProps {
     onPlay: (video: any) => void;
 }
 
-export const VideoItemInfoModal: React.FC<VideoInfoModalProps> = ({ visible, video, onClose, onPlay }) => {
+export const VideoItemDetailsModal: React.FC<VideoInfoModalProps> = ({ visible, video, onClose, onPlay }) => {
     if (!video) return null;
 
     return (
@@ -18,22 +18,20 @@ export const VideoItemInfoModal: React.FC<VideoInfoModalProps> = ({ visible, vid
             <View className="p-6 pb-2">
                 <View className="flex-row items-center gap-5 mb-6">
                     {video.thumbnail ? (
-                        <Image
-                            source={{ uri: video.thumbnail }}
-                            className="w-32 aspect-video rounded-xl bg-card"
-                        />
+                        <Image source={{ uri: video.thumbnail }} className="w-32 aspect-video rounded-xl bg-card" />
                     ) : (
-                        <View
-                            className="w-32 aspect-video rounded-xl justify-center items-center bg-card border border-border"
-                        >
+                        <View className="w-32 aspect-video rounded-xl justify-center items-center bg-card border border-border">
                             <Film size={24} className="text-primary" />
                         </View>
                     )}
                     <View className="flex-1">
                         <Text className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">Video Info</Text>
-                        <Text className="text-text text-xl font-bold">
-                            {video.filename}
-                        </Text>
+                        <Text className="text-text text-xl font-bold mb-1">{video.displayName}</Text>
+                        {video.displayName !== video.filename && (
+                            <Text className="text-secondary text-[11px] italic" numberOfLines={2}>
+                                {video.filename}
+                            </Text>
+                        )}
                     </View>
                 </View>
 
@@ -47,9 +45,7 @@ export const VideoItemInfoModal: React.FC<VideoInfoModalProps> = ({ visible, vid
                             <Clock size={16} className="text-primary" />
                         </View>
                         <View>
-                            <Text className="text-secondary text-[10px] uppercase font-bold tracking-wider">
-                                Total Duration
-                            </Text>
+                            <Text className="text-secondary text-[10px] uppercase font-bold tracking-wider">Total Duration</Text>
                             <Text className="text-text text-sm">
                                 {Math.floor((video.duration || 0) / 60)}:
                                 {Math.floor((video.duration || 0) % 60)
@@ -64,9 +60,7 @@ export const VideoItemInfoModal: React.FC<VideoInfoModalProps> = ({ visible, vid
                             <Calendar size={16} className="text-primary" />
                         </View>
                         <View>
-                            <Text className="text-secondary text-[10px] uppercase font-bold tracking-wider">
-                                Date Added
-                            </Text>
+                            <Text className="text-secondary text-[10px] uppercase font-bold tracking-wider">Date Added</Text>
                             <Text className="text-text text-sm">
                                 {new Date(video.creationTime || 0).toLocaleDateString(undefined, {
                                     year: "numeric",
@@ -84,9 +78,7 @@ export const VideoItemInfoModal: React.FC<VideoInfoModalProps> = ({ visible, vid
                             <Info size={16} className="text-primary" />
                         </View>
                         <View>
-                            <Text className="text-secondary text-[10px] uppercase font-bold tracking-wider">
-                                Properties
-                            </Text>
+                            <Text className="text-secondary text-[10px] uppercase font-bold tracking-wider">Properties</Text>
                             <Text className="text-text text-xs mt-1 leading-5">
                                 Resolution: {video.width}x{video.height}
                                 {"\n"}

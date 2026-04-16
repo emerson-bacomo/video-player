@@ -18,6 +18,7 @@ module.exports = {
                 success: "rgb(var(--color-success-rgb) / <alpha-value>)",
                 tabActive: "rgb(var(--color-tab-active-rgb) / <alpha-value>)",
                 tabInactive: "rgb(var(--color-tab-inactive-rgb) / <alpha-value>)",
+                playerBackground: "rgb(var(--color-player-background-rgb) / <alpha-value>)",
             }
         },
     },

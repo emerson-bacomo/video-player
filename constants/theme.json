@@ -12,6 +12,7 @@
     "error": "#ef4444",
     "success": "#10b981",
     "tabActive": "#3b82f6",
-    "tabInactive": "#71717a"
+    "tabInactive": "#71717a",
+    "playerBackground": "#000000"
   }
 }

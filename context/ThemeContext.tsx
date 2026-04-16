@@ -16,6 +16,7 @@ export interface ThemeColors {
   success: string;
   tabActive: string;
   tabInactive: string;
+  playerBackground: string;
 }
 
 interface ThemeContextType {
@@ -42,6 +43,7 @@ const normalizeTheme = (colors: Partial<ThemeColors>): ThemeColors => ({
   ...defaultTheme.colors,
   ...colors,
   menu: colors.menu || colors.card || defaultTheme.colors.menu || defaultTheme.colors.card,
+  playerBackground: colors.playerBackground || "#000000",
 });
 
 export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {

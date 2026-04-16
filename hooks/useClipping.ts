@@ -6,106 +6,109 @@ export interface Marker {
 }
 
 export interface MarkerPair {
-  startT: number;
-  endT: number;
+  id: string;
+  start: Marker;
+  end?: Marker;
+  isFixed: boolean;
 }
 
 export const useClipping = (duration: number) => {
-  const [markersData, setMarkersData] = useState<Marker[]>([]);
+  const [fixedSegments, setFixedSegments] = useState<MarkerPair[]>([]);
+  const [draftMarkers, setDraftMarkers] = useState<Marker[]>([]);
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
   const [previewActive, setPreviewActive] = useState(false);
-
-  // Derived pairs: [start, end, start, end, ...]
-  const markerPairs = useMemo(() => {
-    const pairs: MarkerPair[] = [];
-    for (let i = 0; i < markersData.length; i += 2) {
-      if (i + 1 < markersData.length) {
-        pairs.push({
-          startT: markersData[i].time,
-          endT: markersData[i + 1].time,
-        });
-      }
-    }
-    return pairs;
-  }, [markersData]);
 
   const generateId = useCallback(() => {
     return Math.random().toString(36).substring(2, 15);
   }, []);
 
-  const addMarkerPair = useCallback((startTime: number, endTime: number) => {
-    const newMarkers = [
-      ...markersData,
-      { time: startTime, markerId: generateId() },
-      { time: endTime, markerId: generateId() },
-    ].sort((a, b) => a.time - b.time);
+  const draftPairs = useMemo(() => {
+    const sorted = [...draftMarkers].sort((a, b) => a.time - b.time);
+    const pairs: MarkerPair[] = [];
+    for (let i = 0; i < sorted.length; i += 2) {
+      pairs.push({
+        id: `draft-${i}`,
+        start: sorted[i],
+        end: sorted[i + 1],
+        isFixed: false,
+      });
+    }
+    return pairs;
+  }, [draftMarkers]);
 
-    setMarkersData(newMarkers);
-    return newMarkers[newMarkers.length - 1].markerId;
-  }, [markersData, generateId]);
+  const addMarker = useCallback((time: number) => {
+    const newId = generateId();
+    setDraftMarkers(prev => [...prev, { time, markerId: newId }]);
+    setActiveMarkerId(newId);
+  }, [generateId]);
 
   const removeMarker = useCallback((markerId: string) => {
-    // Find the pair containing this marker
-    let pairIndices: number[] = [];
-    for (let i = 0; i < markersData.length; i += 2) {
-      const id1 = markersData[i].markerId;
-      const id2 = markersData[i + 1]?.markerId;
-      if (id1 === markerId || id2 === markerId) {
-        pairIndices = [i, i + 1];
-        break;
-      }
+    setDraftMarkers(prev => prev.filter(m => m.markerId !== markerId));
+    if (activeMarkerId === markerId) setActiveMarkerId(null);
+  }, [activeMarkerId]);
+
+  const saveSession = useCallback(() => {
+    const sorted = [...draftMarkers].sort((a, b) => a.time - b.time);
+    const newFixed: MarkerPair[] = [];
+    
+    for (let i = 0; i < sorted.length - 1; i += 2) {
+      newFixed.push({
+        id: generateId(),
+        start: sorted[i],
+        end: sorted[i + 1],
+        isFixed: true,
+      });
     }
 
-    if (pairIndices.length > 0) {
-      const newMarkers = markersData.filter((_, index) => !pairIndices.includes(index));
-      setMarkersData(newMarkers);
-      if (activeMarkerId === markerId) setActiveMarkerId(null);
-    }
-  }, [markersData, activeMarkerId]);
+    if (newFixed.length === 0) return { success: false, message: "No complete segments to save." };
+
+    setFixedSegments(prev => [...prev, ...newFixed]);
+    setDraftMarkers([]);
+    setActiveMarkerId(null);
+    return { success: true };
+  }, [draftMarkers, generateId]);
+
+  const removeFixedSegment = useCallback((id: string) => {
+    setFixedSegments(prev => prev.filter(p => p.id !== id));
+  }, []);
 
   const updateMarkerTime = useCallback((markerId: string, newTime: number) => {
-    setMarkersData(prev => 
-      prev.map(m => m.markerId === markerId ? { ...m, time: newTime } : m)
-          .sort((a, b) => a.time - b.time)
-    );
+    setDraftMarkers(prev => prev.map(m => 
+      m.markerId === markerId ? { ...m, time: newTime } : m
+    ));
   }, []);
 
   const getNextClipStart = useCallback((currentPositionMs: number) => {
-    if (markersData.length === 0) return -1;
+    const allPairs = [...fixedSegments, ...draftPairs].filter(p => p.end).sort((a, b) => a.start.time - b.start.time);
+    if (allPairs.length === 0) return -1;
 
-    for (let i = 0; i < markersData.length; i += 2) {
-      const start = markersData[i].time;
-      const end = markersData[i + 1]?.time;
-      if (end && currentPositionMs < end) {
-        if (currentPositionMs < start) return start;
-        return -1; // Already in a segment
+    for (const pair of allPairs) {
+      if (currentPositionMs < (pair.end?.time || 0)) {
+        if (currentPositionMs < pair.start.time) return pair.start.time;
+        return -1; // In segment
       }
     }
-
-    // Loop back to start if finished all clips
-    return markersData[0].time;
-  }, [markersData]);
+    return allPairs[0].start.time;
+  }, [fixedSegments, draftPairs]);
 
   const isInSegment = useCallback((currentPositionMs: number) => {
-    for (let i = 0; i < markersData.length; i += 2) {
-      const start = markersData[i].time;
-      const end = markersData[i + 1]?.time;
-      if (end && currentPositionMs >= start && currentPositionMs < end) {
-        return true;
-      }
-    }
-    return false;
-  }, [markersData]);
+    const allPairs = [...fixedSegments, ...draftPairs];
+    return allPairs.some(p => 
+      p.end && currentPositionMs >= p.start.time && currentPositionMs < p.end.time
+    );
+  }, [fixedSegments, draftPairs]);
 
   return {
-    markersData,
-    markerPairs,
+    markerPairs: [...fixedSegments, ...draftPairs],
+    draftMarkers,
     activeMarkerId,
     setActiveMarkerId,
     previewActive,
     setPreviewActive,
-    addMarkerPair,
+    addMarker,
     removeMarker,
+    saveSession,
+    removeFixedSegment,
     updateMarkerTime,
     getNextClipStart,
     isInSegment,

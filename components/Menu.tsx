@@ -3,6 +3,8 @@ import React, { createContext, useContext, useLayoutEffect, useRef, useState } f
 import {
     Dimensions,
     DimensionValue,
+    FlatList,
+    FlatListProps,
     GestureResponderEvent,
     TouchableOpacity,
     TouchableOpacityProps,
@@ -10,6 +12,7 @@ import {
     View,
 } from "react-native";
 import Modal from "react-native-modal";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type MenuVariant = "POPUP" | "MODAL";
 
@@ -198,6 +201,8 @@ const Item = ({ children, onPress, ...props }: TouchableOpacityProps) => {
     );
 };
 
+const BOTTOM_PADDING = 16;
+
 const Content = ({ children, className }: { children: React.ReactNode; className?: string }) => {
     const context = useContext(MenuContext);
     if (!context) throw new Error("Content must be used within Menu");
@@ -215,7 +220,11 @@ const Content = ({ children, className }: { children: React.ReactNode; className
         shouldRender,
     } = context;
 
-    const screenWidth = Dimensions.get("window").width;
+    const insets = useSafeAreaInsets();
+    const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
+
+    // Height available between where the menu spawns and the bottom of the safe area
+    const popupMaxHeight = Math.max(80, screenHeight - menuLayout.top - insets.bottom - BOTTOM_PADDING);
     const finalAnchor = anchorHorizontal || menuLayout.autoAnchor;
 
     if (!shouldRender) return null;
@@ -305,9 +314,10 @@ const Content = ({ children, className }: { children: React.ReactNode; className
                                 className={cn("rounded-2xl shadow-2xl border bg-menu border-border", className)}
                                 style={{
                                     maxWidth: maxWidth === "fit-content" ? undefined : maxWidth,
+                                    maxHeight: popupMaxHeight,
                                 }}
                             >
-                                <View className="rounded-2xl overflow-hidden" style={{ zIndex: 60 }}>
+                                <View className="rounded-2xl overflow-hidden" style={{ maxHeight: popupMaxHeight }}>
                                     {children}
                                 </View>
                             </View>
@@ -333,6 +343,27 @@ const Content = ({ children, className }: { children: React.ReactNode; className
     );
 };
 
+const Header = ({ children, className }: { children: React.ReactNode; className?: string }) => {
+    return (
+        <View className={cn("flex-row items-center justify-between px-5 h-14 border-b border-border", className)}>
+            {children}
+        </View>
+    );
+};
+
+const List = <T,>({ className, ...props }: FlatListProps<T>) => {
+    return (
+        <FlatList
+            className={cn("flex-grow-0", className)}
+            showsVerticalScrollIndicator={true}
+            contentContainerStyle={[{ paddingBottom: 12 }, props.contentContainerStyle]}
+            {...props}
+        />
+    );
+};
+
 Menu.Trigger = Trigger;
 Menu.Item = Item;
 Menu.Content = Content;
+Menu.Header = Header;
+Menu.List = List;

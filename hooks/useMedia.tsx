@@ -22,7 +22,9 @@ import {
     setLastSyncTimestamp,
     updateAlbumThumbnail,
     updateVideoThumbnail,
+    searchVideosByName,
 } from "../utils/db";
+import { useSettings } from "./useSettings";
 
 const MAX_WORKERS = 4;
 const RESULT_BATCH_SIZE = 3;
@@ -35,6 +37,7 @@ export const getThumbnailUri = (videoId: string) => `${FileSystem.cacheDirectory
 export interface VideoMedia {
     id: string;
     filename: string;
+    displayName: string;
     uri: string;
     duration: number;
     width: number;
@@ -53,6 +56,7 @@ export type SortOrder = "asc" | "desc";
 export interface Album {
     id: string;
     title: string;
+    displayName: string;
     assetCount: number;
     type?: string;
     thumbnail?: string;
@@ -88,10 +92,16 @@ export interface MediaContextType {
     resetToAlbums: () => void;
     resetEverything: () => Promise<void>;
     requestPermissionAndFetch: () => Promise<void>;
+    loadDataFromDB: () => Promise<void>;
+    folderFilters: Record<string, string[]>;
+    setFolderFilter: (albumId: string, filters: string[]) => void;
     isLoadingVisible: boolean;
     setIsLoadingVisible: React.Dispatch<React.SetStateAction<boolean>>;
     isLoadingExpanded: boolean;
     setIsLoadingExpanded: React.Dispatch<React.SetStateAction<boolean>>;
+    searchMedia: (query: string) => VideoMedia[];
+    isSearchVisible: boolean;
+    setIsSearchVisible: (visible: boolean) => void;
 }
 
 const MediaContext = createContext<MediaContextType | null>(null);
@@ -110,8 +120,24 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
     const [error, setError] = useState<string | null>(null);
     const [isLoadingVisible, setIsLoadingVisible] = useState(false);
     const [isLoadingExpanded, setIsLoadingExpanded] = useState(false);
+    const [isSearchVisible, setIsSearchVisible] = useState(false);
 
     const [videoCache, setVideoCache] = useState<Record<string, VideoMedia[]>>({});
+    const { settings } = useSettings();
+
+    const cleanName = React.useCallback(
+        (name: string) => {
+            if (!settings.nameReplacements || settings.nameReplacements.length === 0) return name;
+            let cleaned = name;
+            settings.nameReplacements.forEach((rule) => {
+                if (rule.active && rule.find) {
+                    cleaned = cleaned.split(rule.find).join(rule.replace || "");
+                }
+            });
+            return cleaned;
+        },
+        [settings.nameReplacements],
+    );
 
     // Refs for background worker state
     const thumbnailQueue = React.useRef<{ id: string; uri: string; albumId: string; filename: string }[]>([]);
@@ -129,6 +155,15 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
 
     const [albumSort, setAlbumSort] = useState<{ by: SortBy; order: SortOrder }>({ by: "date", order: "desc" });
     const [videoSort, setVideoSort] = useState<{ by: SortBy; order: SortOrder }>({ by: "episode", order: "asc" });
+    const [folderFilters, setFolderFilters] = useState<Record<string, string[]>>({});
+
+    const setFolderFilter = (albumId: string, filters: string[]) => {
+        setFolderFilters((prev) => {
+            const next = { ...prev, [albumId]: filters };
+            saveSetting("folderFilters", JSON.stringify(next));
+            return next;
+        });
+    };
 
     // Live State Refs to prevent stale closures inside background queue async workers
     const currentAlbumRef = React.useRef(currentAlbum);
@@ -233,22 +268,25 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
 
     // Shared priority comparator — used by both spawnWorker (thumbnailQueue) and drainResults (resultQueue)
     const compareByVideoSort = <
-        T extends { filename: string; modificationTime?: number; creationTime?: number; duration?: number },
+        T extends { filename: string; displayName?: string; modificationTime?: number; creationTime?: number; duration?: number },
     >(
         a: T,
         b: T,
         vSort = videoSortRef.current,
     ) => {
         let comp = 0;
+        const nameA = a.displayName || a.filename;
+        const nameB = b.displayName || b.filename;
+
         if (vSort.by === "episode") {
-            const preA = extractPrefix(a.filename);
-            const preB = extractPrefix(b.filename);
+            const preA = extractPrefix(nameA);
+            const preB = extractPrefix(nameB);
             comp =
                 preA.localeCompare(preB) !== 0
                     ? preA.localeCompare(preB)
-                    : extractEpisode(a.filename) - extractEpisode(b.filename);
+                    : extractEpisode(nameA) - extractEpisode(nameB);
         } else if (vSort.by === "name") {
-            comp = a.filename.localeCompare(b.filename);
+            comp = nameA.localeCompare(nameB);
         } else if (vSort.by === "date") {
             comp = (a.modificationTime || a.creationTime || 0) - (b.modificationTime || b.creationTime || 0);
         } else if (vSort.by === "duration") {
@@ -673,7 +711,11 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             });
             const cachedAlbums = getAlbums();
             if (cachedAlbums.length > 0) {
-                setAlbums(cachedAlbums);
+                const cleanA = cachedAlbums.map((a: any) => ({
+                    ...a,
+                    displayName: cleanName(a.title),
+                }));
+                setAlbums(cleanA);
 
                 // Pre-fill video cache from DB for all albums
                 const fullVideoCache: Record<string, VideoMedia[]> = {};
@@ -682,12 +724,24 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                     if (cachedVideos.length > 0) {
                         fullVideoCache[album.id] = cachedVideos.map((v: any) => ({
                             ...v,
+                            displayName: cleanName(v.filename),
                             thumbnail: v.thumbnail || undefined,
                             baseThumbnailUri: getThumbnailUri(v.id),
                         }));
                     }
                 }
                 setVideoCache(fullVideoCache);
+
+                // Sync the active "videos" state and "currentAlbum" if we are inside a folder
+                const activeAlbumId = currentAlbumRef.current?.id;
+                if (activeAlbumId) {
+                    const cleanActiveAlbum = cleanA.find((a) => a.id === activeAlbumId);
+                    if (cleanActiveAlbum) setCurrentAlbum(cleanActiveAlbum);
+
+                    if (fullVideoCache[activeAlbumId]) {
+                        setVideos(fullVideoCache[activeAlbumId]);
+                    }
+                }
             }
 
             // Load sort preferences
@@ -695,6 +749,9 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             if (savedAlbumSort) setAlbumSort(JSON.parse(savedAlbumSort));
             const savedVideoSort = getSetting("videoSort");
             if (savedVideoSort) setVideoSort(JSON.parse(savedVideoSort));
+            const savedFilters = getSetting("folderFilters");
+            if (savedFilters) setFolderFilters(JSON.parse(savedFilters));
+            setLoadingTask(null);
         } catch (e) {
             console.error("[Media] DB Load failed:", e);
         }
@@ -769,19 +826,20 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                     const latestDate = Math.max(...albumAssets.map((asset) => asset.modificationTime || asset.creationTime || 0));
                     const hasNew = albumAssets.some((asset) => (playbackMap.get(asset.id) ?? -1) === -1);
 
-                    const albumVideos: VideoMedia[] = await Promise.all(
+                    const rawVideos: VideoMedia[] = await Promise.all(
                         albumAssets.map(async (asset) => {
                             const vThumb = await getThumbnailCached(asset.id);
                             const video: VideoMedia = {
                                 id: asset.id,
                                 filename: asset.filename,
+                                displayName: cleanName(asset.filename),
                                 uri: asset.uri,
                                 duration: asset.duration,
                                 width: asset.width,
                                 height: asset.height,
                                 creationTime: asset.creationTime,
                                 modificationTime: asset.modificationTime,
-                                thumbnail: vThumb, // Immediate render if exists
+                                thumbnail: vThumb,
                                 baseThumbnailUri: vThumb,
                                 lastPlayedMs: playbackMap.get(asset.id) ?? -1,
                             };
@@ -798,18 +856,22 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                             return video;
                         }),
                     );
-                    const albumThumbnail = getAlbumThumbnailForVideos(albumVideos);
+
+                    // Save to database (now includes displayName)
+                    saveVideos(a.id, rawVideos);
+
+                    const albumThumbnail = getAlbumThumbnailForVideos(rawVideos);
                     const albumObj: Album = {
                         id: a.id,
                         title: a.title,
+                        displayName: cleanName(a.title),
                         assetCount: totalCount,
                         lastModified: latestDate,
                         thumbnail: albumThumbnail,
                         hasNew,
                     };
                     newAlbums.push(albumObj);
-                    newVideoCache[a.id] = albumVideos;
-                    saveVideos(a.id, albumVideos);
+                    newVideoCache[a.id] = rawVideos;
                 }),
             );
 
@@ -844,8 +906,12 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             setLoadingTask(null);
             setManualRefresh(false);
             setLoadingId(null);
-        } else if (albums.length === 0) {
-            await loadDataFromDB();
+        } else {
+            if (albums.length === 0) {
+                await loadDataFromDB();
+            }
+            // Fast check on every navigation
+            performSmartSync(false, false);
         }
     };
 
@@ -878,13 +944,14 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                     return {
                         id: asset.id,
                         filename: asset.filename,
+                        displayName: cleanName(asset.filename),
                         uri: asset.uri,
                         duration: asset.duration,
                         width: asset.width,
                         height: asset.height,
                         creationTime: asset.creationTime,
                         modificationTime: asset.modificationTime,
-                        thumbnail, // Immediate render if already exists on disk
+                        thumbnail,
                         baseThumbnailUri: thumbnail,
                         lastPlayedMs: playbackMap.get(asset.id) ?? -1,
                     };
@@ -960,6 +1027,8 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                 setLoadingTask(null);
                 setLoadingId(null);
             }
+            // Fast check on every navigation
+            performSmartSync(false, false);
         }
     };
 
@@ -1094,6 +1163,19 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
         }
     }, [videoSort, videoCache]);
 
+    const searchMedia = (query: string) => {
+        const dbResults = searchVideosByName(query);
+        return dbResults.map((v: any) => {
+            const rawName = v.displayName || v.filename;
+            return {
+                ...v,
+                displayName: cleanName(rawName),
+                thumbnail: v.thumbnail || undefined,
+                baseThumbnailUri: getThumbnailUri(v.id),
+            };
+        });
+    };
+
     return (
         <MediaContext.Provider
             value={{
@@ -1122,10 +1204,16 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                 },
                 resetEverything,
                 requestPermissionAndFetch,
+                loadDataFromDB,
+                folderFilters,
+                setFolderFilter,
                 isLoadingVisible,
                 setIsLoadingVisible,
                 isLoadingExpanded,
                 setIsLoadingExpanded,
+                searchMedia,
+                isSearchVisible,
+                setIsSearchVisible,
             }}
         >
             {children}

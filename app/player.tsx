@@ -2,11 +2,15 @@ import * as Brightness from "expo-brightness";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { StatusBar } from "expo-status-bar";
-import { useVideoPlayer, VideoView } from "expo-video";
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Dimensions, View, Text, TouchableOpacity } from "react-native";
-import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Dimensions, Text, TouchableOpacity, View } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Video, { OnLoadData, OnProgressData, VideoRef } from "react-native-video";
 
+import { useTheme } from "@/context/ThemeContext";
+import { BrightnessCorner } from "../components/BrightnessCorner";
+import { PlayerCentralIndicator, PlayerCentralIndicatorProps } from "../components/PlayerCentralIndicator";
 import { PlayerControls } from "../components/PlayerControls";
 import { PlayerHeader } from "../components/PlayerHeader";
 import { useClipping } from "../hooks/useClipping";
@@ -23,10 +27,48 @@ export default function PlayerScreen() {
     const router = useRouter();
     const { settings } = useSettings();
     const [showControls, setShowControls] = useState(true);
-    const [currentTime, setCurrentTime] = useState(0);
+    const [currentTime, setCurrentTime] = useState(resumeMs ? Number(resumeMs) : 0);
     const [isClipMode, setIsClipMode] = useState(false);
+    const [centralIndicator, setCentralIndicator] = useState<PlayerCentralIndicatorProps["indicator"]>(null);
+    const [panSeekTime, setPanSeekTime] = useState<number | null>(null);
     const controlsTimeout = useRef<any>(null);
+    const skipTimeout = useRef<any>(null);
+    const panStartTime = useRef<number>(0);
+    const holdSeekTimer = useRef<any>(null);
+    const wasPlayingBeforePan = useRef(false);
     const isUnmounted = useRef(false);
+    const insets = useSafeAreaInsets();
+
+    const [paused, setPaused] = useState(true);
+    const [playbackRate, setPlaybackRate] = useState(1.0);
+    const [duration, setDuration] = useState(0);
+    const videoRef = useRef<VideoRef>(null);
+
+    const [showBrightnessCorners, setShowBrightnessCorners] = useState(false);
+    const cornersTimeoutRef = useRef<any>(null);
+
+    const handleCornerDoubleTap = useCallback(() => {
+        setShowBrightnessCorners(true);
+        if (cornersTimeoutRef.current) clearTimeout(cornersTimeoutRef.current);
+        cornersTimeoutRef.current = setTimeout(() => {
+            setShowBrightnessCorners(false);
+        }, 2000);
+    }, []);
+
+    const brightnessTimeoutRef = useRef<any>(null);
+    const handleBrightnessChange = useCallback((val: number) => {
+        setCentralIndicator({ icon: "brightness", label: `${Math.round(val * 100)}%`, value: val });
+        if (brightnessTimeoutRef.current) clearTimeout(brightnessTimeoutRef.current);
+        brightnessTimeoutRef.current = setTimeout(() => setCentralIndicator(null), 800);
+    }, []);
+
+    const [orientation, setOrientation] = useState<ScreenOrientation.OrientationLock>(
+        settings.defaultOrientation === "landscape"
+            ? ScreenOrientation.OrientationLock.LANDSCAPE
+            : settings.defaultOrientation === "portrait"
+              ? ScreenOrientation.OrientationLock.PORTRAIT
+              : ScreenOrientation.OrientationLock.DEFAULT,
+    );
 
     const [hasBrightnessPermission, setHasBrightnessPermission] = useState(false);
     const [permissionChecked, setPermissionChecked] = useState(false);
@@ -42,83 +84,121 @@ export default function PlayerScreen() {
     }, []);
 
     useEffect(() => {
+        isUnmounted.current = false;
         return () => {
             isUnmounted.current = true;
         };
     }, []);
 
-    const player = useVideoPlayer(uri as string, (p) => {
-        p.loop = false;
-        if (resumeMs && Number(resumeMs) > 0) {
-            p.currentTime = Number(resumeMs) / 1000;
+    useEffect(() => {
+        const lockOrientation = async () => {
+            try {
+                if (orientation === ScreenOrientation.OrientationLock.LANDSCAPE) {
+                    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+                } else if (orientation === ScreenOrientation.OrientationLock.PORTRAIT) {
+                    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT);
+                } else {
+                    await ScreenOrientation.unlockAsync();
+                }
+            } catch (e) {
+                console.warn("[Player] Failed to lock orientation:", e);
+            }
+        };
+        lockOrientation();
+        return () => {
+            ScreenOrientation.unlockAsync().catch(() => {});
+        };
+    }, [orientation]);
+
+    const toggleOrientation = async () => {
+        try {
+            let nextLock;
+            if (orientation === ScreenOrientation.OrientationLock.DEFAULT) {
+                nextLock = ScreenOrientation.OrientationLock.LANDSCAPE;
+            } else if (orientation === ScreenOrientation.OrientationLock.LANDSCAPE) {
+                nextLock = ScreenOrientation.OrientationLock.PORTRAIT;
+            } else {
+                nextLock = ScreenOrientation.OrientationLock.DEFAULT;
+            }
+            setOrientation(nextLock);
+        } catch (e) {
+            console.warn("[Player] Failed to toggle orientation:", e);
         }
-    });
+    };
 
     useEffect(() => {
         if (permissionChecked && hasBrightnessPermission) {
-            player.play();
+            setPaused(false);
         }
-    }, [permissionChecked, hasBrightnessPermission, player]);
+    }, [permissionChecked, hasBrightnessPermission]);
 
     const {
-        markersData,
         markerPairs,
+        activeMarkerId,
+        setActiveMarkerId,
         previewActive,
         setPreviewActive,
-        addMarkerPair,
+        addMarker,
+        saveSession,
         removeMarker,
         updateMarkerTime,
         getNextClipStart,
         isInSegment,
-        activeMarkerId,
-    } = useClipping(player.duration * 1000);
+    } = useClipping(duration);
 
-    // Orientation Management
+    const isDraggingMarker = useRef(false);
+
+    // Initial jump for resume
     useEffect(() => {
-        async function applyOrientation() {
-            if (settings.defaultOrientation === "landscape") {
-                await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
-            } else if (settings.defaultOrientation === "portrait") {
-                await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-            } else {
-                await ScreenOrientation.unlockAsync();
+        if (resumeMs && duration > 0 && currentTime === 0) {
+            videoRef.current?.seek(Number(resumeMs) / 1000);
+            setCurrentTime(Number(resumeMs));
+        }
+    }, [duration, resumeMs]);
+
+    // Initial jump for preview
+    useEffect(() => {
+        if (previewActive && duration > 0) {
+            const firstSegment = markerPairs.filter((p) => p.end).sort((a, b) => a.start.time - b.start.time)[0];
+            if (firstSegment) {
+                videoRef.current?.seek(firstSegment.start.time / 1000);
+                if (paused) setPaused(false);
             }
         }
-        applyOrientation();
-        return () => {
-            ScreenOrientation.unlockAsync();
-        };
-    }, [settings.defaultOrientation]);
-
-
+    }, [previewActive, duration]);
 
     // Handle auto-hide controls
     const resetControlsTimer = useCallback(() => {
         if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
         setShowControls(true);
-        if (player.playing && !isClipMode) {
-            controlsTimeout.current = setTimeout(() => setShowControls(false), 3000);
+        if (!paused && !isClipMode && !isDraggingMarker.current) {
+            controlsTimeout.current = setTimeout(() => setShowControls(false), 2000);
         }
-    }, [player.playing, isClipMode]);
+    }, [paused, isClipMode]);
 
     useEffect(() => {
-        resetControlsTimer();
+        if (!paused && showControls && !isClipMode && !previewActive && !isDraggingMarker.current) {
+            if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
+            controlsTimeout.current = setTimeout(() => setShowControls(false), 2000);
+        }
+    }, [paused, showControls, isClipMode, previewActive]);
+
+    useEffect(() => {
         return () => {
             if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
         };
-    }, [player.playing, isClipMode, resetControlsTimer]);
+    }, []);
 
-    // Sync Timer & Clipping Preview & Auto Save
+    // Sync Progress & Clipping Preview & Auto Save
     useEffect(() => {
         let lastSaveMs = 0;
         const interval = setInterval(() => {
-            if (isUnmounted.current || !player) return;
+            if (isUnmounted.current || !videoRef.current || isDraggingMarker.current || paused) return;
 
-            const posMs = player.currentTime * 1000;
-            setCurrentTime(posMs);
+            const posMs = currentTime;
 
             // Save playback progress every 5 seconds
-            if (videoId && player.playing && Math.abs(posMs - lastSaveMs) > 5000) {
+            if (videoId && !paused && Math.abs(posMs - lastSaveMs) > 5000) {
                 savePlaybackData(videoId, posMs);
                 lastSaveMs = posMs;
             }
@@ -126,127 +206,313 @@ export default function PlayerScreen() {
             if (previewActive && !isInSegment(posMs)) {
                 const nextStart = getNextClipStart(posMs);
                 if (nextStart !== -1) {
-                    player.seekBy(nextStart / 1000 - player.currentTime);
+                    videoRef.current?.seek(nextStart / 1000);
                 }
             }
         }, 500);
+
         return () => {
             clearInterval(interval);
-            // Final save on unmount if player is still valid
-            if (videoId && !isUnmounted.current && player) {
+            // Final save on unmount
+            if (videoId && !isUnmounted.current) {
                 try {
-                    const finalPos = player.currentTime * 1000;
-                    if (finalPos > 0 && Math.abs(finalPos - lastSaveMs) > 1000) {
-                        savePlaybackData(videoId, finalPos);
+                    if (currentTime > 0) {
+                        savePlaybackData(videoId, currentTime);
                     }
                 } catch (e) {
                     console.log("[Player] Error saving on unmount:", e);
                 }
             }
         };
-    }, [player.playing, previewActive, isInSegment, getNextClipStart, videoId]);
+    }, [paused, previewActive, isInSegment, getNextClipStart, videoId, currentTime]);
 
-    // Gestures
-    const singleTap = Gesture.Tap()
-        .numberOfTaps(1)
-        .runOnJS(true)
-        .onEnd(() => {
-            resetControlsTimer();
-        });
+    const { colors } = useTheme();
 
-    const doubleTap = Gesture.Tap()
-        .numberOfTaps(2)
-        .runOnJS(true)
-        .onEnd((event) => {
-            if (isUnmounted.current || !player) return;
-            const { x } = event;
-            const screenWidth = Dimensions.get("window").width;
-            if (x < screenWidth / 3) {
-                player.seekBy(-10);
-            } else if (x > (screenWidth * 2) / 3) {
-                player.seekBy(10);
-            } else {
-                // Center double tap = toggle play/pause
-                if (player.playing) player.pause();
-                else player.play();
-            }
-        });
+    const singleTapGesture = useMemo(
+        () =>
+            Gesture.Tap()
+                .numberOfTaps(1)
+                .runOnJS(true)
+                .onEnd((event) => {
+                    const w = Dimensions.get("window").width;
+                    const h = Dimensions.get("window").height;
+                    const isCornerX = event.x < w * 0.2 || event.x > w * 0.8;
+                    const isCornerY = event.y < h * 0.2 || event.y > h * 0.8;
+                    if (isCornerX && isCornerY) return;
 
-    const longPress = Gesture.LongPress()
-        .runOnJS(true)
-        .onStart(() => {
-            if (!isUnmounted.current && player) player.playbackRate = 2.0;
-        })
-        .onEnd(() => {
-            if (!isUnmounted.current && player) player.playbackRate = 1.0;
-        });
+                    if (showControls) {
+                        if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
+                        setShowControls(false);
+                    } else {
+                        resetControlsTimer();
+                    }
+                }),
+        [showControls, resetControlsTimer],
+    );
 
-    const composedGesture = Gesture.Exclusive(doubleTap, singleTap, longPress);
+    const doubleTapGesture = useMemo(
+        () =>
+            Gesture.Tap()
+                .numberOfTaps(2)
+                .runOnJS(true)
+                .onEnd((event) => {
+                    if (!videoRef.current) return;
+                    const screenWidth = Dimensions.get("window").width;
+                    const screenHeight = Dimensions.get("window").height;
+                    const isCornerX = event.x < screenWidth * 0.2 || event.x > screenWidth * 0.8;
+                    const isCornerY = event.y < screenHeight * 0.2 || event.y > screenHeight * 0.8;
+                    if (isCornerX && isCornerY) return;
+
+                    if (skipTimeout.current) clearTimeout(skipTimeout.current);
+
+                    if (event.x < screenWidth / 3) {
+                        const newTime = Math.max(0, currentTime - 10000);
+                        videoRef.current.seek(newTime / 1000);
+                        setCurrentTime(newTime);
+                        setCentralIndicator((prev) => {
+                            const base = prev?.icon === "skip-back" ? parseInt(prev.label || "0") : 0;
+                            return { icon: "skip-back", label: `${base + 10}s` };
+                        });
+                    } else if (event.x > (screenWidth * 2) / 3) {
+                        const newTime = Math.min(duration, currentTime + 10000);
+                        videoRef.current.seek(newTime / 1000);
+                        setCurrentTime(newTime);
+                        setCentralIndicator((prev) => {
+                            const base = prev?.icon === "skip-fwd" ? parseInt(prev.label || "0") : 0;
+                            return { icon: "skip-fwd", label: `${base + 10}s` };
+                        });
+                    } else {
+                        if (!paused) {
+                            setPaused(true);
+                            setCentralIndicator({ icon: "pause" });
+                        } else {
+                            setPaused(false);
+                            setCentralIndicator({ icon: "play" });
+                        }
+                    }
+
+                    skipTimeout.current = setTimeout(() => setCentralIndicator(null), 800);
+                }),
+        [duration, currentTime, paused],
+    );
+
+    const longPressGesture = useMemo(
+        () =>
+            Gesture.LongPress()
+                .runOnJS(true)
+                .onStart((event) => {
+                    if (!videoRef.current) return;
+                    wasPlayingBeforePan.current = !paused;
+                    const screenWidth = Dimensions.get("window").width;
+                    const direction = event.x > screenWidth / 2 ? 1 : -1;
+
+                    if (direction === 1) {
+                        setPlaybackRate(2.0);
+                        setCentralIndicator({ icon: "speed", label: "2X", direction: 1 });
+                    } else {
+                        setPaused(true);
+                        setCentralIndicator({ icon: "speed", label: "2X", direction: -1 });
+                        if (holdSeekTimer.current) clearInterval(holdSeekTimer.current);
+                        holdSeekTimer.current = setInterval(() => {
+                            // Manual position control for backward
+                            setCurrentTime((prev) => {
+                                const next = Math.max(0, prev - 64);
+                                videoRef.current?.seek(next / 1000);
+                                return next;
+                            });
+                        }, 32);
+                    }
+                })
+                .onEnd(() => {
+                    setPlaybackRate(1.0);
+                    if (wasPlayingBeforePan.current) {
+                        setPaused(false);
+                    }
+                    if (holdSeekTimer.current) clearInterval(holdSeekTimer.current);
+                    setCentralIndicator(null);
+                }),
+        [paused],
+    );
+
+    const panGesture = useMemo(
+        () =>
+            Gesture.Pan()
+                .activeOffsetX([-10, 10])
+                .runOnJS(true)
+                .onStart(() => {
+                    if (!videoRef.current) return;
+                    wasPlayingBeforePan.current = !paused;
+                    setPaused(true);
+                    panStartTime.current = currentTime;
+                    setCentralIndicator({ icon: "seek" });
+                })
+                .onUpdate((event) => {
+                    if (!videoRef.current) return;
+                    const deltaSec = event.translationX * 0.15;
+                    const newTimeMs = Math.max(0, Math.min(duration, panStartTime.current + deltaSec * 1000));
+
+                    if (Math.abs(newTimeMs - currentTime) > 100) {
+                        videoRef.current.seek(newTimeMs / 1000);
+                        setCurrentTime(newTimeMs);
+                    }
+
+                    setPanSeekTime(newTimeMs);
+                })
+                .onEnd(() => {
+                    if (wasPlayingBeforePan.current) {
+                        setPaused(false);
+                    }
+                    setPanSeekTime(null);
+                    setCentralIndicator(null);
+                }),
+        [duration, currentTime, paused],
+    );
+
+    const composedGesture = useMemo(() => {
+        const holdOrSlide = Gesture.Race(longPressGesture, panGesture);
+        const taps = Gesture.Exclusive(doubleTapGesture, singleTapGesture);
+        return Gesture.Simultaneous(taps, holdOrSlide);
+    }, [doubleTapGesture, singleTapGesture, longPressGesture, panGesture]);
 
     return (
-        <GestureHandlerRootView className="flex-1 bg-black">
-            <StatusBar style="light" hidden />
+        <View style={{ flex: 1, backgroundColor: colors.playerBackground }}>
+            <StatusBar style="light" hidden={!showControls} />
 
             <GestureDetector gesture={composedGesture}>
-                <View className="flex-1 w-full h-full">
-                    <VideoView
-                        style={{ width: "100%", height: "100%" }}
-                        player={player}
-                        fullscreenOptions={{ enable: false }}
-                        allowsPictureInPicture
-                        nativeControls={false}
-                        contentFit="contain"
+                <View className="flex-1 w-full h-full" style={{ backgroundColor: colors.playerBackground }}>
+                    <Video
+                        ref={videoRef}
+                        source={{ uri: uri as string }}
+                        style={{ flex: 1, width: "100%", height: "100%" }}
+                        paused={paused}
+                        rate={playbackRate}
+                        resizeMode="contain"
+                        onLoad={(data: OnLoadData) => {
+                            setDuration(data.duration * 1000);
+                        }}
+                        onProgress={(data: OnProgressData) => {
+                            setCurrentTime(data.currentTime * 1000);
+                        }}
+                        onEnd={() => {
+                            setPaused(true);
+                            setCurrentTime(duration);
+                        }}
+                        playInBackground={false}
+                        playWhenInactive={false}
+                    />
+
+                    {/* Brightness Pattern Corners */}
+                    {["top-left", "top-right", "bottom-left", "bottom-right"].map((position) => (
+                        <BrightnessCorner
+                            key={position}
+                            position={position as any}
+                            hasPermission={hasBrightnessPermission}
+                            isActive={showBrightnessCorners}
+                            sensitivity={settings.brightnessSensitivity}
+                            onDoubleTap={handleCornerDoubleTap}
+                            onSingleTap={() => {
+                                if (showControls) {
+                                    if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
+                                    setShowControls(false);
+                                } else {
+                                    resetControlsTimer();
+                                }
+                            }}
+                            onBrightnessChange={handleBrightnessChange}
+                        />
+                    ))}
+
+                    <PlayerCentralIndicator
+                        indicator={centralIndicator}
+                        panSeekTime={panSeekTime}
+                        panStartTime={panStartTime.current}
                     />
                 </View>
             </GestureDetector>
 
-            {showControls && (
-                <>
-                    <PlayerHeader
-                        title={title || "Video Player"}
-                        onBack={() => {
-                            ScreenOrientation.unlockAsync();
-                            router.back();
-                        }}
-                    />
+            <View
+                style={{
+                    position: "absolute",
+                    inset: 0,
+                    paddingLeft: insets.left,
+                    paddingRight: insets.right,
+                    pointerEvents: showControls ? "box-none" : "none",
+                    opacity: showControls ? 1 : 0,
+                }}
+            >
+                <PlayerHeader
+                    title={title || "Video Player"}
+                    orientation={orientation}
+                    onToggleOrientation={toggleOrientation}
+                    onSettings={() => {
+                        ScreenOrientation.unlockAsync();
+                        router.push("/player-settings");
+                    }}
+                    onBack={() => {
+                        ScreenOrientation.unlockAsync();
+                        router.back();
+                    }}
+                />
 
-                    <PlayerControls
-                        isPlaying={player.playing}
-                        onTogglePlay={() => {
-                            if (player.playing) player.pause();
-                            else player.play();
-                            resetControlsTimer();
-                        }}
-                        onSeek={(value) => {
-                            player.seekBy(value / 1000 - player.currentTime);
-                            setCurrentTime(value);
-                            resetControlsTimer();
-                        }}
-                        onSkipNext={() => player.seekBy(10)}
-                        onSkipPrevious={() => player.seekBy(-10)}
-                        currentTime={currentTime}
-                        duration={player.duration * 1000}
-                        // Clipping Props
-                        isClipMode={isClipMode}
-                        onToggleClipMode={() => setIsClipMode(!isClipMode)}
-                        markerPairs={markerPairs}
-                        markersData={markersData}
-                        previewActive={previewActive}
-                        onTogglePreview={() => setPreviewActive(!previewActive)}
-                        onAddClip={() => addMarkerPair(currentTime, Math.min(currentTime + 5000, player.duration * 1000))}
-                        onRemoveClip={() => activeMarkerId && removeMarker(activeMarkerId)}
-                        onSaveClips={() => console.log("Saving Clips...")}
-                    />
-                </>
-            )}
+                <PlayerControls
+                    isPlaying={!paused}
+                    orientation={orientation}
+                    onTogglePlay={() => {
+                        setPaused(!paused);
+                        resetControlsTimer();
+                    }}
+                    onSeek={(value) => {
+                        videoRef.current?.seek(value / 1000);
+                        setCurrentTime(value);
+                        resetControlsTimer();
+                    }}
+                    onSkipNext={() => {
+                        const next = Math.min(duration, currentTime + 10000);
+                        videoRef.current?.seek(next / 1000);
+                        setCurrentTime(next);
+                    }}
+                    onSkipPrevious={() => {
+                        const prev = Math.max(0, currentTime - 10000);
+                        videoRef.current?.seek(prev / 1000);
+                        setCurrentTime(prev);
+                    }}
+                    currentTime={currentTime}
+                    duration={duration}
+                    // Clipping Props
+                    isClipMode={isClipMode}
+                    onToggleClipMode={() => setIsClipMode(!isClipMode)}
+                    markerPairs={markerPairs}
+                    previewActive={previewActive}
+                    onTogglePreview={() => setPreviewActive(!previewActive)}
+                    onAddMarker={() => addMarker(currentTime)}
+                    onSaveSession={saveSession}
+                    onRemoveMarker={removeMarker}
+                    onSelectMarker={setActiveMarkerId}
+                    onUpdateMarkerTime={(id, time) => {
+                        updateMarkerTime(id, time);
+                        videoRef.current?.seek(time / 1000);
+                        setCurrentTime(time);
+                    }}
+                    activeMarkerId={activeMarkerId}
+                    onDragStart={() => {
+                        isDraggingMarker.current = true;
+                        setPaused(true);
+                    }}
+                    onDragEnd={() => {
+                        isDraggingMarker.current = false;
+                        resetControlsTimer();
+                    }}
+                />
+            </View>
 
             {!hasBrightnessPermission && permissionChecked && (
-                <View className="absolute z-50 inset-0 flex-1 bg-black/95 justify-center items-center p-6">
+                <View className="absolute z-[100] inset-0 flex-1 bg-black/95 justify-center items-center p-6">
                     <Text className="text-white text-xl font-bold mb-4 text-center">System Requirements</Text>
                     <Text className="text-zinc-400 text-center mb-8 px-4 leading-6">
-                        This player utilizes system hardware controls to dynamically adjust brightness on-the-fly. We require permission to modify Android system settings.
+                        This player utilizes system hardware controls to dynamically adjust brightness on-the-fly. We require
+                        permission to modify Android system settings.
                     </Text>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                         className="bg-blue-600 px-8 py-3.5 rounded-full mb-4 w-full max-w-[280px]"
                         onPress={async () => {
                             const { status } = await Brightness.requestPermissionsAsync();
@@ -255,7 +521,7 @@ export default function PlayerScreen() {
                     >
                         <Text className="text-white font-bold text-center text-base tracking-wide">Grant Permission</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                         className="px-8 py-3 rounded-full border border-zinc-700 w-full max-w-[280px]"
                         onPress={() => router.back()}
                     >
@@ -263,6 +529,6 @@ export default function PlayerScreen() {
                     </TouchableOpacity>
                 </View>
             )}
-        </GestureHandlerRootView>
+        </View>
     );
 }

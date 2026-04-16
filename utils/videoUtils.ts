@@ -1,4 +1,5 @@
-const EPISODE_PATTERN = /(?:ep?|episode)\s*0*(\d+(?:\.\d+)?)|e0*(\d+(?:\.\d+)?)|_0*(\d{1,3}(?:\.\d+)?)_|_0*(\d{1,3}(?:\.\d+)?)v/i;
+const EPISODE_PATTERN =
+    /(?:ep?|episode)\s*0*(\d+(?:\.\d+)?)|(?<![a-z])e0*(\d+(?:\.\d+)?)|(?<!s|season)[\s\-_]0*(\d{1,3})(?=[v\s\-_]|$)/i;
 
 /**
  * Extracts a prefix from a filename to group related videos.
@@ -8,6 +9,8 @@ const EPISODE_PATTERN = /(?:ep?|episode)\s*0*(\d+(?:\.\d+)?)|e0*(\d+(?:\.\d+)?)|
  * 3. Handles patterns like [Group] Title - 01.mp4 and Titles_01_720p.mkv.
  */
 export const extractPrefix = (filename: string): string => {
+    if (!filename) return "Unknown";
+
     const epMatch = EPISODE_PATTERN.exec(filename);
     if (epMatch && typeof epMatch.index === "number") {
         const prefix = filename
@@ -27,8 +30,8 @@ export const extractPrefix = (filename: string): string => {
         }
     }
 
-    // If no prefix found, or name is too short, return first 5 chars
-    return filename.substring(0, 10).trim();
+    // If no prefix found, or name is too short, return first 5-10 chars
+    return filename.substring(0, 10).trim() || "Unknown";
 };
 
 /**
@@ -36,7 +39,8 @@ export const extractPrefix = (filename: string): string => {
  * Returns -1 if no episode pattern is found.
  */
 export const extractEpisode = (filename: string): number => {
+    if (!filename) return -1;
     const epMatch = filename.match(EPISODE_PATTERN);
-    const episodeStr = epMatch ? epMatch[1] || epMatch[2] || epMatch[3] || epMatch[4] : null;
+    const episodeStr = epMatch ? epMatch[1] || epMatch[2] || epMatch[3] : null;
     return episodeStr ? parseFloat(episodeStr) : -1;
 };

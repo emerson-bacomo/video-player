@@ -1,3 +1,5 @@
+import { useTheme } from "@/context/ThemeContext";
+import { renderHighlight } from "@/utils/textUtils";
 import { extractEpisode } from "@/utils/videoUtils";
 import { router } from "expo-router";
 import { Film } from "lucide-react-native";
@@ -8,9 +10,12 @@ import { Skeleton } from "./Skeleton";
 interface VideoItemProps {
     item: any;
     setSelectedVideoId: (id: string | null) => void;
+    searchQuery?: string;
+    noEllipsis?: boolean;
 }
 
-export const VideoItem = React.memo(({ item, setSelectedVideoId }: VideoItemProps) => {
+export const VideoItem = React.memo(({ item, setSelectedVideoId, searchQuery, noEllipsis }: VideoItemProps) => {
+    const { colors } = useTheme();
     const thumb = item.thumbnail;
 
     if (item.isPlaceholder) {
@@ -27,7 +32,7 @@ export const VideoItem = React.memo(({ item, setSelectedVideoId }: VideoItemProp
         );
     }
 
-    const episodeNum = extractEpisode(item.filename);
+    const episodeNum = extractEpisode(item.displayName);
 
     const totalTimeStr = `${Math.floor(item.duration / 60)}:${Math.floor(item.duration % 60)
         .toString()
@@ -55,7 +60,7 @@ export const VideoItem = React.memo(({ item, setSelectedVideoId }: VideoItemProp
                         pathname: "/player",
                         params: {
                             uri: item.uri,
-                            title: item.filename,
+                            title: item.displayName,
                             videoId: item.id,
                             resumeMs: item.lastPlayedMs !== -1 ? item.lastPlayedMs : 0,
                         },
@@ -98,9 +103,7 @@ export const VideoItem = React.memo(({ item, setSelectedVideoId }: VideoItemProp
             </TouchableOpacity>
 
             <TouchableOpacity activeOpacity={0.7} onPress={() => setSelectedVideoId(item.id)} className="px-1">
-                <Text className="text-text text-sm font-semibold mb-0.5" numberOfLines={1}>
-                    {item.filename}
-                </Text>
+                {renderHighlight(item.displayName, searchQuery, colors.primary, noEllipsis)}
                 <View className="flex-row items-center justify-between">
                     <Text className="text-secondary text-[10px] font-medium uppercase tracking-tight">{timeDisplay}</Text>
                 </View>

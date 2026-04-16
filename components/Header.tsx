@@ -1,7 +1,9 @@
-import { ChevronLeft } from "lucide-react-native";
+import { ChevronLeft, Search, X } from "lucide-react-native";
 import React from "react";
-import { Text, TouchableOpacity, View } from "react-native";
+import { Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Icon } from "./Icon";
+import { useMedia } from "@/hooks/useMedia";
+import { useTheme } from "@/context/ThemeContext";
 
 interface HeaderProps {
     children: React.ReactNode;
@@ -43,8 +45,18 @@ const Actions = ({ children }: { children: React.ReactNode }) => {
     return <View className="flex-row items-center gap-2">{children}</View>;
 };
 
+const SearchAction = () => {
+    const { setIsSearchVisible } = useMedia();
+    return (
+        <TouchableOpacity onPress={() => setIsSearchVisible(true)} className="p-2">
+            <Icon icon={Search} size={20} className="text-text" />
+        </TouchableOpacity>
+    );
+};
+
 Header.Back = Back;
 Header.Title = Title;
 Header.Actions = Actions;
+Header.SearchAction = SearchAction;
 
 export { Header };

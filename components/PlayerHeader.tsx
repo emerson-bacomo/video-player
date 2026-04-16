@@ -1,41 +1,52 @@
 import { LinearGradient } from "expo-linear-gradient";
-import { ChevronLeft, ScreenShare, Settings, Unlock } from "lucide-react-native";
+import * as ScreenOrientation from "expo-screen-orientation";
+import { ChevronLeft, Cpu, Monitor, Settings, Smartphone } from "lucide-react-native";
 import React from "react";
 import { Text, TouchableOpacity, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 interface PlayerHeaderProps {
     title: string;
     onBack: () => void;
     onSettings?: () => void;
+    orientation?: ScreenOrientation.OrientationLock;
+    onToggleOrientation?: () => void;
 }
 
-export const PlayerHeader: React.FC<PlayerHeaderProps> = ({ title, onBack, onSettings }) => {
+export const PlayerHeader: React.FC<PlayerHeaderProps> = ({ title, onBack, onSettings, orientation, onToggleOrientation }) => {
+    const insets = useSafeAreaInsets();
+
+    const getOrientationIcon = () => {
+        if (orientation === ScreenOrientation.OrientationLock.LANDSCAPE) return <Monitor size={22} color="white" />;
+        if (orientation === ScreenOrientation.OrientationLock.PORTRAIT) return <Smartphone size={22} color="white" />;
+        return <Cpu size={20} color="white" />;
+    };
+
     return (
         <View className="absolute top-0 left-0 right-0 z-50">
             <LinearGradient
                 colors={["rgba(0,0,0,0.8)", "transparent"]}
-                className="px-4 pt-12 pb-8 flex-row items-center space-x-4"
+                style={{ paddingTop: insets.top }}
+                className="px-4 pb-8 flex-row items-center space-x-1"
             >
-                <TouchableOpacity onPress={onBack}>
+                <TouchableOpacity onPress={onBack} className="p-2 pl-0">
                     <ChevronLeft size={28} color="white" />
                 </TouchableOpacity>
 
-                <View className="flex-1">
-                    <Text className="text-white text-lg font-bold" numberOfLines={1}>
+                <View className="flex-1 px-1">
+                    <Text className="text-white text-base font-bold" numberOfLines={1}>
                         {title}
                     </Text>
                 </View>
 
-                <TouchableOpacity className="p-2">
-                    <ScreenShare size={24} color="white" />
-                </TouchableOpacity>
-
-                <TouchableOpacity className="p-2">
-                    <Unlock size={24} color="white" />
-                </TouchableOpacity>
+                {onToggleOrientation && (
+                    <TouchableOpacity onPress={onToggleOrientation} className="p-2 mr-1">
+                        {getOrientationIcon()}
+                    </TouchableOpacity>
+                )}
 
                 <TouchableOpacity onPress={onSettings} className="p-2">
-                    <Settings size={24} color="white" />
+                    <Settings size={22} color="white" />
                 </TouchableOpacity>
             </LinearGradient>
         </View>

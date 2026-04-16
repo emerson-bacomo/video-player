@@ -6,20 +6,25 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { ThemeProvider, useTheme } from "../context/ThemeContext";
 import "../global.css";
 import { MediaProvider } from "../hooks/useMedia";
+import { SettingsProvider } from "../context/SettingsContext";
+import { SearchModal } from "../components/SearchModal";
 import { initDB } from "../utils/db";
 
 function InnerRoot() {
     const { themeVars } = useTheme();
     return (
         <View className="bg-background flex-1" style={[themeVars]}>
-            <BottomSheetModalProvider>
-                <MediaProvider>
-                    <Stack screenOptions={{ headerShown: false }}>
-                        <Stack.Screen name="(tabs)" />
-                        <Stack.Screen name="player" />
-                    </Stack>
-                </MediaProvider>
-            </BottomSheetModalProvider>
+            <SettingsProvider>
+                <BottomSheetModalProvider>
+                    <MediaProvider>
+                        <Stack screenOptions={{ headerShown: false }}>
+                            <Stack.Screen name="(tabs)" />
+                            <Stack.Screen name="player" />
+                        </Stack>
+                        <SearchModal />
+                    </MediaProvider>
+                </BottomSheetModalProvider>
+            </SettingsProvider>
         </View>
     );
 }

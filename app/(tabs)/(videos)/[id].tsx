@@ -1,20 +1,20 @@
 import { AlbumItemDetailsModal } from "@/components/AlbumItemDetailsModal";
 import { Header } from "@/components/Header";
+import { Icon } from "@/components/Icon";
 import { LoadingStatus } from "@/components/LoadingStatus";
 import { PrefixFilterMenu } from "@/components/PrefixFilterMenu";
 import { SortMenu } from "@/components/SortMenu";
 import { ThemedSafeAreaView } from "@/components/Themed";
 import { VideoItem } from "@/components/VideoItem";
-import { VideoItemInfoModal } from "@/components/VideoItemInfoModal";
-import { useMedia } from "@/hooks/useMedia";
+import { VideoItemDetailsModal } from "@/components/VideoItemDetailsModal";
 import { useTheme } from "@/context/ThemeContext";
+import { useMedia } from "@/hooks/useMedia";
 import { extractEpisode, extractPrefix } from "@/utils/videoUtils";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { Calendar, Clock, Film, Hash, Info, LucideIcon, SortAsc } from "lucide-react-native";
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef } from "react";
 import { FlatList, RefreshControl, Text, TouchableOpacity, View } from "react-native";
-import { Icon } from "@/components/Icon";
 
 const AlbumVideosScreen = () => {
     const { id, title } = useLocalSearchParams<{ id: string; title: string }>();
@@ -27,9 +27,20 @@ const AlbumVideosScreen = () => {
         refreshPlaybackProgress,
         currentAlbum,
         setCurrentAlbum,
+        folderFilters,
+        setFolderFilter,
     } = useMedia();
     const { colors } = useTheme();
     const REFRESH_TASK_ID = "albumVideosRefresh";
+
+    // Filtering State (Persisted)
+    const selectedPrefixes = folderFilters[id] || [];
+    const setSelectedPrefixes = (arg: string[] | ((prev: string[]) => string[])) => {
+        const next = typeof arg === "function" ? arg(selectedPrefixes) : arg;
+        setFolderFilter(id, next);
+    };
+    const deferredPrefixes = useDeferredValue(selectedPrefixes);
+
     const [selectedVideoId, setSelectedVideoId] = React.useState<string | null>(null);
     const selectedVideo = React.useMemo(() => videos.find((v) => v.id === selectedVideoId), [videos, selectedVideoId]);
     const [showAlbumInfo, setShowAlbumInfo] = React.useState(false);
@@ -44,44 +55,47 @@ const AlbumVideosScreen = () => {
     const currentAlbumData = useMemo(() => {
         return {
             id,
-            title: title || currentAlbum?.title || "",
+            title: title || currentAlbum?.displayName || currentAlbum?.title || "",
             assetCount: currentAlbum?.assetCount || videos.length,
             thumbnail: currentAlbum?.thumbnail,
             lastModified: currentAlbum?.lastModified || 0,
         };
     }, [id, title, currentAlbum, videos.length]);
 
-    // 1. Pre-calculate metadata (prefix, episode) to avoid expensive regex during sorting/filtering
+    // 1. Pre-calculate metadata (prefix, rawPrefix, episode) to avoid expensive regex during sorting/filtering
     // 1. Efficient metadata caching — Reactive to thumbnail updates but optimized via Ref Map
-    const metadataCacheRef = useRef(new Map<string, { prefix: string; episode: number }>());
+    const metadataCacheRef = useRef(new Map<string, { prefix: string; rawPrefix: string; episode: number }>());
     const videosWithMetadata = useMemo(() => {
         return videos.map((v) => {
             const cached = metadataCacheRef.current.get(v.id);
             if (cached) {
-                return { ...v, prefix: cached.prefix, episode: cached.episode };
+                return { ...v, prefix: cached.prefix, rawPrefix: cached.rawPrefix, episode: cached.episode };
             }
-            const prefix = extractPrefix(v.filename);
-            const episode = extractEpisode(v.filename);
-            metadataCacheRef.current.set(v.id, { prefix, episode });
-            return { ...v, prefix, episode };
+            const prefix = extractPrefix(v.displayName);
+            const rawPrefix = extractPrefix(v.filename);
+            const episode = extractEpisode(v.displayName);
+            metadataCacheRef.current.set(v.id, { prefix, rawPrefix, episode });
+            return { ...v, prefix, rawPrefix, episode };
         });
     }, [videos]);
 
-    // Filtering State
-    const [selectedPrefixes, setSelectedPrefixes] = useState<string[]>([]);
-    const deferredPrefixes = useDeferredValue(selectedPrefixes);
+    // Prefix Calculation (Filtering Logic continues using global state)
 
     // 2. Prefix Calculation
     const prefixOptions = useMemo(() => {
         if (videosWithMetadata.length === 0) return [];
-        const counts: Record<string, number> = {};
+        // Map of rawPrefix -> { displayNamePrefix, count }
+        const counts: Record<string, { label: string; count: number }> = {};
         videosWithMetadata.forEach((v) => {
-            counts[v.prefix] = (counts[v.prefix] || 0) + 1;
+            if (!counts[v.rawPrefix]) {
+                counts[v.rawPrefix] = { label: v.prefix, count: 0 };
+            }
+            counts[v.rawPrefix].count++;
         });
 
         return Object.entries(counts)
-            .filter(([_, count]) => count > 1)
-            .map(([label, count]) => ({ label, count }))
+            .filter(([_, data]) => data.count > 1)
+            .map(([value, data]) => ({ value, label: data.label, count: data.count }))
             .sort((a, b) => a.label.localeCompare(b.label));
     }, [videosWithMetadata]); // Keep reactive to list changes
 
@@ -94,7 +108,7 @@ const AlbumVideosScreen = () => {
 
         // 1. Filter - Use deferred value to prevent blocking the UI thread during menu taps
         if (deferredPrefixes.length > 0) {
-            result = result.filter((v) => deferredPrefixes.includes(v.prefix));
+            result = result.filter((v) => deferredPrefixes.includes(v.rawPrefix));
         }
 
         // 2. Sort
@@ -111,7 +125,7 @@ const AlbumVideosScreen = () => {
                     comparison = a.episode - b.episode;
                 }
             } else if (by === "name") {
-                comparison = a.filename.localeCompare(b.filename);
+                comparison = a.displayName.localeCompare(b.displayName);
             } else if (by === "date") {
                 comparison = (a.modificationTime || a.creationTime || 0) - (b.modificationTime || b.creationTime || 0);
             } else if (by === "duration") {
@@ -155,7 +169,7 @@ const AlbumVideosScreen = () => {
             pathname: "/player",
             params: {
                 uri: item.uri,
-                title: item.filename,
+                title: item.displayName,
                 videoId: item.id,
                 resumeMs: item.lastPlayedMs !== -1 ? item.lastPlayedMs : 0,
             },
@@ -200,6 +214,7 @@ const AlbumVideosScreen = () => {
                         onClearAll={handleClearFilters}
                     />
                     <SortMenu currentSort={videoSort} onSortChange={setVideoSort} options={videoSortOptions} />
+                    <Header.SearchAction />
                     <TouchableOpacity
                         onPress={() => setShowAlbumInfo(true)}
                         className="w-10 h-10 items-center justify-center rounded-full bg-zinc-800/50"
@@ -232,7 +247,7 @@ const AlbumVideosScreen = () => {
                 contentContainerStyle={{ paddingHorizontal: 8, paddingTop: 20, paddingBottom: 20 }}
             />
 
-            <VideoItemInfoModal
+            <VideoItemDetailsModal
                 visible={!!selectedVideoId}
                 video={selectedVideo}
                 onClose={() => setSelectedVideoId(null)}

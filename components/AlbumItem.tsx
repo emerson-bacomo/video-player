@@ -49,7 +49,7 @@ export const AlbumItem = React.memo(({ item, onPress, onLongPress }: AlbumItemPr
 
             <TouchableOpacity activeOpacity={0.7} onPress={onLongPress} className="px-1">
                 <Text className="text-text font-semibold text-sm" numberOfLines={1}>
-                    {item.title}
+                    {item.displayName || item.title}
                 </Text>
                 <Text className="text-secondary text-[11px] mt-0.5">{item.assetCount} videos</Text>
             </TouchableOpacity>
