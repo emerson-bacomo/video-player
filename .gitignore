@@ -42,6 +42,18 @@ app-example
 /ios
 /android
 
-# local modules
-modules/**/android/build/
-modules/**/android/.cxx/
+# local modules & android artifacts
+**/android/build/
+**/android/.cxx/
+**/android/.gradle/
+**/android/local.properties
+**/android/.idea
+**/android/*.iml
+
+# IDEs
+.vscode/
+.idea/
+
+# macOS/Windows
+.DS_Store
+Thumbs.db
