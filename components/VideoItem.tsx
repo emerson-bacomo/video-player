@@ -12,9 +12,10 @@ interface VideoItemProps {
     setSelectedVideoId: (id: string | null) => void;
     searchQuery?: string;
     noEllipsis?: boolean;
+    onPress?: (item: any) => void;
 }
 
-export const VideoItem = React.memo(({ item, setSelectedVideoId, searchQuery, noEllipsis }: VideoItemProps) => {
+export const VideoItem = React.memo(({ item, setSelectedVideoId, searchQuery, noEllipsis, onPress }: VideoItemProps) => {
     const { colors } = useTheme();
     const thumb = item.thumbnail;
 
@@ -55,7 +56,11 @@ export const VideoItem = React.memo(({ item, setSelectedVideoId, searchQuery, no
             <TouchableOpacity
                 activeOpacity={0.8}
                 className="w-full aspect-[16/10] bg-card rounded-xl overflow-hidden relative border border-border shadow-md mb-2"
-                onPress={() =>
+                onPress={() => {
+                    if (onPress) {
+                        onPress(item);
+                        return;
+                    }
                     router.push({
                         pathname: "/player",
                         params: {
@@ -64,8 +69,8 @@ export const VideoItem = React.memo(({ item, setSelectedVideoId, searchQuery, no
                             videoId: item.id,
                             resumeMs: item.lastPlayedMs !== -1 ? item.lastPlayedMs : 0,
                         },
-                    })
-                }
+                    });
+                }}
                 onLongPress={() => setSelectedVideoId(item.id)}
             >
                 {thumb ? (
@@ -76,8 +81,8 @@ export const VideoItem = React.memo(({ item, setSelectedVideoId, searchQuery, no
                     </View>
                 )}
 
-                <View className="absolute top-2 left-0 right-0 px-2 flex-row gap-1.5 items-center justify-between">
-                    {episodeNum && (
+                <View className="absolute top-2 left-0 right-0 px-2 flex-row gap-1.5 items-center">
+                    {episodeNum !== -1 && (
                         <View
                             pointerEvents="none"
                             className="bg-black/60 h-[18px] px-2 rounded-full justify-center items-center backdrop-blur-md border border-white/20"
@@ -88,7 +93,7 @@ export const VideoItem = React.memo(({ item, setSelectedVideoId, searchQuery, no
                     {item.lastPlayedMs === -1 && (
                         <View
                             pointerEvents="none"
-                            className="bg-red-600/80 h-[18px] px-2 rounded-full justify-center items-center backdrop-blur-md border border-white/15"
+                            className="ml-auto bg-red-600/80 h-[18px] px-2 rounded-full justify-center items-center backdrop-blur-md border border-white/15"
                         >
                             <Text className="text-red-100 text-[9px] font-bold uppercase tracking-wider">NEW</Text>
                         </View>

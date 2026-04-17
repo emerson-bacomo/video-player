@@ -100,8 +100,6 @@ export interface MediaContextType {
     isLoadingExpanded: boolean;
     setIsLoadingExpanded: React.Dispatch<React.SetStateAction<boolean>>;
     searchMedia: (query: string) => VideoMedia[];
-    isSearchVisible: boolean;
-    setIsSearchVisible: (visible: boolean) => void;
 }
 
 const MediaContext = createContext<MediaContextType | null>(null);
@@ -120,10 +118,9 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
     const [error, setError] = useState<string | null>(null);
     const [isLoadingVisible, setIsLoadingVisible] = useState(false);
     const [isLoadingExpanded, setIsLoadingExpanded] = useState(false);
-    const [isSearchVisible, setIsSearchVisible] = useState(false);
 
     const [videoCache, setVideoCache] = useState<Record<string, VideoMedia[]>>({});
-    const { settings } = useSettings();
+    const { settings, loading: settingsLoading } = useSettings();
 
     const cleanName = React.useCallback(
         (name: string) => {
@@ -1093,7 +1090,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
         let active = true;
 
         const initialize = async () => {
-            if (!permissionResponse) return;
+            if (!permissionResponse || settingsLoading) return;
 
             if (permissionResponse.status !== "granted") {
                 if (active) setLoadingTask(null);
@@ -1106,7 +1103,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                 // Only perform an automatic sync if the user has completed a manual scan before.
                 // This prevents the 'Auto Deep Scan' on fresh installs until the user clicks 'Scan Device'.
                 const lastSync = getLastSyncTimestamp();
-                if (lastSync !== 0) {
+                if (lastSync !== 0 && active) {
                     await performSmartSync(false, false);
                 }
             } catch (e) {
@@ -1119,7 +1116,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
         return () => {
             active = false;
         };
-    }, [permissionResponse]);
+    }, [permissionResponse, settingsLoading]);
 
     // Re-sort albums immediately when sort order changes
     useEffect(() => {
@@ -1212,8 +1209,6 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                 isLoadingExpanded,
                 setIsLoadingExpanded,
                 searchMedia,
-                isSearchVisible,
-                setIsSearchVisible,
             }}
         >
             {children}

@@ -1,11 +1,11 @@
-import React from 'react';
-import { View, Text } from 'react-native';
-import { Database } from 'lucide-react-native';
-import { ThemedButton } from './Themed';
+import { Database } from "lucide-react-native";
+import React from "react";
+import { Text, View } from "react-native";
+import { ThemedButton } from "./Themed";
 
 interface EmptyAlbumStateProps {
-  loading: boolean;
-  onScan: () => void;
+    loading: boolean;
+    onScan: () => void;
 }
 
 export const EmptyAlbumState = ({ loading, onScan }: EmptyAlbumStateProps) => {
@@ -13,9 +13,7 @@ export const EmptyAlbumState = ({ loading, onScan }: EmptyAlbumStateProps) => {
 
     return (
         <View className="flex-1 justify-center items-center py-20 px-10">
-            <View 
-                className="w-20 h-20 rounded-full items-center justify-center mb-6 border bg-card border-border"
-            >
+            <View className="w-20 h-20 rounded-full items-center justify-center mb-6 border bg-card border-border">
                 <Database size={32} className="text-primary" />
             </View>
             <Text className="text-lg font-bold mb-2 text-center text-text">No Media Found</Text>
@@ -24,7 +22,7 @@ export const EmptyAlbumState = ({ loading, onScan }: EmptyAlbumStateProps) => {
             </Text>
             <ThemedButton
                 title="Scan Device"
-                className="px-8 py-3.5 shadow-lg shadow-blue-500/20"
+                className="px-8 py-3.5 shadow-lg shadow-blue-500/20 rounded-full"
                 onPress={(setLoading) => {
                     setLoading(true);
                     onScan();

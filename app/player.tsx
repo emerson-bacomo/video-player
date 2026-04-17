@@ -1,19 +1,23 @@
 import * as Brightness from "expo-brightness";
+import * as NavigationBar from "expo-navigation-bar";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { StatusBar } from "expo-status-bar";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dimensions, Text, TouchableOpacity, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, { useAnimatedStyle, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Video, { OnLoadData, OnProgressData, VideoRef } from "react-native-video";
 
 import { useTheme } from "@/context/ThemeContext";
-import { BrightnessCorner } from "../components/BrightnessCorner";
 import { PlayerCentralIndicator, PlayerCentralIndicatorProps } from "../components/PlayerCentralIndicator";
 import { PlayerControls } from "../components/PlayerControls";
+import { PlayerCorner } from "../components/PlayerCorner";
 import { PlayerHeader } from "../components/PlayerHeader";
+import { VideoItemDetailsModal } from "../components/VideoItemDetailsModal";
 import { useClipping } from "../hooks/useClipping";
+import { useMedia } from "../hooks/useMedia";
 import { useSettings } from "../hooks/useSettings";
 import { savePlaybackData } from "../utils/db";
 
@@ -26,6 +30,10 @@ export default function PlayerScreen() {
     }>();
     const router = useRouter();
     const { settings } = useSettings();
+    const { videos } = useMedia();
+    const activeVideo = videos.find((v) => v.id === videoId);
+    const [infoModalVisible, setInfoModalVisible] = useState(false);
+
     const [showControls, setShowControls] = useState(true);
     const [currentTime, setCurrentTime] = useState(resumeMs ? Number(resumeMs) : 0);
     const [isClipMode, setIsClipMode] = useState(false);
@@ -44,16 +52,61 @@ export default function PlayerScreen() {
     const [duration, setDuration] = useState(0);
     const videoRef = useRef<VideoRef>(null);
 
-    const [showBrightnessCorners, setShowBrightnessCorners] = useState(false);
-    const cornersTimeoutRef = useRef<any>(null);
+    const [showPieMenu, setShowPieMenu] = useState(false);
+    const initialSeekDone = useRef(false);
+    const [isInitialLoadDone, setIsInitialLoadDone] = useState(false);
+    const isCornerModalOpen = useRef(false);
+    const wasPlayingBeforePie = useRef(false);
+
+    const handleCornerModalChange = useCallback((isOpen: boolean) => {
+        isCornerModalOpen.current = isOpen;
+        if (isOpen) {
+            // Immediately hide controls and cancel any pending timer
+            if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
+            setShowControls(false);
+        }
+    }, []);
 
     const handleCornerDoubleTap = useCallback(() => {
-        setShowBrightnessCorners(true);
-        if (cornersTimeoutRef.current) clearTimeout(cornersTimeoutRef.current);
-        cornersTimeoutRef.current = setTimeout(() => {
-            setShowBrightnessCorners(false);
-        }, 2000);
-    }, []);
+        setShowPieMenu((prev) => {
+            const next = !prev;
+            if (next) {
+                // Opening - Save state and pause
+                wasPlayingBeforePie.current = !paused;
+                setPaused(true);
+            } else {
+                // Closing - Restore state
+                if (wasPlayingBeforePie.current) {
+                    setPaused(false);
+                }
+            }
+            return next;
+        });
+    }, [paused]);
+
+    const handleExecuteOperation = useCallback(
+        (op: any) => {
+            if (!videoRef.current) return;
+
+            if (op.type === "seek") {
+                const deltaMs = (op.value || 0) * 1000;
+                const newTime = Math.max(0, Math.min(duration, currentTime + deltaMs));
+                videoRef.current.seek(newTime / 1000);
+                setCurrentTime(newTime);
+
+                // Show feedback
+                const iconName = op.value >= 0 ? "skip-fwd" : "skip-back";
+                setCentralIndicator({
+                    icon: iconName as any,
+                    label: op.label || `${op.value > 0 ? "+" : ""}${op.value}s`,
+                });
+
+                if (skipTimeout.current) clearTimeout(skipTimeout.current);
+                skipTimeout.current = setTimeout(() => setCentralIndicator(null), 800);
+            }
+        },
+        [duration, currentTime],
+    );
 
     const brightnessTimeoutRef = useRef<any>(null);
     const handleBrightnessChange = useCallback((val: number) => {
@@ -127,6 +180,14 @@ export default function PlayerScreen() {
     };
 
     useEffect(() => {
+        if (!showControls) {
+            NavigationBar.setVisibilityAsync("hidden");
+        } else {
+            NavigationBar.setVisibilityAsync("visible");
+        }
+    }, [showControls]);
+
+    useEffect(() => {
         if (permissionChecked && hasBrightnessPermission) {
             setPaused(false);
         }
@@ -148,14 +209,6 @@ export default function PlayerScreen() {
 
     const isDraggingMarker = useRef(false);
 
-    // Initial jump for resume
-    useEffect(() => {
-        if (resumeMs && duration > 0 && currentTime === 0) {
-            videoRef.current?.seek(Number(resumeMs) / 1000);
-            setCurrentTime(Number(resumeMs));
-        }
-    }, [duration, resumeMs]);
-
     // Initial jump for preview
     useEffect(() => {
         if (previewActive && duration > 0) {
@@ -170,11 +223,19 @@ export default function PlayerScreen() {
     // Handle auto-hide controls
     const resetControlsTimer = useCallback(() => {
         if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
+        if (isCornerModalOpen.current || infoModalVisible) return; // Never show controls while a modal is open
         setShowControls(true);
         if (!paused && !isClipMode && !isDraggingMarker.current) {
             controlsTimeout.current = setTimeout(() => setShowControls(false), 2000);
         }
-    }, [paused, isClipMode]);
+    }, [paused, isClipMode, infoModalVisible]);
+
+    useEffect(() => {
+        if (infoModalVisible) {
+            if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
+            setShowControls(false);
+        }
+    }, [infoModalVisible]);
 
     useEffect(() => {
         if (!paused && showControls && !isClipMode && !previewActive && !isDraggingMarker.current) {
@@ -374,9 +435,13 @@ export default function PlayerScreen() {
         return Gesture.Simultaneous(taps, holdOrSlide);
     }, [doubleTapGesture, singleTapGesture, longPressGesture, panGesture]);
 
+    const animatedControlsStyle = useAnimatedStyle(() => ({
+        opacity: withTiming(showControls ? 1 : 0, { duration: 150 }),
+    }));
+
     return (
         <View style={{ flex: 1, backgroundColor: colors.playerBackground }}>
-            <StatusBar style="light" hidden={!showControls} />
+            <StatusBar style="light" hidden={!showControls} translucent />
 
             <GestureDetector gesture={composedGesture}>
                 <View className="flex-1 w-full h-full" style={{ backgroundColor: colors.playerBackground }}>
@@ -389,9 +454,19 @@ export default function PlayerScreen() {
                         resizeMode="contain"
                         onLoad={(data: OnLoadData) => {
                             setDuration(data.duration * 1000);
+                            const resumeTime = resumeMs ? Number(resumeMs) : 0;
+                            if (resumeMs && !initialSeekDone.current) {
+                                videoRef.current?.seek(resumeTime / 1000);
+                                setCurrentTime(resumeTime);
+                                initialSeekDone.current = true;
+                            }
+                            // Small delay to ensure the native seek has 'taken' before showing the slider
+                            setTimeout(() => setIsInitialLoadDone(true), 250);
                         }}
                         onProgress={(data: OnProgressData) => {
-                            setCurrentTime(data.currentTime * 1000);
+                            if (isInitialLoadDone) {
+                                setCurrentTime(data.currentTime * 1000);
+                            }
                         }}
                         onEnd={() => {
                             setPaused(true);
@@ -401,16 +476,19 @@ export default function PlayerScreen() {
                         playWhenInactive={false}
                     />
 
-                    {/* Brightness Pattern Corners */}
+                    {/* Player Corners & Custom Operations */}
                     {["top-left", "top-right", "bottom-left", "bottom-right"].map((position) => (
-                        <BrightnessCorner
+                        <PlayerCorner
                             key={position}
                             position={position as any}
                             hasPermission={hasBrightnessPermission}
-                            isActive={showBrightnessCorners}
+                            showPieMenu={showPieMenu && !showControls}
                             sensitivity={settings.brightnessSensitivity}
                             onDoubleTap={handleCornerDoubleTap}
+                            onExecuteOperation={handleExecuteOperation}
+                            onModalChange={handleCornerModalChange}
                             onSingleTap={() => {
+                                if (isCornerModalOpen.current || infoModalVisible) return;
                                 if (showControls) {
                                     if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
                                     setShowControls(false);
@@ -430,15 +508,17 @@ export default function PlayerScreen() {
                 </View>
             </GestureDetector>
 
-            <View
-                style={{
-                    position: "absolute",
-                    inset: 0,
-                    paddingLeft: insets.left,
-                    paddingRight: insets.right,
-                    pointerEvents: showControls ? "box-none" : "none",
-                    opacity: showControls ? 1 : 0,
-                }}
+            <Animated.View
+                pointerEvents={showControls ? "box-none" : "none"}
+                style={[
+                    {
+                        position: "absolute",
+                        inset: 0,
+                        paddingLeft: insets.left,
+                        paddingRight: insets.right,
+                    },
+                    animatedControlsStyle,
+                ]}
             >
                 <PlayerHeader
                     title={title || "Video Player"}
@@ -451,6 +531,9 @@ export default function PlayerScreen() {
                     onBack={() => {
                         ScreenOrientation.unlockAsync();
                         router.back();
+                    }}
+                    onTitlePress={() => {
+                        if (activeVideo) setInfoModalVisible(true);
                     }}
                 />
 
@@ -494,6 +577,7 @@ export default function PlayerScreen() {
                         setCurrentTime(time);
                     }}
                     activeMarkerId={activeMarkerId}
+                    isInitialLoadDone={isInitialLoadDone}
                     onDragStart={() => {
                         isDraggingMarker.current = true;
                         setPaused(true);
@@ -503,7 +587,7 @@ export default function PlayerScreen() {
                         resetControlsTimer();
                     }}
                 />
-            </View>
+            </Animated.View>
 
             {!hasBrightnessPermission && permissionChecked && (
                 <View className="absolute z-[100] inset-0 flex-1 bg-black/95 justify-center items-center p-6">
@@ -528,6 +612,15 @@ export default function PlayerScreen() {
                         <Text className="text-zinc-300 font-semibold text-center text-base">Go Back</Text>
                     </TouchableOpacity>
                 </View>
+            )}
+
+            {activeVideo && (
+                <VideoItemDetailsModal
+                    visible={infoModalVisible}
+                    video={activeVideo}
+                    onClose={() => setInfoModalVisible(false)}
+                    onPlay={() => setInfoModalVisible(false)}
+                />
             )}
         </View>
     );

@@ -7,7 +7,6 @@ import { ThemeProvider, useTheme } from "../context/ThemeContext";
 import "../global.css";
 import { MediaProvider } from "../hooks/useMedia";
 import { SettingsProvider } from "../context/SettingsContext";
-import { SearchModal } from "../components/SearchModal";
 import { initDB } from "../utils/db";
 
 function InnerRoot() {
@@ -20,8 +19,8 @@ function InnerRoot() {
                         <Stack screenOptions={{ headerShown: false }}>
                             <Stack.Screen name="(tabs)" />
                             <Stack.Screen name="player" />
+                            <Stack.Screen name="search" />
                         </Stack>
-                        <SearchModal />
                     </MediaProvider>
                 </BottomSheetModalProvider>
             </SettingsProvider>

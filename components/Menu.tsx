@@ -45,7 +45,6 @@ interface MenuContextType {
 const MenuContext = createContext<MenuContextType | null>(null);
 
 const MENU_OFFSET = 16;
-const ARROW_HEIGHT = 10;
 const ARROW_WIDTH = 16;
 
 export const Menu = ({
@@ -323,20 +322,6 @@ const Content = ({ children, className }: { children: React.ReactNode; className
                             </View>
                         </View>
                     </>
-                )}
-
-                {variant === "MODAL" && (
-                    <View className="flex-1 justify-center items-center px-6">
-                        <View
-                            onStartShouldSetResponder={() => true}
-                            className={cn(
-                                "rounded-2xl shadow-2xl overflow-hidden w-full max-w-sm border bg-menu border-border",
-                                className,
-                            )}
-                        >
-                            {children}
-                        </View>
-                    </View>
                 )}
             </View>
         </Modal>

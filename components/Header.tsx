@@ -1,5 +1,6 @@
 import { ChevronLeft, Search, X } from "lucide-react-native";
 import React from "react";
+import { router } from "expo-router";
 import { Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Icon } from "./Icon";
 import { useMedia } from "@/hooks/useMedia";
@@ -46,9 +47,8 @@ const Actions = ({ children }: { children: React.ReactNode }) => {
 };
 
 const SearchAction = () => {
-    const { setIsSearchVisible } = useMedia();
     return (
-        <TouchableOpacity onPress={() => setIsSearchVisible(true)} className="p-2">
+        <TouchableOpacity onPress={() => router.push("/search")} className="p-2">
             <Icon icon={Search} size={20} className="text-text" />
         </TouchableOpacity>
     );

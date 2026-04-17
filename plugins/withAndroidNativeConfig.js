@@ -35,6 +35,35 @@ const withAndroidNativeConfig = (config) => {
             config.modResults.contents = config.modResults.contents.replace(/android\s*\{/, `android {\n    ndkVersion "${ndkVersion}"`);
         }
 
+        // 3. Add applicationIdSuffix ".debug" and prefix for display name for debug builds
+        const appName = (config.name || "App").replace(/"/g, '\\"');
+        const hasDebugSuffix = config.modResults.contents.includes("applicationIdSuffix \".debug\"");
+        const hasDebugName = config.modResults.contents.includes("resValue \"string\", \"app_name\"");
+
+        if (!hasDebugSuffix || !hasDebugName) {
+            const debugEntries = [];
+            if (!hasDebugSuffix) debugEntries.push('            applicationIdSuffix ".debug"');
+            if (!hasDebugName) debugEntries.push(`            resValue "string", "app_name", "[D] ${appName}"`);
+
+            const debugConfig = debugEntries.join("\n");
+
+            // Use a more specific regex to target debug { inside buildTypes {
+            // This avoids matching debug { inside signingConfigs {
+            const buildTypesPattern = /buildTypes\s*\{[\s\S]*?debug\s*\{/;
+            if (buildTypesPattern.test(config.modResults.contents)) {
+                config.modResults.contents = config.modResults.contents.replace(
+                    buildTypesPattern,
+                    (match) => `${match}\n${debugConfig}`,
+                );
+            } else if (config.modResults.contents.includes("buildTypes {")) {
+                // If buildTypes exists but debug { is missing inside it
+                config.modResults.contents = config.modResults.contents.replace(
+                    /buildTypes\s*\{/,
+                    `buildTypes {\n        debug {\n${debugConfig}\n        }`,
+                );
+            }
+        }
+
         return config;
     });
 

@@ -1,3 +1,4 @@
+import { cn } from "@/lib/utils";
 import Slider from "@react-native-community/slider";
 import { LinearGradient } from "expo-linear-gradient";
 import * as ScreenOrientation from "expo-screen-orientation";
@@ -28,6 +29,7 @@ import {
 } from "react-native";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { MarkerPair } from "../hooks/useClipping";
+import { useSettings } from "../hooks/useSettings";
 import { ClippingOverlay } from "./ClippingOverlay";
 
 interface PlayerControlsProps {
@@ -53,6 +55,7 @@ interface PlayerControlsProps {
     activeMarkerId: string | null;
     onDragStart?: () => void;
     onDragEnd?: () => void;
+    isInitialLoadDone?: boolean;
 }
 
 export const PlayerControls: React.FC<PlayerControlsProps> = ({
@@ -77,12 +80,14 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
     activeMarkerId,
     onDragStart,
     onDragEnd,
+    isInitialLoadDone,
 }) => {
     const { width: screenWidth, height: screenHeight } = useWindowDimensions();
     const isLandscape = screenWidth > screenHeight;
+
+    const { settings, updateSettings } = useSettings();
     const [sliderWidth, setSliderWidth] = useState(screenWidth - 32); // Better initial estimate
     const [localIsPlaying, setLocalIsPlaying] = useState(isPlaying);
-    const [timeFormat, setTimeFormat] = useState<"elapsed" | "remaining">("elapsed");
     const [sliderReady, setSliderReady] = useState(false);
 
     const expansion = useSharedValue(isClipMode ? 1 : 0);
@@ -94,11 +99,11 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
     // Wait one rAF after duration arrives so Android's native SeekBar
     // thumb animation (0 → value) completes invisibly before we show the slider.
     useEffect(() => {
-        if (duration > 0 && !sliderReady) {
+        if (duration > 0 && isInitialLoadDone && !sliderReady) {
             const id = requestAnimationFrame(() => setSliderReady(true));
             return () => cancelAnimationFrame(id);
         }
-    }, [duration]);
+    }, [duration, sliderReady, isInitialLoadDone]);
 
     const animatedBarStyle = useAnimatedStyle(() => {
         return {
@@ -142,9 +147,9 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         <View className="absolute bottom-0 left-0 right-0 z-50">
             <LinearGradient
                 colors={["transparent", "rgba(0,0,0,0.8)"]}
-                className={`px-4 ${isLandscape ? "pb-4 pt-4" : "pb-10 pt-8"}`}
+                className={cn("px-4 pt-4", isLandscape ? "pb-10" : "pb-14")}
             >
-                <View className={`flex-row justify-between items-center ${isLandscape ? "mb-1" : "mb-4"}`}>
+                <View className={cn("flex-row justify-between items-center", isLandscape ? "mb-1" : "mb-4")}>
                     {/* Action Bar Container */}
                     <Animated.View
                         style={[{ overflow: "hidden", minWidth: 64 }, animatedBarStyle]}
@@ -164,25 +169,32 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                                 <TouchableOpacity
                                     onPress={() => activeMarkerId && onRemoveMarker(activeMarkerId)}
                                     disabled={!activeMarkerId}
-                                    className={`p-2.5 rounded-full ${!activeMarkerId ? "opacity-30" : "active:bg-red-500/10"}`}
+                                    className={cn("p-2.5 rounded-full", !activeMarkerId ? "opacity-30" : "active:bg-red-500/10")}
                                 >
                                     <Trash2 size={20} color={activeMarkerId ? "#f56565" : "white"} />
                                 </TouchableOpacity>
 
-                                {/* Move to Cursor */}
+                                {/* Adjust Current Marker */}
                                 <TouchableOpacity
                                     onPress={() => activeMarkerId && onUpdateMarkerTime(activeMarkerId, currentTime)}
                                     disabled={!activeMarkerId}
-                                    className={`p-2.5 rounded-full ${!activeMarkerId ? "opacity-30" : "active:bg-blue-500/10"}`}
+                                    className={cn("p-2.5 rounded-full", !activeMarkerId ? "opacity-30" : "active:bg-blue-500/10")}
                                 >
                                     <SeparatorVertical size={20} color="white" />
                                 </TouchableOpacity>
 
-                                {/* Preview */}
+                                {/* Toggle Preview */}
                                 <TouchableOpacity
                                     onPress={onTogglePreview}
                                     disabled={!markerPairs.some((p) => p.end)}
-                                    className={`p-2.5 rounded-full ${!markerPairs.some((p) => p.end) ? "opacity-30" : previewActive ? "bg-white/20" : "active:bg-white/10"}`}
+                                    className={cn(
+                                        "p-2.5 rounded-full",
+                                        !markerPairs.some((p) => p.end)
+                                            ? "opacity-30"
+                                            : previewActive
+                                              ? "bg-white/20"
+                                              : "active:bg-white/10",
+                                    )}
                                 >
                                     <Eye
                                         size={20}
@@ -197,7 +209,10 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                                         if (!res.success && res.message) showToast(res.message);
                                     }}
                                     disabled={!markerPairs.some((p) => p.end)}
-                                    className={`p-2.5 rounded-full ${!markerPairs.some((p) => p.end) ? "opacity-30" : "active:bg-emerald-500/10"}`}
+                                    className={cn(
+                                        "p-2.5 rounded-full",
+                                        !markerPairs.some((p) => p.end) ? "opacity-30" : "active:bg-emerald-500/10",
+                                    )}
                                 >
                                     <Save size={20} color={markerPairs.some((p) => p.end) ? "#5cdab0ff" : "white"} />
                                 </TouchableOpacity>
@@ -226,8 +241,8 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                     </Animated.View>
                 </View>
 
-                {/* Progress Slider */}
-                <View className={`${isLandscape ? "mb-1" : "mb-4"} relative`} onLayout={onSliderLayout}>
+                {/* Scrubber Container */}
+                <View className={cn("relative", isLandscape ? "mb-1" : "mb-4")} onLayout={onSliderLayout}>
                     {isClipMode && (
                         <ClippingOverlay
                             markerPairs={markerPairs}
@@ -255,31 +270,36 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                         />
                     </View>
                     <View className="flex-row justify-between px-1">
-                        <TouchableOpacity onPress={() => setTimeFormat((prev) => (prev === "elapsed" ? "remaining" : "elapsed"))}>
-                            <Text className="text-white/70 text-[10px] font-medium min-w-[32px]">
-                                {timeFormat === "elapsed" ? formatTime(currentTime) : `-${formatTime(duration - currentTime)}`}
+                        <Text className="text-white/70 font-medium min-w-[32px]">{formatTime(currentTime)}</Text>
+                        <TouchableOpacity
+                            onPress={() =>
+                                updateSettings({
+                                    timeDisplayMode: settings.timeDisplayMode === "elapsed" ? "remaining" : "elapsed",
+                                })
+                            }
+                        >
+                            <Text className="text-white/70 font-medium min-w-[32px] text-right">
+                                {settings.timeDisplayMode === "elapsed"
+                                    ? formatTime(duration)
+                                    : `-${formatTime(duration - currentTime)}`}
                             </Text>
                         </TouchableOpacity>
-                        <Text className="text-white/70 text-[10px] font-medium min-w-[32px] text-right">
-                            {formatTime(duration)}
-                        </Text>
                     </View>
                 </View>
 
-                {/* Playback Controls */}
-                <View className={`flex-row items-center justify-center ${isLandscape ? "gap-12" : "gap-14"}`}>
+                {/* Playback Controls (Play/Pause, Skip) */}
+                <View className={cn("flex-row items-center justify-center", isLandscape ? "gap-12" : "gap-14")}>
                     <TouchableOpacity onPress={onSkipPrevious} activeOpacity={0.6}>
                         <SkipBack size={isLandscape ? 24 : 28} color="white" fill="white" />
                     </TouchableOpacity>
 
+                    {/* Play/Pause */}
                     <TouchableOpacity
                         onPress={() => {
                             setLocalIsPlaying(!localIsPlaying);
                             onTogglePlay();
                         }}
-                        activeOpacity={0.5}
-                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                        className={`bg-white/10 ${isLandscape ? "p-3" : "p-6"} rounded-full border border-white/10`}
+                        className={cn("bg-white/10 rounded-full border border-white/10", isLandscape ? "p-3" : "p-6")}
                     >
                         {localIsPlaying ? (
                             <Pause size={isLandscape ? 32 : 42} color="white" fill="white" />

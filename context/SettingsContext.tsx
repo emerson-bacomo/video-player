@@ -4,19 +4,37 @@ import * as FileSystem from 'expo-file-system/legacy';
 const SETTINGS_FILE = `${FileSystem.documentDirectory}settings.json`;
 
 export type Orientation = 'landscape' | 'portrait' | 'auto';
+export type CornerPosition = "top-left" | "top-right" | "bottom-left" | "bottom-right";
+
+export interface PlayerOperation {
+  id: string;
+  type: 'seek' | 'custom';
+  value: number;
+  iconName: string;
+  label: string;
+}
 
 export interface Settings {
   clipDestination: string;
   defaultOrientation: Orientation;
   brightnessSensitivity: number;
   nameReplacements: { find: string; replace: string; active: boolean }[];
+  cornerConfigs: Record<CornerPosition, (PlayerOperation | null)[]>;
+  timeDisplayMode: 'elapsed' | 'remaining';
 }
 
 const DEFAULT_SETTINGS: Settings = {
   clipDestination: '/storage/emulated/0/DCIM/Clips',
   defaultOrientation: 'auto',
-  brightnessSensitivity: 0.3,
+  brightnessSensitivity: 1.0,
   nameReplacements: [],
+  cornerConfigs: {
+    "top-left": [null, null, null, null],
+    "top-right": [null, null, null, null],
+    "bottom-left": [null, null, null, null],
+    "bottom-right": [null, null, null, null],
+  },
+  timeDisplayMode: "elapsed",
 };
 
 interface SettingsContextType {

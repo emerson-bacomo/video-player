@@ -1,3 +1,4 @@
+import { cn } from "@/lib/utils";
 import React from "react";
 import { TouchableOpacity, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -113,7 +114,12 @@ export const ClippingOverlay: React.FC<ClippingOverlayProps> = ({
                             zIndex: 20,
                         }}
                     >
-                        <View className={`h-2 rounded-full border-y border-white/20 ${previewActive ? 'bg-emerald-500/80' : 'bg-amber-400/60'}`} />
+                        <View
+                            className={cn(
+                                "h-2 rounded-full border-y border-white/20",
+                                previewActive ? "bg-emerald-500/80" : "bg-amber-400/60",
+                            )}
+                        />
                     </View>
                 );
             })}

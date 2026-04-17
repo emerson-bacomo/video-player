@@ -8,6 +8,7 @@ import { ThemeColors, useTheme } from "@/context/ThemeContext";
 import * as db from "@/utils/db";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
+import { cn } from "@/lib/utils";
 import { useRouter } from "expo-router";
 import { ArrowLeft, Download, Plus, RotateCcw, Save, Trash, Upload } from "lucide-react-native";
 import React, { useEffect, useMemo, useState } from "react";
@@ -248,7 +249,7 @@ const ThemeEditor = () => {
                                     />
                                     <Text
                                         style={{ color: theme.text }}
-                                        className={`font-bold ${preset.id === activePresetId ? "text-lg" : "text-base"}`}
+                                        className={cn("font-bold", preset.id === activePresetId ? "text-lg" : "text-base")}
                                     >
                                         {preset.name}
                                     </Text>

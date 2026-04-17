@@ -1,2 +1,2 @@
 ninja: Entering directory `C:\Users\User\Downloads\video-player\modules\expo-ffmpeg\android\.cxx\Debug\33296966\arm64-v8a'
-ninja: no work to do.
+[1/1] Linking CXX shared library ..\..\..\..\build\intermediates\cxx\Debug\33296966\obj\arm64-v8a\libexpo-ffmpeg.so

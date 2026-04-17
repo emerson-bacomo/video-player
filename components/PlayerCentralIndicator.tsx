@@ -4,12 +4,12 @@ import { Text, View } from "react-native";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 
 // Design Tokens
-const ICON_SIZE_DEFAULT = 64;
+const ICON_SIZE_DEFAULT = 48;
 const ICON_SIZE_SPEED = ICON_SIZE_DEFAULT * 0.8;
 const FONT_SIZE_DEFAULT = 20;
 const FONT_SIZE_SPEED = 32;
-const FONT_SIZE_SEEK = 36;
-const PADDING = 32;
+const FONT_SIZE_SEEK = 32;
+const PADDING = 24;
 const BG_COLOR = "rgba(0, 0, 0, 0.4)";
 
 export interface PlayerCentralIndicatorProps {
@@ -97,11 +97,11 @@ export const PlayerCentralIndicator: React.FC<PlayerCentralIndicatorProps> = ({ 
             case "seek":
                 if (panSeekTime == null) return null;
                 const isForward = panSeekTime >= panStartTime;
-                const diff = Math.abs(Math.round(panSeekTime - panStartTime));
+                const diff = Math.abs(Math.round((panSeekTime - panStartTime) / 1000));
                 return (
                     <View className="items-center">
                         <Text style={{ fontSize: FONT_SIZE_SEEK }} className="text-white font-bold mb-2">
-                            {new Date(panSeekTime * 1000).toISOString().substr(11, 8)}
+                            {new Date(panSeekTime).toISOString().substr(11, 8)}
                         </Text>
                         <View className="flex-row items-center gap-2">
                             {isForward ? <ChevronsRight color="white" size={24} /> : <ChevronsLeft color="white" size={24} />}

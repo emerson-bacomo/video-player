@@ -3,7 +3,4 @@ do something about the small delay when doing video item operations like enterin
 
 implement the c++ code for clipping (put inside expo-ffmpeg with a function like ClipVideo(path, tuple<start, end>[]), show toast on success that shows the filename, and path as subtitle
 
-2x playback problem
-
-find and replace pattern isnt applied on startup, but works when i press apply changes
-@contextScopeItemMentionalso, _04.5_ and _09.5_ isnt read
+Scan Problem

@@ -8,6 +8,7 @@ import { useMedia } from "@/hooks/useMedia";
 import { Orientation, useSettings } from "@/hooks/useSettings";
 import { Directory } from "expo-file-system";
 import { router } from "expo-router";
+import { cn } from "@/lib/utils";
 import { StatusBar } from "expo-status-bar";
 import {
     ChevronDown,
@@ -82,13 +83,14 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
         const isActive = settings.defaultOrientation === value;
         return (
             <TouchableOpacity
-                className={`flex-1 flex-row items-center justify-center p-4 rounded-xl border gap-2 ${
-                    isActive ? "bg-primary border-primary" : "bg-card border-border"
-                }`}
+                className={cn(
+                    "flex-1 flex-row items-center justify-center p-4 rounded-xl border gap-2",
+                    isActive ? "bg-primary border-primary" : "bg-card border-border",
+                )}
                 onPress={() => updateSettings({ defaultOrientation: value })}
             >
                 <Icon icon={LucideIconProp} size={18} className={isActive ? "text-white" : "text-text"} />
-                <Text className={`font-semibold ${isActive ? "text-white" : "text-text"}`}>{label}</Text>
+                <Text className={cn("font-semibold", isActive ? "text-white" : "text-text")}>{label}</Text>
             </TouchableOpacity>
         );
     };
@@ -220,7 +222,10 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
                                         return (
                                             <TouchableOpacity
                                                 key={preset.id}
-                                                className={`px-4 py-3.5 flex-row items-center justify-between ${isActive ? "bg-card" : "bg-background"}`}
+                                                className={cn(
+                                                    "px-4 py-3.5 flex-row items-center justify-between",
+                                                    isActive ? "bg-card" : "bg-background",
+                                                )}
                                                 onPress={() => {
                                                     switchPreset(preset.id);
                                                     setThemeDropdownOpen(false);
@@ -228,9 +233,9 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
                                             >
                                                 <View className="flex-row items-center gap-3">
                                                     <View
-                                                        className={`w-2 h-2 rounded-full ${isActive ? "bg-primary" : "bg-zinc-600"}`}
+                                                        className={cn("w-2 h-2 rounded-full", isActive ? "bg-primary" : "bg-zinc-600")}
                                                     />
-                                                    <Text className={`font-medium ${isActive ? "text-primary" : "text-text"}`}>
+                                                    <Text className={cn("font-medium", isActive ? "text-primary" : "text-text")}>
                                                         {preset.name}
                                                     </Text>
                                                 </View>
@@ -286,19 +291,21 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
                                                 newRules[idx].active = !newRules[idx].active;
                                                 updateSettings({ nameReplacements: newRules });
                                             }}
-                                            className={`w-7 h-7 rounded-lg items-center justify-center border ${
-                                                rule.active ? "bg-primary border-primary" : "bg-zinc-800 border-zinc-700"
-                                            }`}
+                                            className={cn(
+                                                "w-7 h-7 rounded-lg items-center justify-center border",
+                                                rule.active ? "bg-primary border-primary" : "bg-zinc-800 border-zinc-700",
+                                            )}
                                         >
                                             <View
-                                                className={`w-2 h-2 rounded-full ${rule.active ? "bg-white" : "bg-zinc-500"}`}
+                                                className={cn("w-2 h-2 rounded-full", rule.active ? "bg-white" : "bg-zinc-500")}
                                             />
                                         </TouchableOpacity>
 
                                         <View
-                                            className={`flex-1 flex-row gap-2 bg-background border rounded-xl p-1 ${
-                                                rule.active ? "border-border" : "border-zinc-800 opacity-50"
-                                            }`}
+                                            className={cn(
+                                                "flex-1 flex-row gap-2 bg-background border rounded-xl p-1",
+                                                rule.active ? "border-border" : "border-zinc-800 opacity-50",
+                                            )}
                                         >
                                             <TextInput
                                                 className="flex-1 px-2 py-2 text-text text-sm"
@@ -386,15 +393,16 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
                                 return (
                                     <TouchableOpacity
                                         key={p.label}
-                                        className={`flex-1 items-center justify-center py-3 rounded-xl border ${
-                                            isActive ? "bg-primary border-primary" : "bg-card border-border"
-                                        }`}
+                                        className={cn(
+                                            "flex-1 items-center justify-center py-3 rounded-xl border",
+                                            isActive ? "bg-primary border-primary" : "bg-card border-border",
+                                        )}
                                         onPress={() => {
                                             updateSettings({ brightnessSensitivity: p.value });
                                             setSensitivityInput(String(p.value));
                                         }}
                                     >
-                                        <Text className={`font-semibold ${isActive ? "text-white" : "text-text"}`}>
+                                        <Text className={cn("font-semibold", isActive ? "text-white" : "text-text")}>
                                             {p.label}
                                         </Text>
                                     </TouchableOpacity>

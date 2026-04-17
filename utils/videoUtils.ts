@@ -1,5 +1,5 @@
 const EPISODE_PATTERN =
-    /(?:ep?|episode)\s*0*(\d+(?:\.\d+)?)|(?<![a-z])e0*(\d+(?:\.\d+)?)|(?<!s|season)[\s\-_]0*(\d{1,3})(?=[v\s\-_]|$)/i;
+    /(?:ep?|episode)\s*0*(\d+(?:\.\d+)?)|(?<![a-z])e0*(\d+(?:\.\d+)?)|(?<!s|season)(?<!\d[\s\-_])[\s\-_]0*(\d{1,3}(?:\.\d+)?)(?=[v\s\-_]|$)/i;
 
 /**
  * Extracts a prefix from a filename to group related videos.
