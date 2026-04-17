@@ -57,3 +57,5 @@ app-example
 # macOS/Windows
 .DS_Store
 Thumbs.db
+*.bak
+*.log
