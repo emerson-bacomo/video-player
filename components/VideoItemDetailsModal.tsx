@@ -103,10 +103,10 @@ export const VideoItemDetailsModal: React.FC<VideoInfoModalProps> = ({ visible, 
                     >
                         <Play size={16} color="white" fill="white" />
                         <Text className="text-white font-bold tracking-wide">
-                            {video.lastPlayedMs && video.lastPlayedMs !== -1
-                                ? `Resume ${Math.floor(video.lastPlayedMs / 60000)}:${Math.floor((video.lastPlayedMs / 1000) % 60)
+                            {video.lastPlayedSec && video.lastPlayedSec !== -1
+                                ? `Resume ${Math.floor(video.lastPlayedSec / 60)}:${Math.floor(video.lastPlayedSec % 60)
                                       .toString()
-                                      .padStart(2, "0")}`
+                                      .padStart(2, "00")}`
                                 : "Play Video"}
                         </Text>
                     </TouchableOpacity>

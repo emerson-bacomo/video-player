@@ -1,11 +1,12 @@
 import { useTheme } from "@/context/ThemeContext";
 import { renderHighlight } from "@/utils/textUtils";
-import { extractEpisode } from "@/utils/videoUtils";
+import { extractEpisode, extractSeason } from "@/utils/videoUtils";
 import { router } from "expo-router";
 import { Film } from "lucide-react-native";
 import React from "react";
 import { Image, Text, TouchableOpacity, View } from "react-native";
 import { Skeleton } from "./Skeleton";
+import { VideoBadges } from "./VideoBadges";
 
 interface VideoItemProps {
     item: any;
@@ -33,17 +34,15 @@ export const VideoItem = React.memo(({ item, setSelectedVideoId, searchQuery, no
         );
     }
 
-    const episodeNum = extractEpisode(item.displayName);
-
     const totalTimeStr = `${Math.floor(item.duration / 60)}:${Math.floor(item.duration % 60)
         .toString()
         .padStart(2, "0")}`;
     let timeDisplay = totalTimeStr;
-    const hasPlayed = item.lastPlayedMs && item.lastPlayedMs !== -1;
+    const hasPlayed = item.lastPlayedSec !== undefined && item.lastPlayedSec > 0;
     let progressPercent = 0;
 
     if (hasPlayed) {
-        const playedSecs = item.lastPlayedMs / 1000;
+        const playedSecs = item.lastPlayedSec;
         progressPercent = Math.min(100, Math.max(0, (playedSecs / item.duration) * 100));
         const playedStr = `${Math.floor(playedSecs / 60)}:${Math.floor(playedSecs % 60)
             .toString()
@@ -63,12 +62,7 @@ export const VideoItem = React.memo(({ item, setSelectedVideoId, searchQuery, no
                     }
                     router.push({
                         pathname: "/player",
-                        params: {
-                            uri: item.uri,
-                            title: item.displayName,
-                            videoId: item.id,
-                            resumeMs: item.lastPlayedMs !== -1 ? item.lastPlayedMs : 0,
-                        },
+                        params: { videoId: item.id },
                     });
                 }}
                 onLongPress={() => setSelectedVideoId(item.id)}
@@ -81,16 +75,9 @@ export const VideoItem = React.memo(({ item, setSelectedVideoId, searchQuery, no
                     </View>
                 )}
 
-                <View className="absolute top-2 left-0 right-0 px-2 flex-row gap-1.5 items-center">
-                    {episodeNum !== -1 && (
-                        <View
-                            pointerEvents="none"
-                            className="bg-black/60 h-[18px] px-2 rounded-full justify-center items-center backdrop-blur-md border border-white/20"
-                        >
-                            <Text className="text-white text-[9px] font-bold uppercase tracking-wider">EP {episodeNum}</Text>
-                        </View>
-                    )}
-                    {item.lastPlayedMs === -1 && (
+                <View className="absolute top-2 left-0 right-0 px-2 flex-row items-center">
+                    <VideoBadges title={item.displayName} />
+                    {item.lastPlayedSec === -1 && (
                         <View
                             pointerEvents="none"
                             className="ml-auto bg-red-600/80 h-[18px] px-2 rounded-full justify-center items-center backdrop-blur-md border border-white/15"

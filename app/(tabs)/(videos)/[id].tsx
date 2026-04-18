@@ -19,7 +19,7 @@ import { FlatList, RefreshControl, Text, TouchableOpacity, View } from "react-na
 const AlbumVideosScreen = () => {
     const { id, title } = useLocalSearchParams<{ id: string; title: string }>();
     const {
-        videos,
+        currentAlbumVideos,
         loadingTask,
         fetchVideosInAlbum,
         videoSort,
@@ -42,7 +42,7 @@ const AlbumVideosScreen = () => {
     const deferredPrefixes = useDeferredValue(selectedPrefixes);
 
     const [selectedVideoId, setSelectedVideoId] = React.useState<string | null>(null);
-    const selectedVideo = React.useMemo(() => videos.find((v) => v.id === selectedVideoId), [videos, selectedVideoId]);
+    const selectedVideo = React.useMemo(() => currentAlbumVideos.find((v) => v.id === selectedVideoId), [currentAlbumVideos, selectedVideoId]);
     const [showAlbumInfo, setShowAlbumInfo] = React.useState(false);
 
     // Clear focus natively when routing backward so FFMPEG falls back to global priorities
@@ -56,17 +56,17 @@ const AlbumVideosScreen = () => {
         return {
             id,
             title: title || currentAlbum?.displayName || currentAlbum?.title || "",
-            assetCount: currentAlbum?.assetCount || videos.length,
+            assetCount: currentAlbum?.assetCount || currentAlbumVideos.length,
             thumbnail: currentAlbum?.thumbnail,
             lastModified: currentAlbum?.lastModified || 0,
         };
-    }, [id, title, currentAlbum, videos.length]);
+    }, [id, title, currentAlbum, currentAlbumVideos.length]);
 
     // 1. Pre-calculate metadata (prefix, rawPrefix, episode) to avoid expensive regex during sorting/filtering
     // 1. Efficient metadata caching — Reactive to thumbnail updates but optimized via Ref Map
     const metadataCacheRef = useRef(new Map<string, { prefix: string; rawPrefix: string; episode: number }>());
     const videosWithMetadata = useMemo(() => {
-        return videos.map((v) => {
+        return currentAlbumVideos.map((v) => {
             const cached = metadataCacheRef.current.get(v.id);
             if (cached) {
                 return { ...v, prefix: cached.prefix, rawPrefix: cached.rawPrefix, episode: cached.episode };
@@ -77,7 +77,7 @@ const AlbumVideosScreen = () => {
             metadataCacheRef.current.set(v.id, { prefix, rawPrefix, episode });
             return { ...v, prefix, rawPrefix, episode };
         });
-    }, [videos]);
+    }, [currentAlbumVideos]);
 
     // Prefix Calculation (Filtering Logic continues using global state)
 
@@ -106,36 +106,12 @@ const AlbumVideosScreen = () => {
     const processedVideos = useMemo(() => {
         let result = [...videosWithMetadata];
 
-        // 1. Filter - Use deferred value to prevent blocking the UI thread during menu taps
+        // Filter - Use deferred value to prevent blocking the UI thread during menu taps
         if (deferredPrefixes.length > 0) {
             result = result.filter((v) => deferredPrefixes.includes(v.rawPrefix));
         }
-
-        // 2. Sort
-        const { by, order } = deferredVideoSort;
-        result.sort((a, b) => {
-            let comparison = 0;
-            if (by === "episode") {
-                // Group by prefix first
-                const prefixComp = a.prefix.localeCompare(b.prefix);
-                if (prefixComp !== 0) {
-                    comparison = prefixComp;
-                } else {
-                    // Same prefix, sort by episode numeric (already extracted!)
-                    comparison = a.episode - b.episode;
-                }
-            } else if (by === "name") {
-                comparison = a.displayName.localeCompare(b.displayName);
-            } else if (by === "date") {
-                comparison = (a.modificationTime || a.creationTime || 0) - (b.modificationTime || b.creationTime || 0);
-            } else if (by === "duration") {
-                comparison = (a.duration || 0) - (b.duration || 0);
-            }
-            return order === "asc" ? comparison : -comparison;
-        });
-
         return result;
-    }, [videosWithMetadata, deferredPrefixes, deferredVideoSort]);
+    }, [videosWithMetadata, deferredPrefixes]);
 
     const skeletonData = React.useMemo(
         () => Array.from({ length: 10 }).map((_, i) => ({ id: `skel-${i}`, isPlaceholder: true })),
@@ -167,12 +143,7 @@ const AlbumVideosScreen = () => {
         setSelectedVideoId(null);
         router.push({
             pathname: "/player",
-            params: {
-                uri: item.uri,
-                title: item.displayName,
-                videoId: item.id,
-                resumeMs: item.lastPlayedMs !== -1 ? item.lastPlayedMs : 0,
-            },
+            params: { videoId: item.id },
         });
     };
 

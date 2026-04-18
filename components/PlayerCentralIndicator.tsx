@@ -97,11 +97,11 @@ export const PlayerCentralIndicator: React.FC<PlayerCentralIndicatorProps> = ({ 
             case "seek":
                 if (panSeekTime == null) return null;
                 const isForward = panSeekTime >= panStartTime;
-                const diff = Math.abs(Math.round((panSeekTime - panStartTime) / 1000));
+                const diff = Math.abs(Math.round(panSeekTime - panStartTime));
                 return (
                     <View className="items-center">
                         <Text style={{ fontSize: FONT_SIZE_SEEK }} className="text-white font-bold mb-2">
-                            {new Date(panSeekTime).toISOString().substr(11, 8)}
+                            {new Date(panSeekTime * 1000).toISOString().substr(11, 8)}
                         </Text>
                         <View className="flex-row items-center gap-2">
                             {isForward ? <ChevronsRight color="white" size={24} /> : <ChevronsLeft color="white" size={24} />}

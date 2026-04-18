@@ -1,5 +1,6 @@
 const EPISODE_PATTERN =
     /(?:ep?|episode)\s*0*(\d+(?:\.\d+)?)|(?<![a-z])e0*(\d+(?:\.\d+)?)|(?<!s|season)(?<!\d[\s\-_])[\s\-_]0*(\d{1,3}(?:\.\d+)?)(?=[v\s\-_]|$)/i;
+const SEASON_PATTERN = /(?:s|season)[\s_\-]*0*(\d+)/i;
 
 /**
  * Extracts a prefix from a filename to group related videos.
@@ -43,4 +44,15 @@ export const extractEpisode = (filename: string): number => {
     const epMatch = filename.match(EPISODE_PATTERN);
     const episodeStr = epMatch ? epMatch[1] || epMatch[2] || epMatch[3] : null;
     return episodeStr ? parseFloat(episodeStr) : -1;
+};
+
+/**
+ * Extracts a numeric season number.
+ * Returns -1 if no season pattern is found.
+ */
+export const extractSeason = (filename: string): number => {
+    if (!filename) return -1;
+    const sMatch = filename.match(SEASON_PATTERN);
+    const seasonStr = sMatch ? sMatch[1] : null;
+    return seasonStr ? parseInt(seasonStr, 10) : -1;
 };

@@ -6,9 +6,9 @@ import { ThemedCard, ThemedSafeAreaView } from "@/components/Themed";
 import { useTheme } from "@/context/ThemeContext";
 import { useMedia } from "@/hooks/useMedia";
 import { Orientation, useSettings } from "@/hooks/useSettings";
+import { cn } from "@/lib/utils";
 import { Directory } from "expo-file-system";
 import { router } from "expo-router";
-import { cn } from "@/lib/utils";
 import { StatusBar } from "expo-status-bar";
 import {
     ChevronDown,
@@ -27,9 +27,9 @@ import React, { useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 
 const SENSITIVITY_PRESETS = [
-    { label: "Low", value: 0.5 },
-    { label: "Medium", value: 0.3 },
-    { label: "High", value: 0.15 },
+    { label: "Low", value: 0.15 },
+    { label: "Medium", value: 0.5 },
+    { label: "High", value: 1 },
 ];
 
 interface SettingsScreenComponentProps {
@@ -42,10 +42,12 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
     const { switchPreset, activePresetId, presets } = useTheme();
     const [themeDropdownOpen, setThemeDropdownOpen] = useState(false);
     const [sensitivityInput, setSensitivityInput] = useState("");
+    const [seekAmountInput, setSeekAmountInput] = useState("");
 
     useEffect(() => {
         if (!settingsLoading) {
             setSensitivityInput(String(settings.brightnessSensitivity ?? 0.3));
+            setSeekAmountInput(String(settings.doubleTapSeekAmount ?? 10));
         }
     }, [settingsLoading]);
 
@@ -60,11 +62,21 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
     const commitSensitivity = (raw: string) => {
         const parsed = parseFloat(raw);
         if (!isNaN(parsed) && parsed > 0) {
-            const clamped = Math.max(0.05, Math.min(1, parsed));
-            updateSettings({ brightnessSensitivity: clamped });
-            setSensitivityInput(String(clamped));
+            const clampedUI = Math.max(0.05, Math.min(1, parsed));
+            updateSettings({ brightnessSensitivity: clampedUI });
+            setSensitivityInput(String(clampedUI));
         } else {
             setSensitivityInput(String(settings.brightnessSensitivity));
+        }
+    };
+
+    const commitSeekAmount = (raw: string) => {
+        const parsed = parseInt(raw, 10);
+        if (!isNaN(parsed) && parsed > 0) {
+            updateSettings({ doubleTapSeekAmount: parsed });
+            setSeekAmountInput(String(parsed));
+        } else {
+            setSeekAmountInput(String(settings.doubleTapSeekAmount));
         }
     };
 
@@ -233,7 +245,10 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
                                             >
                                                 <View className="flex-row items-center gap-3">
                                                     <View
-                                                        className={cn("w-2 h-2 rounded-full", isActive ? "bg-primary" : "bg-zinc-600")}
+                                                        className={cn(
+                                                            "w-2 h-2 rounded-full",
+                                                            isActive ? "bg-primary" : "bg-zinc-600",
+                                                        )}
                                                     />
                                                     <Text className={cn("font-medium", isActive ? "text-primary" : "text-text")}>
                                                         {preset.name}
@@ -366,14 +381,52 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
                         <View className="flex-row gap-2">
                             <OrientationOption label="Portrait" value="portrait" icon={Smartphone} />
                             <OrientationOption label="Landscape" value="landscape" icon={Monitor} />
-                            <OrientationOption label="System" value="auto" icon={Cpu} />
+                            <OrientationOption label="System" value="system" icon={Cpu} />
                         </View>
                         <Text className="text-zinc-500 text-xs mt-4">Override system orientation when starting a video.</Text>
                     </ThemedCard>
 
-                    <ThemedCard className="p-4">
+                    <ThemedCard className="p-4 mb-4">
+                        <Text className="text-text font-semibold mb-1">Double Tap Seek Amount</Text>
+                        <Text className="text-zinc-500 text-xs mb-4">Seconds to skip forwards or backwards.</Text>
+
+                        <TextInput
+                            className="bg-background border border-border rounded-xl px-4 py-3 text-text text-base mb-4"
+                            keyboardType="number-pad"
+                            value={seekAmountInput}
+                            onChangeText={setSeekAmountInput}
+                            onBlur={() => commitSeekAmount(seekAmountInput)}
+                            onSubmitEditing={() => commitSeekAmount(seekAmountInput)}
+                            returnKeyType="done"
+                            placeholderTextColor="#71717a"
+                            placeholder="e.g. 10"
+                        />
+
+                        <View className="flex-row gap-2">
+                            {[5, 10, 15, 30].map((val) => {
+                                const isActive = settings.doubleTapSeekAmount === val;
+                                return (
+                                    <TouchableOpacity
+                                        key={val}
+                                        className={cn(
+                                            "flex-1 items-center justify-center py-3 rounded-xl border",
+                                            isActive ? "bg-primary border-primary" : "bg-card border-border",
+                                        )}
+                                        onPress={() => {
+                                            updateSettings({ doubleTapSeekAmount: val });
+                                            setSeekAmountInput(String(val));
+                                        }}
+                                    >
+                                        <Text className={cn("font-semibold", isActive ? "text-white" : "text-text")}>{val}s</Text>
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </View>
+                    </ThemedCard>
+
+                    <ThemedCard className="p-4 mb-4">
                         <Text className="text-text font-semibold mb-1">Brightness Drag Sensitivity</Text>
-                        <Text className="text-zinc-500 text-xs mb-4">Lower value = more sensitive. Range: 0.05 – 1.0</Text>
+                        <Text className="text-zinc-500 text-xs mb-4">Higher value = more sensitive. Range: 0.05 – 1.0</Text>
 
                         <TextInput
                             className="bg-background border border-border rounded-xl px-4 py-3 text-text text-base mb-4"
@@ -412,6 +465,59 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
                         <Text className="text-zinc-500 text-xs mt-4">
                             High sensitivity requires a shorter swipe to reach max brightness.
                         </Text>
+                    </ThemedCard>
+
+                    <ThemedCard className="p-4 mt-4">
+                        <Text className="text-text font-semibold mb-2">Auto-play Next Video</Text>
+                        <Text className="text-secondary text-xs mb-4">
+                            Automatically play the next video in the album when the current one finishes.
+                        </Text>
+
+                        <View className="flex-row items-center justify-between mb-4">
+                            <Text className="text-text font-medium">Enable Auto-play</Text>
+                            <TouchableOpacity
+                                onPress={() => updateSettings({ autoPlayOnEnd: !settings.autoPlayOnEnd })}
+                                className={cn(
+                                    "w-12 h-6 rounded-full px-1 justify-center",
+                                    settings.autoPlayOnEnd ? "bg-primary" : "bg-zinc-800",
+                                )}
+                            >
+                                <View
+                                    className={cn(
+                                        "w-4 h-4 rounded-full bg-white transition-transform duration-200",
+                                        settings.autoPlayOnEnd ? "translate-x-6" : "translate-x-0",
+                                    )}
+                                />
+                            </TouchableOpacity>
+                        </View>
+
+                        <View
+                            className={cn("pl-5 flex-row items-center justify-between", !settings.autoPlayOnEnd && "opacity-50")}
+                        >
+                            <View className="flex-1 mr-4">
+                                <Text className="text-text font-medium">Similar Prefix Only</Text>
+                                <Text className="text-secondary text-[10px] mt-1">
+                                    Only auto-play if the next video shares the same series prefix (e.g. "[Series]").
+                                </Text>
+                            </View>
+                            <TouchableOpacity
+                                disabled={!settings.autoPlayOnEnd}
+                                onPress={() => updateSettings({ autoPlaySimilarPrefixOnly: !settings.autoPlaySimilarPrefixOnly })}
+                                className={cn(
+                                    "w-12 h-6 rounded-full px-1 justify-center",
+                                    settings.autoPlaySimilarPrefixOnly && settings.autoPlayOnEnd ? "bg-primary" : "bg-zinc-800",
+                                )}
+                            >
+                                <View
+                                    className={cn(
+                                        "w-4 h-4 rounded-full bg-white transition-transform duration-200",
+                                        settings.autoPlaySimilarPrefixOnly && settings.autoPlayOnEnd
+                                            ? "translate-x-6"
+                                            : "translate-x-0",
+                                    )}
+                                />
+                            </TouchableOpacity>
+                        </View>
                     </ThemedCard>
                 </View>
 

@@ -1,6 +1,6 @@
 import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library";
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { unstable_batchedUpdates } from "react-native";
 // @ts-ignore - local module
 import { LoadingTask } from "@/components/LoadingStatus";
@@ -14,15 +14,16 @@ import {
     getAllVideos,
     getLastSyncTimestamp,
     getSetting,
+    getVideoById,
     getVideosForAlbum,
     resetDatabase as resetDB,
     saveAlbums,
     saveSetting,
     saveVideos,
+    searchVideosByName,
     setLastSyncTimestamp,
     updateAlbumThumbnail,
     updateVideoThumbnail,
-    searchVideosByName,
 } from "../utils/db";
 import { useSettings } from "./useSettings";
 
@@ -46,7 +47,9 @@ export interface VideoMedia {
     modificationTime: number;
     thumbnail?: string;
     baseThumbnailUri: string; // Persistent URI, used to track if generation is done
-    lastPlayedMs: number;
+    lastPlayedSec: number;
+    prefix?: string;      // Extracted series/season prefix
+    episode?: number;     // Extracted numeric episode number
     isPlaceholder?: boolean;
 }
 
@@ -67,7 +70,7 @@ export interface Album {
 
 export interface MediaContextType {
     albums: Album[];
-    videos: VideoMedia[];
+    currentAlbumVideos: VideoMedia[];
     currentAlbum: Album | null;
     setCurrentAlbum: (album: Album | null) => void;
     manualRefresh: boolean;
@@ -85,6 +88,7 @@ export interface MediaContextType {
         taskId?: string,
     ) => Promise<void>;
     refreshPlaybackProgress: () => void;
+    updateVideoProgress: (videoId: string, sec: number) => void;
     generateThumbnail: (uri: string, id: string, albumId?: string) => Promise<string | undefined>;
     clearThumbnailCache: () => Promise<void>;
     regenerateAllThumbnails: () => Promise<void>;
@@ -93,6 +97,8 @@ export interface MediaContextType {
     resetEverything: () => Promise<void>;
     requestPermissionAndFetch: () => Promise<void>;
     loadDataFromDB: () => Promise<void>;
+    openAlbumByVideoId: (videoId: string) => Promise<void>;
+    allVideosCache: Record<string, VideoMedia[]>;
     folderFilters: Record<string, string[]>;
     setFolderFilter: (albumId: string, filters: string[]) => void;
     isLoadingVisible: boolean;
@@ -105,9 +111,10 @@ export interface MediaContextType {
 const MediaContext = createContext<MediaContextType | null>(null);
 
 export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
-    const [videos, setVideos] = useState<VideoMedia[]>([]);
+    const [currentAlbumVideos, setCurrentAlbumVideos] = useState<VideoMedia[]>([]);
     const [albums, setAlbums] = useState<Album[]>([]);
     const [currentAlbum, setCurrentAlbum] = useState<Album | null>(null);
+    const [allVideosCache, setAllVideosCache] = useState<Record<string, VideoMedia[]>>({});
     const [manualRefresh, setManualRefresh] = useState(false);
     const [loadingId, setLoadingId] = useState<string | null>(null);
     const [loadingTask, setLoadingTask] = useState<LoadingTask | null>({
@@ -119,7 +126,6 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
     const [isLoadingVisible, setIsLoadingVisible] = useState(false);
     const [isLoadingExpanded, setIsLoadingExpanded] = useState(false);
 
-    const [videoCache, setVideoCache] = useState<Record<string, VideoMedia[]>>({});
     const { settings, loading: settingsLoading } = useSettings();
 
     const cleanName = React.useCallback(
@@ -168,7 +174,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
     const albumSortRef = React.useRef(albumSort);
     const albumsRef = React.useRef<Record<string, Album>>({}); // Changed to dictionary for O(1) lookup
     const albumRankRef = React.useRef<Map<string, number>>(new Map()); // id → sort rank, O(1) lookup
-    const videoCacheRef = React.useRef(videoCache);
+    const allVideosCacheRef = React.useRef(allVideosCache);
     const videoDictRef = React.useRef<Map<string, VideoMedia>>(new Map()); // videoId → VideoMedia, O(1) lookup
     const lastSortKeyRef = React.useRef<string>(""); // Track last sort priority to avoid redundant sorts
 
@@ -188,13 +194,13 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
         albumRankRef.current = new Map(albums.map((a, i) => [a.id, i]));
     }, [albums]);
     useEffect(() => {
-        videoCacheRef.current = videoCache;
+        allVideosCacheRef.current = allVideosCache;
         const dict = new Map<string, VideoMedia>();
-        for (const vids of Object.values(videoCache)) {
+        for (const vids of Object.values(allVideosCache)) {
             for (const v of vids) dict.set(v.id, v);
         }
         videoDictRef.current = dict;
-    }, [videoCache]);
+    }, [allVideosCache]);
     useEffect(() => {
         return () => {
             if (drainTimerRef.current) {
@@ -215,6 +221,10 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
 
     useEffect(() => {
         saveSetting("videoSort", JSON.stringify(videoSort));
+        // Also re-sort current videos in state if they exist
+        if (currentAlbumVideos.length > 0) {
+            setCurrentAlbumVideos((prev) => [...prev].sort((a, b) => compareByVideoSort(a, b, videoSort)));
+        }
     }, [videoSort]);
 
     const [permissionResponse, requestPermission] = MediaLibrary.usePermissions();
@@ -235,7 +245,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
         const affectedAlbumId = albumId || currentAlbumRef.current?.id || "";
 
         // Find filename for the loading status label
-        const video = Object.values(videoCacheRef.current)
+        const video = Object.values(allVideosCacheRef.current)
             .flat()
             .find((v) => v.id === videoId);
 
@@ -264,26 +274,20 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
     };
 
     // Shared priority comparator — used by both spawnWorker (thumbnailQueue) and drainResults (resultQueue)
-    const compareByVideoSort = <
-        T extends { filename: string; displayName?: string; modificationTime?: number; creationTime?: number; duration?: number },
-    >(
-        a: T,
-        b: T,
-        vSort = videoSortRef.current,
-    ) => {
+    const compareByVideoSort = (a: VideoMedia, b: VideoMedia, vSort = videoSortRef.current) => {
         let comp = 0;
-        const nameA = a.displayName || a.filename;
-        const nameB = b.displayName || b.filename;
 
         if (vSort.by === "episode") {
-            const preA = extractPrefix(nameA);
-            const preB = extractPrefix(nameB);
-            comp =
-                preA.localeCompare(preB) !== 0
-                    ? preA.localeCompare(preB)
-                    : extractEpisode(nameA) - extractEpisode(nameB);
+            const prefixA = a.prefix ?? "";
+            const prefixB = b.prefix ?? "";
+            const prefixComp = prefixA.localeCompare(prefixB);
+            if (prefixComp !== 0) {
+                comp = prefixComp;
+            } else {
+                comp = (a.episode ?? 0) - (b.episode ?? 0);
+            }
         } else if (vSort.by === "name") {
-            comp = nameA.localeCompare(nameB);
+            comp = a.displayName.localeCompare(b.displayName);
         } else if (vSort.by === "date") {
             comp = (a.modificationTime || a.creationTime || 0) - (b.modificationTime || b.creationTime || 0);
         } else if (vSort.by === "duration") {
@@ -440,7 +444,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                 }
 
                 if (updatesByAlbum.size > 0) {
-                    setVideoCache((prev) => {
+                    setAllVideosCache((prev) => {
                         let changed = false;
                         const next = { ...prev };
 
@@ -469,7 +473,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                     if (currentAlbumId) {
                         const currentAlbumUpdates = updatesByAlbum.get(currentAlbumId);
                         if (currentAlbumUpdates) {
-                            setVideos((prev) => {
+                            setCurrentAlbumVideos((prev) => {
                                 let changed = false;
                                 const next = prev.map((v) => {
                                     const update = currentAlbumUpdates.get(v.id);
@@ -573,14 +577,14 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             );
             cancelThumbnailSession();
             setAlbums((prev) => prev.map((a) => ({ ...a, thumbnail: undefined })));
-            setVideos((prev) =>
+            setCurrentAlbumVideos((prev) =>
                 prev.map((v) => ({
                     ...v,
                     thumbnail: undefined,
                     baseThumbnailUri: "",
                 })),
             );
-            setVideoCache((prev) => {
+            setAllVideosCache((prev) => {
                 const next: Record<string, VideoMedia[]> = {};
                 for (const k in prev) {
                     next[k] = prev[k].map((v) => ({
@@ -685,8 +689,8 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             await clearThumbnailCache();
             resetDB();
             setAlbums([]);
-            setVideos([]);
-            setVideoCache({});
+            setCurrentAlbumVideos([]);
+            setAllVideosCache({});
             setCurrentAlbum(null);
             await performSmartSync(true, true);
             console.log("[Media] Full database and cache reset complete.");
@@ -719,15 +723,20 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                 for (const album of cachedAlbums) {
                     const cachedVideos = getVideosForAlbum(album.id);
                     if (cachedVideos.length > 0) {
-                        fullVideoCache[album.id] = cachedVideos.map((v: any) => ({
-                            ...v,
-                            displayName: cleanName(v.filename),
-                            thumbnail: v.thumbnail || undefined,
-                            baseThumbnailUri: getThumbnailUri(v.id),
-                        }));
+                        fullVideoCache[album.id] = cachedVideos.map((v: any) => {
+                            const displayName = cleanName(v.filename);
+                            return {
+                                ...v,
+                                displayName,
+                                thumbnail: v.thumbnail || undefined,
+                                baseThumbnailUri: getThumbnailUri(v.id),
+                                prefix: extractPrefix(displayName),
+                                episode: extractEpisode(displayName),
+                            };
+                        });
                     }
                 }
-                setVideoCache(fullVideoCache);
+                setAllVideosCache(fullVideoCache);
 
                 // Sync the active "videos" state and "currentAlbum" if we are inside a folder
                 const activeAlbumId = currentAlbumRef.current?.id;
@@ -736,7 +745,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                     if (cleanActiveAlbum) setCurrentAlbum(cleanActiveAlbum);
 
                     if (fullVideoCache[activeAlbumId]) {
-                        setVideos(fullVideoCache[activeAlbumId]);
+                        setCurrentAlbumVideos(fullVideoCache[activeAlbumId]);
                     }
                 }
             }
@@ -802,10 +811,10 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             const fetchedAlbums = await MediaLibrary.getAlbumsAsync();
             const playbackData = getAllPlaybackData();
             const playbackMap = new Map<string, number>();
-            playbackData.forEach((p) => playbackMap.set(p.video_id, p.last_played_ms));
+            playbackData.forEach((p) => playbackMap.set(p.video_id, p.last_played_sec));
 
             const newAlbums: Album[] = [];
-            const newVideoCache: Record<string, VideoMedia[]> = {};
+            const newAllVideosCache: Record<string, VideoMedia[]> = {};
             const allMissingToQueue: { id: string; uri: string; albumId: string; filename: string }[] = [];
 
             // Deep scan all albums and videos
@@ -826,10 +835,11 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                     const rawVideos: VideoMedia[] = await Promise.all(
                         albumAssets.map(async (asset) => {
                             const vThumb = await getThumbnailCached(asset.id);
+                            const displayName = cleanName(asset.filename);
                             const video: VideoMedia = {
                                 id: asset.id,
                                 filename: asset.filename,
-                                displayName: cleanName(asset.filename),
+                                displayName,
                                 uri: asset.uri,
                                 duration: asset.duration,
                                 width: asset.width,
@@ -838,7 +848,9 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                                 modificationTime: asset.modificationTime,
                                 thumbnail: vThumb,
                                 baseThumbnailUri: vThumb,
-                                lastPlayedMs: playbackMap.get(asset.id) ?? -1,
+                                lastPlayedSec: playbackMap.get(asset.id) ?? -1,
+                                prefix: extractPrefix(displayName),
+                                episode: extractEpisode(displayName),
                             };
 
                             // If we don't have a thumbnail revealed yet, queue it — spawnWorker will decide to generate or just push to reveal
@@ -868,7 +880,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                         hasNew,
                     };
                     newAlbums.push(albumObj);
-                    newVideoCache[a.id] = rawVideos;
+                    newAllVideosCache[a.id] = rawVideos;
                 }),
             );
 
@@ -876,7 +888,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             const sortedAlbums = newAlbums.sort((a, b) => (b.lastModified || 0) - (a.lastModified || 0));
             saveAlbums(sortedAlbums);
             setAlbums(sortedAlbums);
-            setVideoCache(newVideoCache);
+            setAllVideosCache(newAllVideosCache);
 
             if (allMissingToQueue.length > 0) {
                 const newItems = allMissingToQueue.filter((m) => !thumbnailQueue.current.some((p) => p.id === m.id));
@@ -933,15 +945,16 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
 
             const playbackData = getAllPlaybackData();
             const playbackMap = new Map<string, number>();
-            playbackData.forEach((p) => playbackMap.set(p.video_id, p.last_played_ms));
+            playbackData.forEach((p) => playbackMap.set(p.video_id, p.last_played_sec));
 
             const videos: VideoMedia[] = await Promise.all(
                 albumAssets.map(async (asset) => {
                     const thumbnail = await getThumbnailCached(asset.id);
+                    const displayName = cleanName(asset.filename);
                     return {
                         id: asset.id,
                         filename: asset.filename,
-                        displayName: cleanName(asset.filename),
+                        displayName,
                         uri: asset.uri,
                         duration: asset.duration,
                         width: asset.width,
@@ -950,14 +963,18 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                         modificationTime: asset.modificationTime,
                         thumbnail,
                         baseThumbnailUri: thumbnail,
-                        lastPlayedMs: playbackMap.get(asset.id) ?? -1,
+                        lastPlayedSec: playbackMap.get(asset.id) ?? -1,
+                        prefix: extractPrefix(displayName),
+                        episode: extractEpisode(displayName),
                     };
                 }),
             );
 
-            saveVideos(album.id, videos);
-            setVideos(videos);
-            setVideoCache((prev) => ({ ...prev, [album.id]: videos }));
+            const sortedVideos = [...videos].sort((a, b) => compareByVideoSort(a, b, videoSort));
+
+            saveVideos(album.id, sortedVideos);
+            setCurrentAlbumVideos(sortedVideos);
+            setAllVideosCache((prev) => ({ ...prev, [album.id]: sortedVideos }));
             setCurrentAlbum(albumsRef.current[album.id] || (album as Album));
 
             // Update album thumbnail to match the first video in current sort
@@ -987,9 +1004,9 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             setLoadingId(null);
         } else {
             // Instant load from memory/cache
-            const cached = videoCache[album.id];
+            const cached = allVideosCache[album.id];
             if (cached) {
-                setVideos(cached);
+                setCurrentAlbumVideos(cached);
                 const fullAlbum = albumsRef.current[album.id] || (album as Album);
                 setCurrentAlbum(fullAlbum);
             } else {
@@ -1002,8 +1019,8 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                         thumbnail: v.thumbnail || undefined,
                         baseThumbnailUri: getThumbnailUri(v.id),
                     }));
-                    setVideos(mappedVideos);
-                    setVideoCache((prev) => ({ ...prev, [album.id]: mappedVideos }));
+                    setCurrentAlbumVideos(mappedVideos);
+                    setAllVideosCache((prev) => ({ ...prev, [album.id]: mappedVideos }));
                     const fullAlbum = albumsRef.current[album.id] || (album as Album);
                     setCurrentAlbum(fullAlbum);
                 } else {
@@ -1016,8 +1033,8 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                             thumbnail: v.thumbnail || undefined,
                             baseThumbnailUri: getThumbnailUri(v.id),
                         }));
-                        setVideos(mappedVideos);
-                        setVideoCache((prev) => ({ ...prev, [album.id]: mappedVideos }));
+                        setCurrentAlbumVideos(mappedVideos);
+                        setAllVideosCache((prev) => ({ ...prev, [album.id]: mappedVideos }));
                         setCurrentAlbum(album as Album);
                     }
                 }
@@ -1028,6 +1045,32 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             performSmartSync(false, false);
         }
     };
+
+    const openAlbumByVideoId = useCallback(
+        async (videoId: string) => {
+            // 1. Try cache first
+            let albumId = Object.keys(allVideosCache).find((aid) => allVideosCache[aid].some((v) => v.id === videoId));
+
+            // 2. Try DB if cache failed
+            if (!albumId) {
+                const dbVideo = getVideoById(videoId);
+                if (dbVideo) albumId = dbVideo.albumId;
+            }
+
+                if (albumId) {
+                    const targetAlbum = albums.find((a) => a.id === albumId);
+                    // If we have album in state, set it
+                    if (targetAlbum) {
+                        setCurrentAlbum(targetAlbum);
+                        await fetchVideosInAlbum(targetAlbum);
+                    } else {
+                        // Fallback: pass minimal object if not in state yet
+                        await fetchVideosInAlbum({ id: albumId });
+                    }
+                }
+        },
+        [allVideosCache, albums, fetchVideosInAlbum],
+    );
 
     const checkPermission = async () => {
         if (permissionResponse?.status !== "granted") {
@@ -1047,32 +1090,33 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
         }
     };
 
+
     const refreshPlaybackProgress = React.useCallback(() => {
         try {
             // @ts-ignore
             const { getAllPlaybackData } = require("../utils/db");
             const playbackData = getAllPlaybackData();
             const playbackMap = new Map<string, number>();
-            playbackData.forEach((p: any) => playbackMap.set(p.video_id, p.last_played_ms));
+            playbackData.forEach((p: any) => playbackMap.set(p.video_id, p.last_played_sec));
 
-            setVideos((prev) => {
+            setCurrentAlbumVideos((prev) => {
                 let changed = false;
                 const next = prev.map((v) => {
-                    const updatedMs = playbackMap.get(v.id) ?? -1;
-                    if (v.lastPlayedMs !== updatedMs) changed = true;
-                    return v.lastPlayedMs !== updatedMs ? { ...v, lastPlayedMs: updatedMs } : v;
+                    const updatedSec = playbackMap.get(v.id) ?? -1;
+                    if (v.lastPlayedSec !== updatedSec) changed = true;
+                    return v.lastPlayedSec !== updatedSec ? { ...v, lastPlayedSec: updatedSec } : v;
                 });
                 return changed ? next : prev;
             });
 
-            setVideoCache((prev) => {
+            setAllVideosCache((prev) => {
                 let cacheChanged = false;
                 const next: Record<string, VideoMedia[]> = {};
                 for (const key in prev) {
                     const mapped = prev[key].map((v) => {
-                        const updatedMs = playbackMap.get(v.id) ?? -1;
-                        if (v.lastPlayedMs !== updatedMs) cacheChanged = true;
-                        return v.lastPlayedMs !== updatedMs ? { ...v, lastPlayedMs: updatedMs } : v;
+                        const updatedSec = playbackMap.get(v.id) ?? -1;
+                        if (v.lastPlayedSec !== updatedSec) cacheChanged = true;
+                        return v.lastPlayedSec !== updatedSec ? { ...v, lastPlayedSec: updatedSec } : v;
                     });
                     next[key] = mapped;
                 }
@@ -1081,6 +1125,35 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
         } catch (e) {
             console.error("[Media] Failed to refresh playback progress:", e);
         }
+    }, []);
+
+    const updateVideoProgress = React.useCallback((videoId: string, sec: number) => {
+        setCurrentAlbumVideos((prev) => {
+            const index = prev.findIndex((v) => v.id === videoId);
+            if (index === -1) return prev;
+            if (prev[index].lastPlayedSec === sec) return prev;
+            const next = [...prev];
+            next[index] = { ...next[index], lastPlayedSec: sec };
+            return next;
+        });
+
+        setAllVideosCache((prev) => {
+            let found = false;
+            const next = { ...prev };
+            for (const key in next) {
+                const arr = next[key];
+                const vIndex = arr.findIndex((v) => v.id === videoId);
+                if (vIndex !== -1) {
+                    if (arr[vIndex].lastPlayedSec === sec) return prev;
+                    const nextArr = [...arr];
+                    nextArr[vIndex] = { ...nextArr[vIndex], lastPlayedSec: sec };
+                    next[key] = nextArr;
+                    found = true;
+                    break;
+                }
+            }
+            return found ? next : prev;
+        });
     }, []);
 
     useEffect(() => {
@@ -1142,7 +1215,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             setAlbums((prev) => {
                 let changed = false;
                 const next = prev.map((album) => {
-                    const albumVids = videoCache[album.id];
+                    const albumVids = allVideosCache[album.id];
                     if (!albumVids || albumVids.length === 0) return album;
 
                     const sorted = [...albumVids].sort((a, b) => compareByVideoSort(a, b, videoSort));
@@ -1158,17 +1231,20 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                 return changed ? next : prev;
             });
         }
-    }, [videoSort, videoCache]);
+    }, [videoSort, allVideosCache]);
 
     const searchMedia = (query: string) => {
         const dbResults = searchVideosByName(query);
         return dbResults.map((v: any) => {
             const rawName = v.displayName || v.filename;
+            const displayName = cleanName(rawName);
             return {
                 ...v,
-                displayName: cleanName(rawName),
+                displayName,
                 thumbnail: v.thumbnail || undefined,
                 baseThumbnailUri: getThumbnailUri(v.id),
+                prefix: extractPrefix(displayName),
+                episode: extractEpisode(displayName),
             };
         });
     };
@@ -1177,7 +1253,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
         <MediaContext.Provider
             value={{
                 albums,
-                videos,
+                currentAlbumVideos,
                 currentAlbum,
                 setCurrentAlbum,
                 manualRefresh,
@@ -1195,13 +1271,16 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                 regenerateAllThumbnails,
                 syncDatabaseWithStorage,
                 refreshPlaybackProgress,
+                updateVideoProgress,
                 resetToAlbums: () => {
-                    setVideos([]);
+                    setCurrentAlbumVideos([]);
                     setCurrentAlbum(null);
                 },
                 resetEverything,
                 requestPermissionAndFetch,
                 loadDataFromDB,
+                openAlbumByVideoId,
+                allVideosCache,
                 folderFilters,
                 setFolderFilter,
                 isLoadingVisible,

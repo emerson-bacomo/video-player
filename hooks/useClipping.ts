@@ -78,23 +78,23 @@ export const useClipping = (duration: number) => {
     ));
   }, []);
 
-  const getNextClipStart = useCallback((currentPositionMs: number) => {
+  const getNextClipStart = useCallback((currentPositionSec: number) => {
     const allPairs = [...fixedSegments, ...draftPairs].filter(p => p.end).sort((a, b) => a.start.time - b.start.time);
     if (allPairs.length === 0) return -1;
 
     for (const pair of allPairs) {
-      if (currentPositionMs < (pair.end?.time || 0)) {
-        if (currentPositionMs < pair.start.time) return pair.start.time;
+      if (currentPositionSec < (pair.end?.time || 0)) {
+        if (currentPositionSec < pair.start.time) return pair.start.time;
         return -1; // In segment
       }
     }
     return allPairs[0].start.time;
   }, [fixedSegments, draftPairs]);
 
-  const isInSegment = useCallback((currentPositionMs: number) => {
+  const isInSegment = useCallback((currentPositionSec: number) => {
     const allPairs = [...fixedSegments, ...draftPairs];
     return allPairs.some(p => 
-      p.end && currentPositionMs >= p.start.time && currentPositionMs < p.end.time
+      p.end && currentPositionSec >= p.start.time && currentPositionSec < p.end.time
     );
   }, [fixedSegments, draftPairs]);
 

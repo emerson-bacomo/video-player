@@ -3,9 +3,8 @@ import * as NavigationBar from "expo-navigation-bar";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { StatusBar } from "expo-status-bar";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Dimensions, Text, TouchableOpacity, View } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Text, TouchableOpacity, View } from "react-native";
 import Animated, { useAnimatedStyle, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Video, { OnLoadData, OnProgressData, VideoRef } from "react-native-video";
@@ -14,36 +13,31 @@ import { useTheme } from "@/context/ThemeContext";
 import { PlayerCentralIndicator, PlayerCentralIndicatorProps } from "../components/PlayerCentralIndicator";
 import { PlayerControls } from "../components/PlayerControls";
 import { PlayerCorner } from "../components/PlayerCorner";
+import { PlayerGestureDetector } from "../components/PlayerGestureDetector";
 import { PlayerHeader } from "../components/PlayerHeader";
 import { VideoItemDetailsModal } from "../components/VideoItemDetailsModal";
 import { useClipping } from "../hooks/useClipping";
 import { useMedia } from "../hooks/useMedia";
 import { useSettings } from "../hooks/useSettings";
+import { CorePlayer } from "../components/CorePlayer";
 import { savePlaybackData } from "../utils/db";
 
 export default function PlayerScreen() {
-    const { uri, title, videoId, resumeMs } = useLocalSearchParams<{
-        uri: string;
-        title: string;
-        videoId?: string;
-        resumeMs?: string;
-    }>();
+    const { videoId } = useLocalSearchParams<{ videoId?: string }>();
     const router = useRouter();
     const { settings } = useSettings();
-    const { videos } = useMedia();
-    const activeVideo = videos.find((v) => v.id === videoId);
+    const { currentAlbumVideos, refreshPlaybackProgress } = useMedia();
+    const activeVideo = currentAlbumVideos.find((v) => v.id === videoId);
     const [infoModalVisible, setInfoModalVisible] = useState(false);
 
     const [showControls, setShowControls] = useState(true);
-    const [currentTime, setCurrentTime] = useState(resumeMs ? Number(resumeMs) : 0);
+    const [currentTime, setCurrentTime] = useState(0);
     const [isClipMode, setIsClipMode] = useState(false);
     const [centralIndicator, setCentralIndicator] = useState<PlayerCentralIndicatorProps["indicator"]>(null);
     const [panSeekTime, setPanSeekTime] = useState<number | null>(null);
     const controlsTimeout = useRef<any>(null);
     const skipTimeout = useRef<any>(null);
     const panStartTime = useRef<number>(0);
-    const holdSeekTimer = useRef<any>(null);
-    const wasPlayingBeforePan = useRef(false);
     const isUnmounted = useRef(false);
     const insets = useSafeAreaInsets();
 
@@ -51,9 +45,12 @@ export default function PlayerScreen() {
     const [playbackRate, setPlaybackRate] = useState(1.0);
     const [duration, setDuration] = useState(0);
     const videoRef = useRef<VideoRef>(null);
+    /** Always-current refs so the unmount cleanup can read latest values */
+    const currentTimeRef = useRef(0);
+    const durationRef = useRef(0);
 
     const [showPieMenu, setShowPieMenu] = useState(false);
-    const initialSeekDone = useRef(false);
+    const lastSaveSecRef = useRef<number>(0);
     const [isInitialLoadDone, setIsInitialLoadDone] = useState(false);
     const isCornerModalOpen = useRef(false);
     const wasPlayingBeforePie = useRef(false);
@@ -89,9 +86,9 @@ export default function PlayerScreen() {
             if (!videoRef.current) return;
 
             if (op.type === "seek") {
-                const deltaMs = (op.value || 0) * 1000;
-                const newTime = Math.max(0, Math.min(duration, currentTime + deltaMs));
-                videoRef.current.seek(newTime / 1000);
+                const deltaSec = op.value || 0;
+                const newTime = Math.max(0, Math.min(duration, currentTime + deltaSec));
+                videoRef.current.seek(newTime);
                 setCurrentTime(newTime);
 
                 // Show feedback
@@ -141,7 +138,7 @@ export default function PlayerScreen() {
         return () => {
             isUnmounted.current = true;
         };
-    }, []);
+    }, [videoId]);
 
     useEffect(() => {
         const lockOrientation = async () => {
@@ -192,6 +189,14 @@ export default function PlayerScreen() {
             setPaused(false);
         }
     }, [permissionChecked, hasBrightnessPermission]);
+
+    // Reset player state when switching videos via playlist buttons
+    useEffect(() => {
+        setIsInitialLoadDone(false);
+        setCurrentTime(0);
+        currentTimeRef.current = 0;
+        lastSaveSecRef.current = 0;
+    }, [videoId]);
 
     const {
         markerPairs,
@@ -250,231 +255,97 @@ export default function PlayerScreen() {
         };
     }, []);
 
-    // Sync Progress & Clipping Preview & Auto Save
-    useEffect(() => {
-        let lastSaveMs = 0;
-        const interval = setInterval(() => {
-            if (isUnmounted.current || !videoRef.current || isDraggingMarker.current || paused) return;
-
-            const posMs = currentTime;
-
-            // Save playback progress every 5 seconds
-            if (videoId && !paused && Math.abs(posMs - lastSaveMs) > 5000) {
-                savePlaybackData(videoId, posMs);
-                lastSaveMs = posMs;
-            }
-
-            if (previewActive && !isInSegment(posMs)) {
-                const nextStart = getNextClipStart(posMs);
-                if (nextStart !== -1) {
-                    videoRef.current?.seek(nextStart / 1000);
-                }
-            }
-        }, 500);
-
-        return () => {
-            clearInterval(interval);
-            // Final save on unmount
-            if (videoId && !isUnmounted.current) {
-                try {
-                    if (currentTime > 0) {
-                        savePlaybackData(videoId, currentTime);
-                    }
-                } catch (e) {
-                    console.log("[Player] Error saving on unmount:", e);
-                }
-            }
-        };
-    }, [paused, previewActive, isInSegment, getNextClipStart, videoId, currentTime]);
-
     const { colors } = useTheme();
-
-    const singleTapGesture = useMemo(
-        () =>
-            Gesture.Tap()
-                .numberOfTaps(1)
-                .runOnJS(true)
-                .onEnd((event) => {
-                    const w = Dimensions.get("window").width;
-                    const h = Dimensions.get("window").height;
-                    const isCornerX = event.x < w * 0.2 || event.x > w * 0.8;
-                    const isCornerY = event.y < h * 0.2 || event.y > h * 0.8;
-                    if (isCornerX && isCornerY) return;
-
-                    if (showControls) {
-                        if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
-                        setShowControls(false);
-                    } else {
-                        resetControlsTimer();
-                    }
-                }),
-        [showControls, resetControlsTimer],
-    );
-
-    const doubleTapGesture = useMemo(
-        () =>
-            Gesture.Tap()
-                .numberOfTaps(2)
-                .runOnJS(true)
-                .onEnd((event) => {
-                    if (!videoRef.current) return;
-                    const screenWidth = Dimensions.get("window").width;
-                    const screenHeight = Dimensions.get("window").height;
-                    const isCornerX = event.x < screenWidth * 0.2 || event.x > screenWidth * 0.8;
-                    const isCornerY = event.y < screenHeight * 0.2 || event.y > screenHeight * 0.8;
-                    if (isCornerX && isCornerY) return;
-
-                    if (skipTimeout.current) clearTimeout(skipTimeout.current);
-
-                    if (event.x < screenWidth / 3) {
-                        const newTime = Math.max(0, currentTime - 10000);
-                        videoRef.current.seek(newTime / 1000);
-                        setCurrentTime(newTime);
-                        setCentralIndicator((prev) => {
-                            const base = prev?.icon === "skip-back" ? parseInt(prev.label || "0") : 0;
-                            return { icon: "skip-back", label: `${base + 10}s` };
-                        });
-                    } else if (event.x > (screenWidth * 2) / 3) {
-                        const newTime = Math.min(duration, currentTime + 10000);
-                        videoRef.current.seek(newTime / 1000);
-                        setCurrentTime(newTime);
-                        setCentralIndicator((prev) => {
-                            const base = prev?.icon === "skip-fwd" ? parseInt(prev.label || "0") : 0;
-                            return { icon: "skip-fwd", label: `${base + 10}s` };
-                        });
-                    } else {
-                        if (!paused) {
-                            setPaused(true);
-                            setCentralIndicator({ icon: "pause" });
-                        } else {
-                            setPaused(false);
-                            setCentralIndicator({ icon: "play" });
-                        }
-                    }
-
-                    skipTimeout.current = setTimeout(() => setCentralIndicator(null), 800);
-                }),
-        [duration, currentTime, paused],
-    );
-
-    const longPressGesture = useMemo(
-        () =>
-            Gesture.LongPress()
-                .runOnJS(true)
-                .onStart((event) => {
-                    if (!videoRef.current) return;
-                    wasPlayingBeforePan.current = !paused;
-                    const screenWidth = Dimensions.get("window").width;
-                    const direction = event.x > screenWidth / 2 ? 1 : -1;
-
-                    if (direction === 1) {
-                        setPlaybackRate(2.0);
-                        setCentralIndicator({ icon: "speed", label: "2X", direction: 1 });
-                    } else {
-                        setPaused(true);
-                        setCentralIndicator({ icon: "speed", label: "2X", direction: -1 });
-                        if (holdSeekTimer.current) clearInterval(holdSeekTimer.current);
-                        holdSeekTimer.current = setInterval(() => {
-                            // Manual position control for backward
-                            setCurrentTime((prev) => {
-                                const next = Math.max(0, prev - 64);
-                                videoRef.current?.seek(next / 1000);
-                                return next;
-                            });
-                        }, 32);
-                    }
-                })
-                .onEnd(() => {
-                    setPlaybackRate(1.0);
-                    if (wasPlayingBeforePan.current) {
-                        setPaused(false);
-                    }
-                    if (holdSeekTimer.current) clearInterval(holdSeekTimer.current);
-                    setCentralIndicator(null);
-                }),
-        [paused],
-    );
-
-    const panGesture = useMemo(
-        () =>
-            Gesture.Pan()
-                .activeOffsetX([-10, 10])
-                .runOnJS(true)
-                .onStart(() => {
-                    if (!videoRef.current) return;
-                    wasPlayingBeforePan.current = !paused;
-                    setPaused(true);
-                    panStartTime.current = currentTime;
-                    setCentralIndicator({ icon: "seek" });
-                })
-                .onUpdate((event) => {
-                    if (!videoRef.current) return;
-                    const deltaSec = event.translationX * 0.15;
-                    const newTimeMs = Math.max(0, Math.min(duration, panStartTime.current + deltaSec * 1000));
-
-                    if (Math.abs(newTimeMs - currentTime) > 100) {
-                        videoRef.current.seek(newTimeMs / 1000);
-                        setCurrentTime(newTimeMs);
-                    }
-
-                    setPanSeekTime(newTimeMs);
-                })
-                .onEnd(() => {
-                    if (wasPlayingBeforePan.current) {
-                        setPaused(false);
-                    }
-                    setPanSeekTime(null);
-                    setCentralIndicator(null);
-                }),
-        [duration, currentTime, paused],
-    );
-
-    const composedGesture = useMemo(() => {
-        const holdOrSlide = Gesture.Race(longPressGesture, panGesture);
-        const taps = Gesture.Exclusive(doubleTapGesture, singleTapGesture);
-        return Gesture.Simultaneous(taps, holdOrSlide);
-    }, [doubleTapGesture, singleTapGesture, longPressGesture, panGesture]);
 
     const animatedControlsStyle = useAnimatedStyle(() => ({
         opacity: withTiming(showControls ? 1 : 0, { duration: 150 }),
     }));
 
+    const currentIndex = currentAlbumVideos.findIndex((v) => v.id === videoId);
+    const hasNext = currentIndex !== -1 && currentIndex < currentAlbumVideos.length - 1;
+    const hasPrevious = currentIndex > 0;
+
     return (
         <View style={{ flex: 1, backgroundColor: colors.playerBackground }}>
             <StatusBar style="light" hidden={!showControls} translucent />
 
-            <GestureDetector gesture={composedGesture}>
+            <PlayerGestureDetector
+                showControls={showControls}
+                setShowControls={setShowControls}
+                currentTime={currentTime}
+                setCurrentTime={setCurrentTime}
+                duration={duration}
+                paused={paused}
+                setPaused={setPaused}
+                setPlaybackRate={setPlaybackRate}
+                setCentralIndicator={setCentralIndicator}
+                setPanSeekTime={setPanSeekTime}
+                resetControlsTimer={resetControlsTimer}
+                videoRef={videoRef}
+                controlsTimeout={controlsTimeout}
+                skipTimeout={skipTimeout}
+                panStartTime={panStartTime}
+            >
                 <View className="flex-1 w-full h-full" style={{ backgroundColor: colors.playerBackground }}>
-                    <Video
-                        ref={videoRef}
-                        source={{ uri: uri as string }}
-                        style={{ flex: 1, width: "100%", height: "100%" }}
-                        paused={paused}
-                        rate={playbackRate}
-                        resizeMode="contain"
-                        onLoad={(data: OnLoadData) => {
-                            setDuration(data.duration * 1000);
-                            const resumeTime = resumeMs ? Number(resumeMs) : 0;
-                            if (resumeMs && !initialSeekDone.current) {
-                                videoRef.current?.seek(resumeTime / 1000);
-                                setCurrentTime(resumeTime);
-                                initialSeekDone.current = true;
-                            }
-                            // Small delay to ensure the native seek has 'taken' before showing the slider
-                            setTimeout(() => setIsInitialLoadDone(true), 250);
-                        }}
-                        onProgress={(data: OnProgressData) => {
-                            if (isInitialLoadDone) {
-                                setCurrentTime(data.currentTime * 1000);
-                            }
-                        }}
-                        onEnd={() => {
-                            setPaused(true);
-                            setCurrentTime(duration);
-                        }}
-                        playInBackground={false}
-                        playWhenInactive={false}
-                    />
+                    {activeVideo ? (
+                        <CorePlayer
+                            ref={videoRef}
+                            video={activeVideo}
+                            paused={paused}
+                            rate={playbackRate}
+                            resizeMode="contain"
+                            onLoad={(data: OnLoadData) => {
+                                setDuration(data.duration);
+                                durationRef.current = data.duration;
+                                // Small delay to ensure the native seek has 'taken' before showing the slider
+                                setTimeout(() => setIsInitialLoadDone(true), 250);
+                            }}
+                            onProgress={(data: OnProgressData) => {
+                                if (isInitialLoadDone) {
+                                    const posSec = data.currentTime;
+                                    setCurrentTime(posSec);
+                                    currentTimeRef.current = posSec;
+
+                                    // ── Clipping Preview Logic ────────────────────
+                                    if (previewActive && !isInSegment(posSec)) {
+                                        const nextStart = getNextClipStart(posSec);
+                                        if (nextStart !== -1) {
+                                            videoRef.current?.seek(nextStart);
+                                        }
+                                    }
+                                }
+                            }}
+                            onEnd={() => {
+                                if (settings.autoPlayOnEnd && hasNext) {
+                                    const nextVideo = currentAlbumVideos[currentIndex + 1];
+                                    let shouldAutoPlay = true;
+
+                                    if (settings.autoPlaySimilarPrefixOnly) {
+                                        if (
+                                            !activeVideo?.prefix ||
+                                            activeVideo.prefix === "Unknown" ||
+                                            activeVideo.prefix !== nextVideo.prefix
+                                        ) {
+                                            shouldAutoPlay = false;
+                                        }
+                                    }
+
+                                    if (shouldAutoPlay) {
+                                        router.setParams({ videoId: nextVideo.id });
+                                        return;
+                                    }
+                                }
+
+                                setPaused(true);
+                                setCurrentTime(duration);
+                            }}
+                            style={{ flex: 1, width: "100%", height: "100%" }}
+                        />
+                    ) : (
+                        <View className="flex-1 justify-center items-center">
+                            <Text className="text-white/40">Loading video...</Text>
+                        </View>
+                    )}
 
                     {/* Player Corners & Custom Operations */}
                     {["top-left", "top-right", "bottom-left", "bottom-right"].map((position) => (
@@ -506,7 +377,7 @@ export default function PlayerScreen() {
                         panStartTime={panStartTime.current}
                     />
                 </View>
-            </GestureDetector>
+            </PlayerGestureDetector>
 
             <Animated.View
                 pointerEvents={showControls ? "box-none" : "none"}
@@ -521,7 +392,7 @@ export default function PlayerScreen() {
                 ]}
             >
                 <PlayerHeader
-                    title={title || "Video Player"}
+                    title={activeVideo?.displayName || "Video Player"}
                     orientation={orientation}
                     onToggleOrientation={toggleOrientation}
                     onSettings={() => {
@@ -545,20 +416,24 @@ export default function PlayerScreen() {
                         resetControlsTimer();
                     }}
                     onSeek={(value) => {
-                        videoRef.current?.seek(value / 1000);
+                        videoRef.current?.seek(value); // value is in seconds
                         setCurrentTime(value);
                         resetControlsTimer();
                     }}
                     onSkipNext={() => {
-                        const next = Math.min(duration, currentTime + 10000);
-                        videoRef.current?.seek(next / 1000);
-                        setCurrentTime(next);
+                        if (hasNext) {
+                            const nextVideo = currentAlbumVideos[currentIndex + 1];
+                            router.setParams({ videoId: nextVideo.id });
+                        }
                     }}
                     onSkipPrevious={() => {
-                        const prev = Math.max(0, currentTime - 10000);
-                        videoRef.current?.seek(prev / 1000);
-                        setCurrentTime(prev);
+                        if (hasPrevious) {
+                            const prevVideo = currentAlbumVideos[currentIndex - 1];
+                            router.setParams({ videoId: prevVideo.id });
+                        }
                     }}
+                    hasNext={hasNext}
+                    hasPrevious={hasPrevious}
                     currentTime={currentTime}
                     duration={duration}
                     // Clipping Props
@@ -573,7 +448,7 @@ export default function PlayerScreen() {
                     onSelectMarker={setActiveMarkerId}
                     onUpdateMarkerTime={(id, time) => {
                         updateMarkerTime(id, time);
-                        videoRef.current?.seek(time / 1000);
+                        videoRef.current?.seek(time); // time already in seconds
                         setCurrentTime(time);
                     }}
                     activeMarkerId={activeMarkerId}

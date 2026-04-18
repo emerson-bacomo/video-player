@@ -56,6 +56,8 @@ interface PlayerControlsProps {
     onDragStart?: () => void;
     onDragEnd?: () => void;
     isInitialLoadDone?: boolean;
+    hasNext: boolean;
+    hasPrevious: boolean;
 }
 
 export const PlayerControls: React.FC<PlayerControlsProps> = ({
@@ -81,6 +83,8 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
     onDragStart,
     onDragEnd,
     isInitialLoadDone,
+    hasNext,
+    hasPrevious,
 }) => {
     const { width: screenWidth, height: screenHeight } = useWindowDimensions();
     const isLandscape = screenWidth > screenHeight;
@@ -124,8 +128,8 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         setLocalIsPlaying(isPlaying);
     }, [isPlaying]);
 
-    const formatTime = (ms: number) => {
-        const totalSeconds = Math.floor(ms / 1000);
+    const formatTime = (sec: number) => {
+        const totalSeconds = Math.floor(sec);
         const minutes = Math.floor(totalSeconds / 60);
         const seconds = totalSeconds % 60;
         return `${minutes}:${seconds.toString().padStart(2, "0")}`;
@@ -289,7 +293,12 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
 
                 {/* Playback Controls (Play/Pause, Skip) */}
                 <View className={cn("flex-row items-center justify-center", isLandscape ? "gap-12" : "gap-14")}>
-                    <TouchableOpacity onPress={onSkipPrevious} activeOpacity={0.6}>
+                    <TouchableOpacity
+                        onPress={onSkipPrevious}
+                        activeOpacity={0.6}
+                        disabled={!hasPrevious}
+                        className={cn(!hasPrevious && "opacity-20")}
+                    >
                         <SkipBack size={isLandscape ? 24 : 28} color="white" fill="white" />
                     </TouchableOpacity>
 
@@ -308,7 +317,12 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                         )}
                     </TouchableOpacity>
 
-                    <TouchableOpacity onPress={onSkipNext} activeOpacity={0.6}>
+                    <TouchableOpacity
+                        onPress={onSkipNext}
+                        activeOpacity={0.6}
+                        disabled={!hasNext}
+                        className={cn(!hasNext && "opacity-20")}
+                    >
                         <SkipForward size={isLandscape ? 24 : 28} color="white" fill="white" />
                     </TouchableOpacity>
                 </View>

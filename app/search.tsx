@@ -27,12 +27,7 @@ export default function SearchPage() {
         setSelectedVideoId(null);
         router.push({
             pathname: "/player",
-            params: {
-                uri: item.uri,
-                title: item.displayName,
-                videoId: item.id,
-                resumeMs: item.lastPlayedMs !== -1 ? item.lastPlayedMs : 0,
-            },
+            params: { videoId: item.id },
         });
     };
 

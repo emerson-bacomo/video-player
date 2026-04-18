@@ -3,6 +3,7 @@ import * as ScreenOrientation from "expo-screen-orientation";
 import { ChevronLeft, Cpu, Monitor, Settings, Smartphone } from "lucide-react-native";
 import React from "react";
 import { Text, TouchableOpacity, View } from "react-native";
+import { VideoBadges } from "./VideoBadges";
 
 interface PlayerHeaderProps {
     title: string;
@@ -30,8 +31,13 @@ export const PlayerHeader: React.FC<PlayerHeaderProps> = ({ title, onBack, onSet
                     <ChevronLeft size={28} color="white" />
                 </TouchableOpacity>
 
-                <TouchableOpacity className="flex-1 px-1" onPress={onTitlePress} disabled={!onTitlePress}>
-                    <Text className="text-white text-base font-bold" numberOfLines={1}>
+                <TouchableOpacity className="flex-1 px-1 flex-row items-center gap-2" onPress={onTitlePress} disabled={!onTitlePress}>
+                    <VideoBadges 
+                        title={title} 
+                        badgeClassName="h-auto py-0.5 px-2" 
+                        textClassName="text-base" 
+                    />
+                    <Text className="text-white text-base font-bold flex-1" numberOfLines={1}>
                         {title}
                     </Text>
                 </TouchableOpacity>

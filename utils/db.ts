@@ -7,7 +7,7 @@ export const initDB = () => {
     CREATE TABLE IF NOT EXISTS playback_data (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       video_id TEXT UNIQUE,
-      last_played_ms INTEGER DEFAULT -1
+      last_played_sec REAL DEFAULT -1
     );
     CREATE TABLE IF NOT EXISTS albums (
       id TEXT PRIMARY KEY,
@@ -30,7 +30,7 @@ export const initDB = () => {
       creationTime INTEGER,
       modificationTime INTEGER,
       thumbnail TEXT,
-      lastPlayedMs INTEGER DEFAULT -1
+      lastPlayedSec REAL DEFAULT -1
     );
     CREATE TABLE IF NOT EXISTS sync_metadata (
       key TEXT PRIMARY KEY,
@@ -44,28 +44,49 @@ export const initDB = () => {
       is_system INTEGER DEFAULT 0
     );
   `);
-    try {
-        db.execSync("ALTER TABLE albums ADD COLUMN displayName TEXT");
-    } catch (e) {}
-    try {
-        db.execSync("ALTER TABLE videos ADD COLUMN displayName TEXT");
-    } catch (e) {}
+    // Column migrations (safe for fresh & existing installs)
+    try { db.execSync('ALTER TABLE albums ADD COLUMN displayName TEXT'); } catch {}
+    try { db.execSync('ALTER TABLE videos ADD COLUMN displayName TEXT'); } catch {}
+
+    // v2: ms → sec unit migration
+    const secMigrated = getSetting('db_v2_sec_units');
+    if (!secMigrated) {
+        // playback_data: add sec column, populate from ms column
+        try { db.execSync('ALTER TABLE playback_data ADD COLUMN last_played_sec REAL DEFAULT -1'); } catch {}
+        try {
+            db.execSync(`
+                UPDATE playback_data
+                SET last_played_sec = CASE WHEN last_played_ms > 0 THEN last_played_ms / 1000.0 ELSE -1 END
+                WHERE last_played_ms IS NOT NULL
+            `);
+        } catch {}
+        // videos table: add sec column, populate from ms column
+        try { db.execSync('ALTER TABLE videos ADD COLUMN lastPlayedSec REAL DEFAULT -1'); } catch {}
+        try {
+            db.execSync(`
+                UPDATE videos
+                SET lastPlayedSec = CASE WHEN lastPlayedMs > 0 THEN lastPlayedMs / 1000.0 ELSE -1 END
+                WHERE lastPlayedMs IS NOT NULL
+            `);
+        } catch {}
+        saveSetting('db_v2_sec_units', '1');
+    }
 };
 
-export const savePlaybackData = (videoId: string, lastPlayedMs: number) => {
-    const stmt = db.prepareSync("INSERT OR REPLACE INTO playback_data (video_id, last_played_ms) VALUES (?, ?)");
-    stmt.executeSync([videoId, lastPlayedMs]);
+export const savePlaybackData = (videoId: string, lastPlayedSec: number) => {
+    const stmt = db.prepareSync('INSERT OR REPLACE INTO playback_data (video_id, last_played_sec) VALUES (?, ?)');
+    stmt.executeSync([videoId, lastPlayedSec]);
 };
 
 export const getPlaybackData = (videoId: string): number => {
-    const result = db.getFirstSync<{ last_played_ms: number }>("SELECT last_played_ms FROM playback_data WHERE video_id = ?", [
+    const result = db.getFirstSync<{ last_played_sec: number }>('SELECT last_played_sec FROM playback_data WHERE video_id = ?', [
         videoId,
     ]);
-    return result ? result.last_played_ms : -1;
+    return result ? result.last_played_sec : -1;
 };
 
 export const getAllPlaybackData = () => {
-    return db.getAllSync<{ video_id: string; last_played_ms: number }>("SELECT * FROM playback_data");
+    return db.getAllSync<{ video_id: string; last_played_sec: number }>('SELECT video_id, last_played_sec FROM playback_data');
 };
 
 // --- Album Functions ---
@@ -105,13 +126,13 @@ export const saveVideos = (albumId: string | null, videos: any[]) => {
         db.execSync("DELETE FROM videos");
     }
     const stmt = db.prepareSync(`
-    INSERT INTO videos (id, albumId, filename, displayName, uri, duration, width, height, creationTime, modificationTime, thumbnail, lastPlayedMs)
+    INSERT INTO videos (id, albumId, filename, displayName, uri, duration, width, height, creationTime, modificationTime, thumbnail, lastPlayedSec)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
     videos.forEach((v) => {
         stmt.executeSync([
             v.id,
-            v.albumId || albumId || "",
+            v.albumId || albumId || '',
             v.filename,
             v.displayName,
             v.uri,
@@ -120,14 +141,18 @@ export const saveVideos = (albumId: string | null, videos: any[]) => {
             v.height,
             v.creationTime,
             v.modificationTime,
-            v.thumbnail || "",
-            v.lastPlayedMs || -1,
+            v.thumbnail || '',
+            v.lastPlayedSec ?? v.lastPlayedMs ?? -1, // fallback covers old field name
         ]);
     });
 };
 
 export const getAllVideos = () => {
     return db.getAllSync<any>("SELECT * FROM videos");
+};
+
+export const getVideoById = (id: string) => {
+    return db.getFirstSync<any>("SELECT * FROM videos WHERE id = ?", [id]);
 };
 
 export const getVideosForAlbum = (albumId: string) => {
