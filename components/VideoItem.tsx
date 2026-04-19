@@ -1,6 +1,5 @@
 import { useTheme } from "@/context/ThemeContext";
 import { renderHighlight } from "@/utils/textUtils";
-import { extractEpisode, extractSeason } from "@/utils/videoUtils";
 import { router } from "expo-router";
 import { Film } from "lucide-react-native";
 import React from "react";
@@ -80,7 +79,7 @@ export const VideoItem = React.memo(({ item, setSelectedVideoId, searchQuery, no
                     {item.lastPlayedSec === -1 && (
                         <View
                             pointerEvents="none"
-                            className="ml-auto bg-red-600/80 h-[18px] px-2 rounded-full justify-center items-center backdrop-blur-md border border-white/15"
+                            className="ml-auto bg-error/80 h-[18px] px-2 rounded-full justify-center items-center backdrop-blur-md border border-white/15"
                         >
                             <Text className="text-red-100 text-[9px] font-bold uppercase tracking-wider">NEW</Text>
                         </View>
@@ -89,7 +88,7 @@ export const VideoItem = React.memo(({ item, setSelectedVideoId, searchQuery, no
 
                 {hasPlayed && (
                     <View className="absolute bottom-0 left-0 right-0 h-[3px] bg-white/50 overflow-hidden backdrop-blur-sm">
-                        <View className="bg-red-600 h-full" style={{ width: `${progressPercent}%` }} />
+                        <View className="bg-error h-full" style={{ width: `${progressPercent}%` }} />
                     </View>
                 )}
             </TouchableOpacity>

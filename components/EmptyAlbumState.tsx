@@ -1,6 +1,7 @@
 import { Database } from "lucide-react-native";
 import React from "react";
 import { Text, View } from "react-native";
+import { Icon } from "./Icon";
 import { ThemedButton } from "./Themed";
 
 interface EmptyAlbumStateProps {
@@ -14,7 +15,7 @@ export const EmptyAlbumState = ({ loading, onScan }: EmptyAlbumStateProps) => {
     return (
         <View className="flex-1 justify-center items-center py-20 px-10">
             <View className="w-20 h-20 rounded-full items-center justify-center mb-6 border bg-card border-border">
-                <Database size={32} className="text-primary" />
+                <Icon icon={Database} size={32} className="text-primary" />
             </View>
             <Text className="text-lg font-bold mb-2 text-center text-text">No Media Found</Text>
             <Text className="text-center mb-8 leading-5 text-secondary">

@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { getSetting, saveSetting } from "../utils/db";
+import { getSettingDb, saveSettingDb } from "../utils/db";
 
 export interface LastPlayedVideo {
     id: string;
@@ -28,7 +28,7 @@ export const FloatingPlayerProvider: React.FC<{ children: React.ReactNode }> = (
     // Rehydrate from DB on startup
     useEffect(() => {
         try {
-            const raw = getSetting("floatingPlayerVideo");
+            const raw = getSettingDb("floatingPlayerVideo");
             if (raw) {
                 setLastPlayed(JSON.parse(raw));
                 setShowFloater(true);
@@ -38,7 +38,7 @@ export const FloatingPlayerProvider: React.FC<{ children: React.ReactNode }> = (
     const saveLastPlayed = useCallback((v: LastPlayedVideo) => {
         setLastPlayed(v);
         setShowFloater(true);
-        saveSetting("floatingPlayerVideo", JSON.stringify(v));
+        saveSettingDb("floatingPlayerVideo", JSON.stringify(v));
     }, []);
 
     const dismissFloater = useCallback(() => {

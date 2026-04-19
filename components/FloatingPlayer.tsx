@@ -53,8 +53,11 @@ export const FloatingPlayer: React.FC = () => {
     const { lastPlayed, showFloater, dismissFloater } = useFloatingPlayer();
     const { currentAlbumVideos, openAlbumByVideoId } = useMedia();
 
+    const lastAttemptedIdRef = useRef<string | null>(null);
+
     useEffect(() => {
-        if (lastPlayed?.id && currentAlbumVideos.length === 0) {
+        if (lastPlayed?.id && currentAlbumVideos.length === 0 && lastAttemptedIdRef.current !== lastPlayed.id) {
+            lastAttemptedIdRef.current = lastPlayed.id;
             openAlbumByVideoId(lastPlayed.id);
         }
     }, [lastPlayed?.id, currentAlbumVideos.length]);
@@ -104,8 +107,8 @@ export const FloatingPlayer: React.FC = () => {
     const [isActuallyOnPlayer, setIsActuallyOnPlayer] = useState(pathname.includes("player"));
 
     useEffect(() => {
-        const onPlayer = pathname.includes("player");
-        if (onPlayer) {
+        const onExcludedRoute = pathname.includes("player") || pathname.includes("test-gesture");
+        if (onExcludedRoute) {
             setIsActuallyOnPlayer(true);
         } else {
             // Delay setting to false when leaving player to wait for transition
@@ -230,6 +233,7 @@ export const FloatingPlayer: React.FC = () => {
                                     resizeMode="cover"
                                     onReadyForDisplay={() => setHasLoaded(true)}
                                     style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
+                                    isFloating={true}
                                 />
                             </Animated.View>
 

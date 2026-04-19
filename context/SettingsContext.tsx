@@ -24,10 +24,11 @@ export interface Settings {
     autoPlayOnEnd: boolean;
     autoPlaySimilarPrefixOnly: boolean;
     doubleTapSeekAmount: number;
+    panSeekSensitivity: number; // seconds per cm
 }
 
 const DEFAULT_SETTINGS: Settings = {
-    clipDestination: "/storage/emulated/0/DCIM/Clips",
+    clipDestination: "",
     defaultOrientation: "system",
     brightnessSensitivity: 1.0,
     nameReplacements: [],
@@ -41,6 +42,7 @@ const DEFAULT_SETTINGS: Settings = {
     autoPlayOnEnd: true,
     autoPlaySimilarPrefixOnly: true,
     doubleTapSeekAmount: 5,
+    panSeekSensitivity: 10.0,
 };
 
 interface SettingsContextType {

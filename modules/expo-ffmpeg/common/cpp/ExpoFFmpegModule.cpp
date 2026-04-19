@@ -4,16 +4,31 @@
 #include <vector>
 #include <random>
 #include <chrono>
+#include <sstream>
 
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/error.h>
 #include <libswscale/swscale.h>
 }
 
 #define LOG_TAG "ExpoFFmpeg"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+
+static std::string g_last_clip_error;
+
+static std::string ffmpegErrorToString(int errnum) {
+    char errbuf[AV_ERROR_MAX_STRING_SIZE];
+    av_strerror(errnum, errbuf, sizeof(errbuf));
+    return std::string(errbuf);
+}
+
+static void setLastClipError(const std::string &message) {
+    g_last_clip_error = message;
+    LOGE("%s", message.c_str());
+}
 
 extern "C"
 JNIEXPORT jintArray JNICALL
@@ -123,4 +138,130 @@ Java_expo_modules_ffmpeg_ExpoFFmpegModule_nativeGenerateThumbnail(
     env->ReleaseStringUTFChars(video_path, path);
 
     return result;
+}
+
+#include <vector>
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_expo_modules_ffmpeg_ExpoFFmpegModule_nativeClipVideo(
+    JNIEnv *env, jobject thiz,
+    jstring video_path, jstring out_path,
+    jdoubleArray segments) {
+
+    const char *in_filename = env->GetStringUTFChars(video_path, nullptr);
+    const char *out_filename = env->GetStringUTFChars(out_path, nullptr);
+    jdouble *seg = env->GetDoubleArrayElements(segments, nullptr);
+
+    double start_sec = seg[0];
+    double end_sec   = seg[1];
+
+    AVFormatContext *ifmt_ctx = nullptr;
+    AVFormatContext *ofmt_ctx = nullptr;
+    AVPacket *pkt = av_packet_alloc();
+    
+    int ret = 0;
+    std::vector<int> stream_mapping;
+    std::vector<int64_t> start_pts;
+
+    // ================= INPUT =================
+    if (avformat_open_input(&ifmt_ctx, in_filename, nullptr, nullptr) < 0)
+        goto cleanup;
+
+    if (avformat_find_stream_info(ifmt_ctx, nullptr) < 0)
+        goto cleanup;
+
+    // ================= OUTPUT =================
+    avformat_alloc_output_context2(&ofmt_ctx, nullptr, nullptr, out_filename);
+    if (!ofmt_ctx) goto cleanup;
+
+    stream_mapping.resize(ifmt_ctx->nb_streams, -1);
+    start_pts.resize(ifmt_ctx->nb_streams, AV_NOPTS_VALUE);
+
+    // Map both Audio and Video streams to the output file
+    for (int i = 0; i < ifmt_ctx->nb_streams; i++) {
+        AVStream *in_stream = ifmt_ctx->streams[i];
+        AVCodecParameters *in_codecpar = in_stream->codecpar;
+
+        if (in_codecpar->codec_type != AVMEDIA_TYPE_AUDIO &&
+            in_codecpar->codec_type != AVMEDIA_TYPE_VIDEO) {
+            continue; // Skip subtitles/data streams
+        }
+
+        AVStream *out_stream = avformat_new_stream(ofmt_ctx, nullptr);
+        if (!out_stream) goto cleanup;
+
+        // COPY the codec parameters (No decoding/encoding needed!)
+        if (avcodec_parameters_copy(out_stream->codecpar, in_codecpar) < 0)
+            goto cleanup;
+        
+        out_stream->codecpar->codec_tag = 0;
+        stream_mapping[i] = out_stream->index;
+    }
+
+    if (!(ofmt_ctx->oformat->flags & AVFMT_NOFILE)) {
+        if (avio_open(&ofmt_ctx->pb, out_filename, AVIO_FLAG_WRITE) < 0)
+            goto cleanup;
+    }
+
+    if (avformat_write_header(ofmt_ctx, nullptr) < 0)
+        goto cleanup;
+
+// ================= SEEK =================
+    // Seek to the closest keyframe before the start time
+    av_seek_frame(ifmt_ctx, -1, start_sec * AV_TIME_BASE, AVSEEK_FLAG_BACKWARD);
+
+    // ================= LOOP =================
+    while (av_read_frame(ifmt_ctx, pkt) >= 0) {
+        AVStream *in_stream = ifmt_ctx->streams[pkt->stream_index];
+        
+        // Skip unmapped streams
+        if (pkt->stream_index >= ifmt_ctx->nb_streams || stream_mapping[pkt->stream_index] < 0) {
+            av_packet_unref(pkt);
+            continue;
+        }
+
+        double pts_sec = pkt->pts * av_q2d(in_stream->time_base);
+        
+        // Stop processing if we exceed the end time
+        if (pts_sec > end_sec) {
+            av_packet_unref(pkt);
+            break; 
+        }
+
+        // Capture the very first PTS for this stream so we can zero-base the timestamps.
+        // Because we removed the skip logic, this will naturally be the Keyframe's PTS!
+        if (start_pts[pkt->stream_index] == AV_NOPTS_VALUE) {
+            start_pts[pkt->stream_index] = pkt->pts;
+        }
+
+        // 1. Shift the timestamp so the clip starts at zero
+        if (pkt->pts != AV_NOPTS_VALUE) pkt->pts -= start_pts[pkt->stream_index];
+        if (pkt->dts != AV_NOPTS_VALUE) pkt->dts -= start_pts[pkt->stream_index];
+
+        // 2. Rescale the timestamp to the new output stream's time base
+        AVStream *out_stream = ofmt_ctx->streams[stream_mapping[pkt->stream_index]];
+        av_packet_rescale_ts(pkt, in_stream->time_base, out_stream->time_base);
+        pkt->stream_index = stream_mapping[pkt->stream_index];
+
+        // Write the frame directly to the output container
+        av_interleaved_write_frame(ofmt_ctx, pkt);
+        av_packet_unref(pkt);
+    }
+
+    av_write_trailer(ofmt_ctx);
+
+cleanup:
+    if (pkt) av_packet_free(&pkt);
+
+    if (ifmt_ctx) avformat_close_input(&ifmt_ctx);
+    if (ofmt_ctx && !(ofmt_ctx->oformat->flags & AVFMT_NOFILE))
+        avio_closep(&ofmt_ctx->pb);
+    if (ofmt_ctx) avformat_free_context(ofmt_ctx);
+
+    env->ReleaseStringUTFChars(video_path, in_filename);
+    env->ReleaseStringUTFChars(out_path, out_filename);
+    env->ReleaseDoubleArrayElements(segments, seg, 0);
+
+    return true;
 }

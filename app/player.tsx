@@ -1,34 +1,36 @@
 import * as Brightness from "expo-brightness";
+import { Directory } from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
+import * as MediaLibrary from "expo-media-library";
 import * as NavigationBar from "expo-navigation-bar";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import * as ScreenOrientation from "expo-screen-orientation";
 import { StatusBar } from "expo-status-bar";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import Animated, { useAnimatedStyle, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Video, { OnLoadData, OnProgressData, VideoRef } from "react-native-video";
+import { OnLoadData, OnProgressData, VideoRef } from "react-native-video";
 
 import { useTheme } from "@/context/ThemeContext";
+import { CorePlayer } from "../components/CorePlayer";
 import { PlayerCentralIndicator, PlayerCentralIndicatorProps } from "../components/PlayerCentralIndicator";
 import { PlayerControls } from "../components/PlayerControls";
 import { PlayerCorner } from "../components/PlayerCorner";
 import { PlayerGestureDetector } from "../components/PlayerGestureDetector";
 import { PlayerHeader } from "../components/PlayerHeader";
-import { VideoItemDetailsModal } from "../components/VideoItemDetailsModal";
+import { SuccessBadge } from "../components/SuccessBadge";
 import { useClipping } from "../hooks/useClipping";
 import { useMedia } from "../hooks/useMedia";
 import { useSettings } from "../hooks/useSettings";
-import { CorePlayer } from "../components/CorePlayer";
-import { savePlaybackData } from "../utils/db";
+import ExpoFFmpeg from "../modules/expo-ffmpeg/src/index";
+import { normalizeClipDestination } from "../utils/clipDestination";
 
 export default function PlayerScreen() {
     const { videoId } = useLocalSearchParams<{ videoId?: string }>();
     const router = useRouter();
-    const { settings } = useSettings();
-    const { currentAlbumVideos, refreshPlaybackProgress } = useMedia();
+    const { settings, updateSettings } = useSettings();
+    const { currentAlbumVideos, setLoadingTask, fetchAlbums, updateVideoProgress } = useMedia();
     const activeVideo = currentAlbumVideos.find((v) => v.id === videoId);
-    const [infoModalVisible, setInfoModalVisible] = useState(false);
 
     const [showControls, setShowControls] = useState(true);
     const [currentTime, setCurrentTime] = useState(0);
@@ -54,6 +56,7 @@ export default function PlayerScreen() {
     const [isInitialLoadDone, setIsInitialLoadDone] = useState(false);
     const isCornerModalOpen = useRef(false);
     const wasPlayingBeforePie = useRef(false);
+    const [showSuccessBadge, setShowSuccessBadge] = useState(false);
 
     const handleCornerModalChange = useCallback((isOpen: boolean) => {
         isCornerModalOpen.current = isOpen;
@@ -112,14 +115,6 @@ export default function PlayerScreen() {
         brightnessTimeoutRef.current = setTimeout(() => setCentralIndicator(null), 800);
     }, []);
 
-    const [orientation, setOrientation] = useState<ScreenOrientation.OrientationLock>(
-        settings.defaultOrientation === "landscape"
-            ? ScreenOrientation.OrientationLock.LANDSCAPE
-            : settings.defaultOrientation === "portrait"
-              ? ScreenOrientation.OrientationLock.PORTRAIT
-              : ScreenOrientation.OrientationLock.DEFAULT,
-    );
-
     const [hasBrightnessPermission, setHasBrightnessPermission] = useState(false);
     const [permissionChecked, setPermissionChecked] = useState(false);
 
@@ -137,44 +132,12 @@ export default function PlayerScreen() {
         isUnmounted.current = false;
         return () => {
             isUnmounted.current = true;
-        };
-    }, [videoId]);
-
-    useEffect(() => {
-        const lockOrientation = async () => {
-            try {
-                if (orientation === ScreenOrientation.OrientationLock.LANDSCAPE) {
-                    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
-                } else if (orientation === ScreenOrientation.OrientationLock.PORTRAIT) {
-                    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT);
-                } else {
-                    await ScreenOrientation.unlockAsync();
-                }
-            } catch (e) {
-                console.warn("[Player] Failed to lock orientation:", e);
+            // Save on unmount or video change
+            if (videoId) {
+                updateVideoProgress(videoId, Math.floor(currentTimeRef.current));
             }
         };
-        lockOrientation();
-        return () => {
-            ScreenOrientation.unlockAsync().catch(() => {});
-        };
-    }, [orientation]);
-
-    const toggleOrientation = async () => {
-        try {
-            let nextLock;
-            if (orientation === ScreenOrientation.OrientationLock.DEFAULT) {
-                nextLock = ScreenOrientation.OrientationLock.LANDSCAPE;
-            } else if (orientation === ScreenOrientation.OrientationLock.LANDSCAPE) {
-                nextLock = ScreenOrientation.OrientationLock.PORTRAIT;
-            } else {
-                nextLock = ScreenOrientation.OrientationLock.DEFAULT;
-            }
-            setOrientation(nextLock);
-        } catch (e) {
-            console.warn("[Player] Failed to toggle orientation:", e);
-        }
-    };
+    }, [videoId, updateVideoProgress]);
 
     useEffect(() => {
         if (!showControls) {
@@ -190,13 +153,28 @@ export default function PlayerScreen() {
         }
     }, [permissionChecked, hasBrightnessPermission]);
 
-    // Reset player state when switching videos via playlist buttons
     useEffect(() => {
         setIsInitialLoadDone(false);
         setCurrentTime(0);
         currentTimeRef.current = 0;
         lastSaveSecRef.current = 0;
     }, [videoId]);
+
+    const currentIndex = currentAlbumVideos.findIndex((v) => v.id === videoId);
+    const hasNext = currentIndex !== -1 && currentIndex < currentAlbumVideos.length - 1;
+    const hasPrevious = currentIndex > 0;
+
+    const isDraggingMarker = useRef(false);
+
+    // Handle auto-hide controls
+    const resetControlsTimer = useCallback(() => {
+        if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
+        if (isCornerModalOpen.current) return; // Never show controls while a modal is open
+        setShowControls(true);
+        if (!paused && !isClipMode && !isDraggingMarker.current) {
+            controlsTimeout.current = setTimeout(() => setShowControls(false), 2000);
+        }
+    }, [paused, isClipMode]);
 
     const {
         markerPairs,
@@ -205,47 +183,279 @@ export default function PlayerScreen() {
         previewActive,
         setPreviewActive,
         addMarker,
-        saveSession,
+        generateDraftSegments,
         removeMarker,
+        clearMarkers,
         updateMarkerTime,
         getNextClipStart,
         isInSegment,
-    } = useClipping(duration);
+        maxSegmentEndTime,
+    } = useClipping(currentTime);
 
-    const isDraggingMarker = useRef(false);
+    const handleCorePlayerProgress = useCallback(
+        (data: OnProgressData) => {
+            if (isInitialLoadDone) {
+                const posSec = data.currentTime;
+                setCurrentTime(posSec);
+                currentTimeRef.current = posSec;
+
+                // ── Periodic Save Logic ─────────────────────
+                if (Math.abs(posSec - lastSaveSecRef.current) > 10) {
+                    updateVideoProgress(videoId as string, Math.floor(posSec));
+                    lastSaveSecRef.current = posSec;
+                }
+
+                // ── Clipping Preview Logic ────────────────────
+                if (previewActive) {
+                    // Stop preview once all segments have been played
+                    if (maxSegmentEndTime > 0 && posSec >= maxSegmentEndTime) {
+                        setPreviewActive(false);
+                        setPaused(true);
+                    } else if (!isInSegment(posSec)) {
+                        const nextStart = getNextClipStart(posSec);
+                        if (nextStart !== -1) {
+                            videoRef.current?.seek(nextStart);
+                        }
+                    }
+                }
+            }
+        },
+        [isInitialLoadDone, previewActive, isInSegment, getNextClipStart, videoId, updateVideoProgress],
+    );
+
+    const handleCorePlayerEnd = useCallback(() => {
+        if (settings.autoPlayOnEnd && hasNext) {
+            const nextVideo = currentAlbumVideos[currentIndex + 1];
+            let shouldAutoPlay = true;
+
+            if (settings.autoPlaySimilarPrefixOnly) {
+                if (!activeVideo?.prefix || activeVideo.prefix === "Unknown" || activeVideo.prefix !== nextVideo.prefix) {
+                    shouldAutoPlay = false;
+                }
+            }
+
+            if (shouldAutoPlay) {
+                router.setParams({ videoId: nextVideo.id });
+                return;
+            }
+        }
+
+        setPaused(true);
+        setCurrentTime(duration);
+    }, [
+        settings.autoPlayOnEnd,
+        settings.autoPlaySimilarPrefixOnly,
+        hasNext,
+        currentAlbumVideos,
+        currentIndex,
+        activeVideo,
+        duration,
+    ]);
+
+    const handleTogglePlay = useCallback(() => {
+        setPaused((p) => !p);
+        resetControlsTimer();
+    }, [resetControlsTimer]);
+
+    const handleSeek = useCallback(
+        (value: number) => {
+            videoRef.current?.seek(value);
+            setCurrentTime(value);
+            resetControlsTimer();
+        },
+        [resetControlsTimer],
+    );
+
+    const handleSkipNext = useCallback(() => {
+        if (hasNext) {
+            const nextVideo = currentAlbumVideos[currentIndex + 1];
+            router.setParams({ videoId: nextVideo.id });
+        }
+    }, [hasNext, currentAlbumVideos, currentIndex, router]);
+
+    const handleSkipPrevious = useCallback(() => {
+        if (hasPrevious) {
+            const prevVideo = currentAlbumVideos[currentIndex - 1];
+            router.setParams({ videoId: prevVideo.id });
+        }
+    }, [hasPrevious, currentAlbumVideos, currentIndex, router]);
+
+    const handleSaveClip = useCallback(async () => {
+        const result = generateDraftSegments();
+        if (!result.success || !result.pairs || result.pairs.length === 0 || !activeVideo) {
+            if (result.message) {
+                setLoadingTask({
+                    label: "Clip Error",
+                    detail: result.message,
+                    isImportant: true,
+                    dismissAfter: 4000,
+                });
+            }
+            return result;
+        }
+
+        // Show loading state while processing
+        setLoadingTask({
+            label: "Exporting Clip",
+            detail: "Processing video segments with stream copy...",
+            isImportant: true,
+            minimizeAfter: 3000,
+        });
+
+        // convert segments to seconds for the native module
+        const segments = result.pairs.map((p) => ({
+            start: p.start.time,
+            end: p.end ? p.end.time : duration,
+        }));
+
+        // Seek to the furthest end time of the clip immediately on save
+        const maxEndTime = Math.max(...segments.map((s) => s.end));
+        videoRef.current?.seek(maxEndTime);
+        setCurrentTime(maxEndTime);
+
+        try {
+            let destination = normalizeClipDestination(settings.clipDestination || "");
+            if (!destination) {
+                try {
+                    const directory = await Directory.pickDirectoryAsync();
+                    if (!directory?.uri) {
+                        setLoadingTask({
+                            label: "Config Error",
+                            detail: "Clip destination is not valid, change in settings.",
+                            isImportant: true,
+                            dismissAfter: 4000,
+                        });
+                        return result;
+                    }
+                    destination = normalizeClipDestination(directory.uri);
+                    if (!destination) {
+                        setLoadingTask({
+                            label: "Config Error",
+                            detail: "Clip destination is not valid, change in settings.",
+                            isImportant: true,
+                            dismissAfter: 4000,
+                        });
+                        return result;
+                    }
+                    await updateSettings({ clipDestination: destination });
+                } catch (pickerError) {
+                    console.warn("[Player] Failed to pick clip destination", pickerError);
+                    setLoadingTask({
+                        label: "Config Error",
+                        detail: "Clip destination is not valid, change in settings.",
+                        isImportant: true,
+                        dismissAfter: 4000,
+                    });
+                    return result;
+                }
+            }
+
+            // sanitize filename and construct output path using the user-configured clip destination
+            const cleanName = activeVideo.displayName.replace(/[^a-zA-Z0-9_-]/g, "_");
+            const timeSegments = segments.map((s) => `${Math.floor(s.start)}-${Math.floor(s.end)}`).join("_");
+            const destDir = destination.replace(/\/+$/, ""); // strip trailing slash
+
+            const destInfo = await FileSystem.getInfoAsync(`file://${destDir}`);
+            if (!destInfo.exists || !destInfo.isDirectory) {
+                console.error("[Player] Invalid clip destination directory", {
+                    clipDestination: settings.clipDestination,
+                    resolvedDestination: destination,
+                });
+                setLoadingTask({
+                    label: "File Error",
+                    detail: "Clip destination is not valid, change in settings.",
+                    isImportant: true,
+                    dismissAfter: 4000,
+                });
+                return result;
+            }
+
+            const outPathStr = `${destDir}/${cleanName}_${timeSegments}.mp4`;
+
+            // execute native clipping process
+            const success = await ExpoFFmpeg.clipVideo(activeVideo.uri, outPathStr, segments);
+
+            if (success) {
+                // Force Android Media Store to index the new file immediately
+                try {
+                    await MediaLibrary.createAssetAsync(`file://${outPathStr}`);
+                    // Trigger a refresh of the library state to pick up the new file
+                    fetchAlbums();
+                } catch (idxError) {
+                    console.warn("[Player] Failed to register clip with MediaLibrary", idxError);
+                }
+
+                setLoadingTask({
+                    label: "Export Success",
+                    detail: `Saved to ${outPathStr}`,
+                    isImportant: true,
+                    dismissAfter: 5000,
+                    onDismiss: () => {
+                        console.log("[Player] Success task dismissed, showing badge...");
+                        setShowSuccessBadge(true);
+                    },
+                });
+                clearMarkers();
+            } else {
+                const nativeError = await ExpoFFmpeg.getLastClipError();
+                console.error("[Player] clipVideo returned false", {
+                    inputUri: activeVideo.uri,
+                    outputPath: outPathStr,
+                    segments,
+                    nativeError,
+                });
+                setLoadingTask({
+                    label: "Export Failed",
+                    detail: nativeError ? `FFmpeg error: ${nativeError}` : "Clipping failed.",
+                    isImportant: true,
+                    dismissAfter: 6000,
+                });
+            }
+        } catch (e: any) {
+            console.error("Clipping error:", e);
+            setLoadingTask({
+                label: "Critical Error",
+                detail: "An unexpected error occurred during export.",
+                isImportant: true,
+                dismissAfter: 5000,
+            });
+        }
+
+        return result;
+    }, [generateDraftSegments, activeVideo, duration, settings.clipDestination, updateSettings]);
 
     // Initial jump for preview
     useEffect(() => {
         if (previewActive && duration > 0) {
-            const firstSegment = markerPairs.filter((p) => p.end).sort((a, b) => a.start.time - b.start.time)[0];
+            const firstSegment = markerPairs
+                .filter((p) => p.id !== "pair-realtime")
+                .sort((a, b) => a.start.time - b.start.time)[0];
             if (firstSegment) {
-                videoRef.current?.seek(firstSegment.start.time / 1000);
+                videoRef.current?.seek(firstSegment.start.time);
                 if (paused) setPaused(false);
             }
         }
     }, [previewActive, duration]);
 
-    // Handle auto-hide controls
-    const resetControlsTimer = useCallback(() => {
-        if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
-        if (isCornerModalOpen.current || infoModalVisible) return; // Never show controls while a modal is open
-        setShowControls(true);
-        if (!paused && !isClipMode && !isDraggingMarker.current) {
-            controlsTimeout.current = setTimeout(() => setShowControls(false), 2000);
-        }
-    }, [paused, isClipMode, infoModalVisible]);
-
+    // Auto-pause when entering clip mode and ensure controls stay visible
     useEffect(() => {
-        if (infoModalVisible) {
-            if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
-            setShowControls(false);
+        if (isClipMode) {
+            setPaused(true);
+            setShowControls(true);
+            if (controlsTimeout.current) {
+                clearTimeout(controlsTimeout.current);
+                controlsTimeout.current = null;
+            }
         }
-    }, [infoModalVisible]);
+    }, [isClipMode]);
 
     useEffect(() => {
         if (!paused && showControls && !isClipMode && !previewActive && !isDraggingMarker.current) {
             if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
             controlsTimeout.current = setTimeout(() => setShowControls(false), 2000);
+        } else if (paused && showControls) {
+            // Clear timer if paused to keep controls visible
+            if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
         }
     }, [paused, showControls, isClipMode, previewActive]);
 
@@ -256,14 +466,11 @@ export default function PlayerScreen() {
     }, []);
 
     const { colors } = useTheme();
+    const [headerLayout, setHeaderLayout] = useState<{ y: number; height: number } | null>(null);
 
     const animatedControlsStyle = useAnimatedStyle(() => ({
         opacity: withTiming(showControls ? 1 : 0, { duration: 150 }),
     }));
-
-    const currentIndex = currentAlbumVideos.findIndex((v) => v.id === videoId);
-    const hasNext = currentIndex !== -1 && currentIndex < currentAlbumVideos.length - 1;
-    const hasPrevious = currentIndex > 0;
 
     return (
         <View style={{ flex: 1, backgroundColor: colors.playerBackground }}>
@@ -273,6 +480,7 @@ export default function PlayerScreen() {
                 showControls={showControls}
                 setShowControls={setShowControls}
                 currentTime={currentTime}
+                currentTimeRef={currentTimeRef}
                 setCurrentTime={setCurrentTime}
                 duration={duration}
                 paused={paused}
@@ -300,45 +508,8 @@ export default function PlayerScreen() {
                                 // Small delay to ensure the native seek has 'taken' before showing the slider
                                 setTimeout(() => setIsInitialLoadDone(true), 250);
                             }}
-                            onProgress={(data: OnProgressData) => {
-                                if (isInitialLoadDone) {
-                                    const posSec = data.currentTime;
-                                    setCurrentTime(posSec);
-                                    currentTimeRef.current = posSec;
-
-                                    // ── Clipping Preview Logic ────────────────────
-                                    if (previewActive && !isInSegment(posSec)) {
-                                        const nextStart = getNextClipStart(posSec);
-                                        if (nextStart !== -1) {
-                                            videoRef.current?.seek(nextStart);
-                                        }
-                                    }
-                                }
-                            }}
-                            onEnd={() => {
-                                if (settings.autoPlayOnEnd && hasNext) {
-                                    const nextVideo = currentAlbumVideos[currentIndex + 1];
-                                    let shouldAutoPlay = true;
-
-                                    if (settings.autoPlaySimilarPrefixOnly) {
-                                        if (
-                                            !activeVideo?.prefix ||
-                                            activeVideo.prefix === "Unknown" ||
-                                            activeVideo.prefix !== nextVideo.prefix
-                                        ) {
-                                            shouldAutoPlay = false;
-                                        }
-                                    }
-
-                                    if (shouldAutoPlay) {
-                                        router.setParams({ videoId: nextVideo.id });
-                                        return;
-                                    }
-                                }
-
-                                setPaused(true);
-                                setCurrentTime(duration);
-                            }}
+                            onProgress={handleCorePlayerProgress}
+                            onEnd={handleCorePlayerEnd}
                             style={{ flex: 1, width: "100%", height: "100%" }}
                         />
                     ) : (
@@ -359,7 +530,7 @@ export default function PlayerScreen() {
                             onExecuteOperation={handleExecuteOperation}
                             onModalChange={handleCornerModalChange}
                             onSingleTap={() => {
-                                if (isCornerModalOpen.current || infoModalVisible) return;
+                                if (isCornerModalOpen.current) return;
                                 if (showControls) {
                                     if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
                                     setShowControls(false);
@@ -370,12 +541,6 @@ export default function PlayerScreen() {
                             onBrightnessChange={handleBrightnessChange}
                         />
                     ))}
-
-                    <PlayerCentralIndicator
-                        indicator={centralIndicator}
-                        panSeekTime={panSeekTime}
-                        panStartTime={panStartTime.current}
-                    />
                 </View>
             </PlayerGestureDetector>
 
@@ -385,53 +550,18 @@ export default function PlayerScreen() {
                     {
                         position: "absolute",
                         inset: 0,
-                        paddingLeft: insets.left,
-                        paddingRight: insets.right,
                     },
                     animatedControlsStyle,
                 ]}
             >
-                <PlayerHeader
-                    title={activeVideo?.displayName || "Video Player"}
-                    orientation={orientation}
-                    onToggleOrientation={toggleOrientation}
-                    onSettings={() => {
-                        ScreenOrientation.unlockAsync();
-                        router.push("/player-settings");
-                    }}
-                    onBack={() => {
-                        ScreenOrientation.unlockAsync();
-                        router.back();
-                    }}
-                    onTitlePress={() => {
-                        if (activeVideo) setInfoModalVisible(true);
-                    }}
-                />
+                <PlayerHeader video={activeVideo || undefined} onLayout={(e) => setHeaderLayout(e.nativeEvent.layout)} />
 
                 <PlayerControls
                     isPlaying={!paused}
-                    orientation={orientation}
-                    onTogglePlay={() => {
-                        setPaused(!paused);
-                        resetControlsTimer();
-                    }}
-                    onSeek={(value) => {
-                        videoRef.current?.seek(value); // value is in seconds
-                        setCurrentTime(value);
-                        resetControlsTimer();
-                    }}
-                    onSkipNext={() => {
-                        if (hasNext) {
-                            const nextVideo = currentAlbumVideos[currentIndex + 1];
-                            router.setParams({ videoId: nextVideo.id });
-                        }
-                    }}
-                    onSkipPrevious={() => {
-                        if (hasPrevious) {
-                            const prevVideo = currentAlbumVideos[currentIndex - 1];
-                            router.setParams({ videoId: prevVideo.id });
-                        }
-                    }}
+                    onTogglePlay={handleTogglePlay}
+                    onSeek={handleSeek}
+                    onSkipNext={handleSkipNext}
+                    onSkipPrevious={handleSkipPrevious}
                     hasNext={hasNext}
                     hasPrevious={hasPrevious}
                     currentTime={currentTime}
@@ -443,7 +573,7 @@ export default function PlayerScreen() {
                     previewActive={previewActive}
                     onTogglePreview={() => setPreviewActive(!previewActive)}
                     onAddMarker={() => addMarker(currentTime)}
-                    onSaveSession={saveSession}
+                    onSaveClip={handleSaveClip}
                     onRemoveMarker={removeMarker}
                     onSelectMarker={setActiveMarkerId}
                     onUpdateMarkerTime={(id, time) => {
@@ -461,8 +591,27 @@ export default function PlayerScreen() {
                         isDraggingMarker.current = false;
                         resetControlsTimer();
                     }}
+                    onDoublePressMarker={(markerTime) => {
+                        videoRef.current?.seek(markerTime);
+                        setCurrentTime(markerTime);
+                    }}
                 />
             </Animated.View>
+
+            <PlayerCentralIndicator
+                indicator={centralIndicator}
+                panSeekTime={panSeekTime}
+                panStartTime={panStartTime.current}
+                showControls={showControls}
+                headerLayout={headerLayout}
+            />
+
+            <SuccessBadge 
+                visible={showSuccessBadge && !showControls} 
+                onVisible={setShowSuccessBadge}
+                duration={1000}
+                style={{ top: insets.top + 15 }}
+            />
 
             {!hasBrightnessPermission && permissionChecked && (
                 <View className="absolute z-[100] inset-0 flex-1 bg-black/95 justify-center items-center p-6">
@@ -487,15 +636,6 @@ export default function PlayerScreen() {
                         <Text className="text-zinc-300 font-semibold text-center text-base">Go Back</Text>
                     </TouchableOpacity>
                 </View>
-            )}
-
-            {activeVideo && (
-                <VideoItemDetailsModal
-                    visible={infoModalVisible}
-                    video={activeVideo}
-                    onClose={() => setInfoModalVisible(false)}
-                    onPlay={() => setInfoModalVisible(false)}
-                />
             )}
         </View>
     );

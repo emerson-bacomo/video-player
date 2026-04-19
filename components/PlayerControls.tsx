@@ -27,6 +27,7 @@ import {
     View,
     useWindowDimensions,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { MarkerPair } from "../hooks/useClipping";
 import { useSettings } from "../hooks/useSettings";
@@ -49,12 +50,13 @@ interface PlayerControlsProps {
     onTogglePreview: () => void;
     onAddMarker: () => void;
     onRemoveMarker: (id: string) => void;
-    onSaveSession: () => { success: boolean; message?: string };
+    onSaveClip: () => Promise<{ success: boolean; message?: string; pairs?: any[] }>;
     onSelectMarker: (id: string) => void;
     onUpdateMarkerTime: (id: string, time: number) => void;
     activeMarkerId: string | null;
     onDragStart?: () => void;
     onDragEnd?: () => void;
+    onDoublePressMarker?: (markerTime: number) => void;
     isInitialLoadDone?: boolean;
     hasNext: boolean;
     hasPrevious: boolean;
@@ -68,7 +70,6 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
     onSkipPrevious,
     currentTime,
     duration,
-    orientation,
     isClipMode,
     onToggleClipMode,
     markerPairs,
@@ -76,12 +77,13 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
     onTogglePreview,
     onAddMarker,
     onRemoveMarker,
-    onSaveSession,
+    onSaveClip,
     onSelectMarker,
     onUpdateMarkerTime,
     activeMarkerId,
     onDragStart,
     onDragEnd,
+    onDoublePressMarker,
     isInitialLoadDone,
     hasNext,
     hasPrevious,
@@ -147,11 +149,14 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         }
     };
 
+    const insets = useSafeAreaInsets();
+
     return (
         <View className="absolute bottom-0 left-0 right-0 z-50">
             <LinearGradient
                 colors={["transparent", "rgba(0,0,0,0.8)"]}
-                className={cn("px-4 pt-4", isLandscape ? "pb-10" : "pb-14")}
+                className={cn("pt-4", isLandscape ? "pb-10" : "pb-14")}
+                style={{ paddingLeft: Math.max(insets.left, 16), paddingRight: Math.max(insets.right, 16) }}
             >
                 <View className={cn("flex-row justify-between items-center", isLandscape ? "mb-1" : "mb-4")}>
                     {/* Action Bar Container */}
@@ -190,10 +195,10 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                                 {/* Toggle Preview */}
                                 <TouchableOpacity
                                     onPress={onTogglePreview}
-                                    disabled={!markerPairs.some((p) => p.end)}
+                                    disabled={!markerPairs.some((p) => p.id !== "pair-realtime")}
                                     className={cn(
                                         "p-2.5 rounded-full",
-                                        !markerPairs.some((p) => p.end)
+                                        !markerPairs.some((p) => p.id !== "pair-realtime")
                                             ? "opacity-30"
                                             : previewActive
                                               ? "bg-white/20"
@@ -202,23 +207,34 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                                 >
                                     <Eye
                                         size={20}
-                                        color={markerPairs.some((p) => p.end) ? (previewActive ? "#3b82f6" : "white") : "white"}
+                                        color={
+                                            markerPairs.some((p) => p.id !== "pair-realtime")
+                                                ? previewActive
+                                                    ? "#3b82f6"
+                                                    : "white"
+                                                : "white"
+                                        }
                                     />
                                 </TouchableOpacity>
 
                                 {/* Save */}
                                 <TouchableOpacity
-                                    onPress={() => {
-                                        const res = onSaveSession();
+                                    onPress={async () => {
+                                        const res = await onSaveClip();
                                         if (!res.success && res.message) showToast(res.message);
                                     }}
-                                    disabled={!markerPairs.some((p) => p.end)}
+                                    disabled={!markerPairs.some((p) => p.id !== "pair-realtime")}
                                     className={cn(
                                         "p-2.5 rounded-full",
-                                        !markerPairs.some((p) => p.end) ? "opacity-30" : "active:bg-emerald-500/10",
+                                        !markerPairs.some((p) => p.id !== "pair-realtime")
+                                            ? "opacity-30"
+                                            : "active:bg-emerald-500/10",
                                     )}
                                 >
-                                    <Save size={20} color={markerPairs.some((p) => p.end) ? "#5cdab0ff" : "white"} />
+                                    <Save
+                                        size={20}
+                                        color={markerPairs.some((p) => p.id !== "pair-realtime") ? "#5cdab0ff" : "white"}
+                                    />
                                 </TouchableOpacity>
                             </View>
                         </Animated.View>
@@ -255,6 +271,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                             activeMarkerId={activeMarkerId}
                             onUpdateMarkerTime={onUpdateMarkerTime}
                             onSelectMarker={onSelectMarker}
+                            onDoublePressMarker={onDoublePressMarker}
                             onDragStart={onDragStart}
                             onDragEnd={onDragEnd}
                             previewActive={previewActive}

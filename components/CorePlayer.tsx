@@ -3,7 +3,7 @@ import { StyleProp, ViewStyle } from "react-native";
 import Video, { OnLoadData, OnProgressData, VideoRef } from "react-native-video";
 import { useFloatingPlayer } from "../context/FloatingPlayerContext";
 import { useMedia, VideoMedia } from "../hooks/useMedia";
-import { savePlaybackData } from "../utils/db";
+import { savePlaybackDataDb } from "../utils/db";
 
 export interface CorePlayerProps {
     video: VideoMedia;
@@ -16,6 +16,7 @@ export interface CorePlayerProps {
     onEnd?: () => void;
     onReadyForDisplay?: () => void;
     saveInterval?: number; // ms, default 5000
+    isFloating?: boolean;
 }
 
 export const CorePlayer = forwardRef<VideoRef, CorePlayerProps>((props, ref) => {
@@ -30,6 +31,7 @@ export const CorePlayer = forwardRef<VideoRef, CorePlayerProps>((props, ref) => 
         onEnd,
         onReadyForDisplay,
         saveInterval = 5000,
+        isFloating = false,
     } = props;
 
     const uri = video.uri;
@@ -52,14 +54,14 @@ export const CorePlayer = forwardRef<VideoRef, CorePlayerProps>((props, ref) => 
     useEffect(() => {
         return () => {
             if (uri) {
-                // Save to Mini Player state
-                if (id) {
+                // Save to Mini Player state ONLY if this is the main player unmounting
+                if (id && !isFloating) {
                     saveLastPlayed({ id });
                 }
 
                 // Final save to DB and global state
                 if (id && currentTimeRef.current > 0) {
-                    savePlaybackData(id, currentTimeRef.current);
+                    savePlaybackDataDb(id, currentTimeRef.current);
                     updateVideoProgress(id, currentTimeRef.current);
                 }
             }
@@ -85,7 +87,7 @@ export const CorePlayer = forwardRef<VideoRef, CorePlayerProps>((props, ref) => 
 
             // Periodic Sync to DB and global state
             if (id && !paused && Math.abs(pos - lastSaveSecRef.current) >= saveInterval / 1000) {
-                savePlaybackData(id, pos);
+                savePlaybackDataDb(id, pos);
                 updateVideoProgress(id, pos);
                 lastSaveSecRef.current = pos;
             }
@@ -111,6 +113,7 @@ export const CorePlayer = forwardRef<VideoRef, CorePlayerProps>((props, ref) => 
             onProgress={handleProgress}
             onEnd={onEnd}
             onReadyForDisplay={onReadyForDisplay}
+            progressUpdateInterval={60}
             playInBackground={false}
             playWhenInactive={false}
         />

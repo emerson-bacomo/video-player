@@ -21,7 +21,7 @@ export default function SearchPage() {
     const [results, setResults] = useState<VideoMedia[]>([]);
     const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
 
-    const selectedVideo = useMemo(() => results.find((v) => v.id === selectedVideoId), [results, selectedVideoId]);
+    const selectedVideo = useMemo(() => results.find((v) => v.id === selectedVideoId) || null, [results, selectedVideoId]);
 
     const handlePlayVideo = (item: any) => {
         setSelectedVideoId(null);
@@ -57,10 +57,7 @@ export default function SearchPage() {
 
             {/* Search Header */}
             <View className="flex-row items-center px-4 py-3 gap-3 border-b border-border shadow-sm">
-                <TouchableOpacity
-                    onPress={() => router.back()}
-                    className="w-10 h-10 items-center justify-center rounded-full"
-                >
+                <TouchableOpacity onPress={() => router.back()} className="w-10 h-10 items-center justify-center rounded-full">
                     <Icon icon={ChevronLeft} size={24} className="text-text" />
                 </TouchableOpacity>
 
@@ -119,12 +116,7 @@ export default function SearchPage() {
                 }
             />
 
-            <VideoItemDetailsModal
-                visible={!!selectedVideoId}
-                video={selectedVideo}
-                onClose={() => setSelectedVideoId(null)}
-                onPlay={handlePlayVideo}
-            />
+            <VideoItemDetailsModal visible={!!selectedVideoId} video={selectedVideo} onClose={() => setSelectedVideoId(null)} />
         </View>
     );
 }

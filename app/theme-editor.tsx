@@ -65,7 +65,7 @@ const ThemeEditor = () => {
 
     const handleAddSlot = () => {
         const name = `Preset ${presets.length + 1}`;
-        db.saveThemePreset(name, JSON.stringify(draftColors), 0, 0);
+        db.saveThemePresetDb(name, JSON.stringify(draftColors), 0, 0);
         refreshPresets();
         Alert.alert("Success", "New theme slot added.");
     };
@@ -81,7 +81,7 @@ const ThemeEditor = () => {
                 text: "Delete",
                 style: "destructive",
                 onPress: () => {
-                    db.deleteThemePreset(id);
+                    db.deleteThemePresetDb(id);
                     refreshPresets();
                 },
             },

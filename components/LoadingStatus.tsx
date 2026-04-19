@@ -7,10 +7,12 @@ import { useMedia } from "../hooks/useMedia";
 import { cn } from "../lib/utils";
 
 export interface LoadingTask {
-    id?: string;
     label: string;
     detail: string;
     isImportant: boolean;
+    dismissAfter?: number;
+    minimizeAfter?: number;
+    onDismiss?: () => void;
 }
 
 export interface LoadingStatusProps {
@@ -18,7 +20,7 @@ export interface LoadingStatusProps {
 }
 
 export const LoadingStatus: React.FC<LoadingStatusProps> = ({ task: manualTask = null }) => {
-    const { loadingTask, manualRefresh, isLoadingVisible, setIsLoadingVisible, isLoadingExpanded, setIsLoadingExpanded } = useMedia();
+    const { loadingTask, isLoadingVisible, setIsLoadingVisible, isLoadingExpanded, setIsLoadingExpanded } = useMedia();
     const screenWidth = Dimensions.get("window").width;
     const MENU_OFFSET = 40;
     const ARROW_HEIGHT = 10;
@@ -57,6 +59,7 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ task: manualTask =
             const timeout = setTimeout(() => {
                 setTaskToDisplay(null);
                 hasAutoShownRef.current = false;
+                setIsLoadingVisible(false);
             }, 250);
             return () => clearTimeout(timeout);
         }
@@ -103,7 +106,7 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ task: manualTask =
         };
     });
 
-    if (!taskToDisplay || manualRefresh) return null;
+    if (!taskToDisplay) return null;
 
     const activeTask = taskToDisplay;
 

@@ -12,6 +12,7 @@ export interface PlayerGestureDetectorProps {
     showControls: boolean;
     setShowControls: Dispatch<SetStateAction<boolean>>;
     currentTime: number;
+    currentTimeRef: RefObject<number>;
     setCurrentTime: Dispatch<SetStateAction<number>>;
     duration: number;
     paused: boolean;
@@ -39,6 +40,7 @@ export function PlayerGestureDetector({
     showControls,
     setShowControls,
     currentTime,
+    currentTimeRef,
     setCurrentTime,
     duration,
     paused,
@@ -55,15 +57,76 @@ export function PlayerGestureDetector({
     const { settings } = useSettings();
     const doubleTapSeekAmount = settings.doubleTapSeekAmount;
     const holdSeekTimer = useRef<any>(null);
-    const wasPlayingBeforePan = useRef(false);
+    const lastTapHandledAt = useRef<number>(0);
+    const accumulatedSeek = useRef<number>(0);
+    const currentSeekDir = useRef<"back" | "fwd" | null>(null);
+    const seekTargetRef = useRef<number>(0);
 
-    // ── Single tap: toggle controls (corner taps ignored) ───────────────────
+    const wasPlayingBeforePan = useRef(false);
+    const wasControlsShownBeforePan = useRef(false);
+    const isActualPan = useRef(false);
+    const isSpeedHolding = useRef(false);
+    const isPanValidated = useRef(false);
+
+    const handleSnowballTap = React.useCallback(
+        (side: "back" | "fwd") => {
+            const now = Date.now();
+            const isWithinSnowball = now - lastTapHandledAt.current < 1000;
+            const amount = doubleTapSeekAmount;
+
+            if (isWithinSnowball && currentSeekDir.current === side) {
+                accumulatedSeek.current += amount;
+            } else {
+                accumulatedSeek.current = amount;
+                currentSeekDir.current = side;
+                seekTargetRef.current = currentTimeRef.current || 0;
+            }
+
+            const nextTime =
+                side === "back"
+                    ? Math.max(0, seekTargetRef.current - amount)
+                    : Math.min(duration, seekTargetRef.current + amount);
+
+            seekTargetRef.current = nextTime;
+            videoRef.current?.seek(nextTime);
+            setCurrentTime(nextTime);
+            lastTapHandledAt.current = now;
+
+            setCentralIndicator({
+                icon: side === "back" ? "skip-back" : "skip-fwd",
+                label: `${accumulatedSeek.current}s`,
+            });
+
+            if (skipTimeout.current) clearTimeout(skipTimeout.current);
+            skipTimeout.current = setTimeout(() => {
+                setCentralIndicator(null);
+                accumulatedSeek.current = 0;
+                currentSeekDir.current = null;
+            }, 1000);
+        },
+        [doubleTapSeekAmount, duration, setCurrentTime, setCentralIndicator, videoRef, currentTimeRef],
+    );
+
+    // ── Single tap: toggle controls or accumulate seek ──────────────────────
     const singleTapGesture = useMemo(
         () =>
             Gesture.Tap()
                 .numberOfTaps(1)
+                .maxDistance(15)
                 .runOnJS(true)
                 .onEnd((event) => {
+                    const screenWidth = Dimensions.get("window").width;
+
+                    // 1. Check if we are in "Snowball Seek" mode (within 1s of last tap)
+                    const isWithinSnowball = Date.now() - lastTapHandledAt.current < 1000;
+                    const side = event.x < screenWidth / 3 ? "back" : event.x > (screenWidth * 2) / 3 ? "fwd" : null;
+
+                    if (isWithinSnowball && side && currentSeekDir.current === side) {
+                        handleSnowballTap(side);
+                        return;
+                    }
+
+                    // 2. Otherwise: Normal control toggle
                     const w = Dimensions.get("window").width;
                     const h = Dimensions.get("window").height;
                     const isCornerX = event.x < w * 0.2 || event.x > w * 0.8;
@@ -77,130 +140,159 @@ export function PlayerGestureDetector({
                         resetControlsTimer();
                     }
                 }),
-        [showControls, resetControlsTimer],
+        [showControls, resetControlsTimer, handleSnowballTap],
     );
 
-    // ── Double tap: seek ±10 s or play/pause ────────────────────────────────
+    // ── Double tap: start snowball seek or play/pause ───────────────────────
     const doubleTapGesture = useMemo(
         () =>
             Gesture.Tap()
                 .numberOfTaps(2)
                 .runOnJS(true)
                 .onEnd((event) => {
-                    if (!videoRef.current) return;
+                    if (!videoRef?.current) return;
                     const screenWidth = Dimensions.get("window").width;
                     const screenHeight = Dimensions.get("window").height;
                     const isCornerX = event.x < screenWidth * 0.2 || event.x > screenWidth * 0.8;
                     const isCornerY = event.y < screenHeight * 0.2 || event.y > screenHeight * 0.8;
                     if (isCornerX && isCornerY) return;
 
-                    if (skipTimeout.current) clearTimeout(skipTimeout.current);
-
                     if (event.x < screenWidth / 3) {
-                        const newTime = Math.max(0, currentTime - doubleTapSeekAmount);
-                        videoRef.current.seek(newTime);
-                        setCurrentTime(newTime);
-                        setCentralIndicator((prev) => {
-                            const base = prev?.icon === "skip-back" ? parseInt(prev.label || "0") : 0;
-                            return { icon: "skip-back", label: `${base + doubleTapSeekAmount}s` };
-                        });
+                        handleSnowballTap("back");
                     } else if (event.x > (screenWidth * 2) / 3) {
-                        const newTime = Math.min(duration, currentTime + doubleTapSeekAmount);
-                        videoRef.current.seek(newTime);
-                        setCurrentTime(newTime);
-                        setCentralIndicator((prev) => {
-                            const base = prev?.icon === "skip-fwd" ? parseInt(prev.label || "0") : 0;
-                            return { icon: "skip-fwd", label: `${base + doubleTapSeekAmount}s` };
-                        });
+                        handleSnowballTap("fwd");
                     } else {
+                        // Reset snowball on middle tap
+                        accumulatedSeek.current = 0;
+                        currentSeekDir.current = null;
+
                         if (!paused) {
                             setPaused(true);
                             setCentralIndicator({ icon: "pause" });
                         } else {
                             setPaused(false);
                             setCentralIndicator({ icon: "play" });
+                            if (showControls) {
+                                if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
+                                setShowControls(false);
+                            }
                         }
                     }
-
-                    skipTimeout.current = setTimeout(() => setCentralIndicator(null), 800);
                 }),
-        [duration, currentTime, paused, doubleTapSeekAmount],
+        [paused, showControls, setShowControls, handleSnowballTap],
     );
 
-    // ── Long press: 2× forward speed or frame-by-frame rewind ───────────────
+    // Long press: 2× forward speed
     const longPressGesture = useMemo(
         () =>
             Gesture.LongPress()
+                .minDuration(500)
+                .maxDistance(100000) // Virtually ignore distance once held
                 .runOnJS(true)
-                .onStart((event) => {
-                    if (!videoRef.current) return;
+                .onStart(() => {
+                    if (!videoRef?.current || isActualPan.current) return;
+                    isSpeedHolding.current = true;
                     wasPlayingBeforePan.current = !paused;
-                    const screenWidth = Dimensions.get("window").width;
-                    const direction = event.x > screenWidth / 2 ? 1 : -1;
-
-                    if (direction === 1) {
-                        setPlaybackRate(2.0);
-                        setCentralIndicator({ icon: "speed", label: "2X", direction: 1 });
-                    } else {
-                        setPaused(true);
-                        setCentralIndicator({ icon: "speed", label: "2X", direction: -1 });
-                        if (holdSeekTimer.current) clearInterval(holdSeekTimer.current);
-                        holdSeekTimer.current = setInterval(() => {
-                            // 2× rewind: step 0.064 s every 32 ms
-                            setCurrentTime((prev) => {
-                                const next = Math.max(0, prev - 0.064);
-                                videoRef.current?.seek(next);
-                                return next;
-                            });
-                        }, 32);
-                    }
+                    wasControlsShownBeforePan.current = showControls;
+                    setPlaybackRate(2.0);
+                    setPaused(false);
+                    setCentralIndicator({ icon: "speed", label: "2X", direction: 1 });
                 })
                 .onEnd(() => {
+                    isSpeedHolding.current = false;
                     setPlaybackRate(1.0);
-                    if (wasPlayingBeforePan.current) setPaused(false);
+                    if (!wasPlayingBeforePan.current) {
+                        setPaused(true);
+                    }
+                    if (wasControlsShownBeforePan.current) {
+                        resetControlsTimer();
+                    }
                     if (holdSeekTimer.current) clearInterval(holdSeekTimer.current);
                     setCentralIndicator(null);
                 }),
         [paused],
     );
 
-    // ── Pan: scrub timeline ─────────────────────────────────────────────────
     const panGesture = useMemo(
         () =>
             Gesture.Pan()
                 .activeOffsetX([-10, 10])
                 .runOnJS(true)
-                .onStart(() => {
-                    if (!videoRef.current) return;
-                    wasPlayingBeforePan.current = !paused;
-                    setPaused(true);
-                    panStartTime.current = currentTime;
-                    setCentralIndicator({ icon: "seek" });
+                .onStart((event) => {
+                    if (!videoRef?.current || isSpeedHolding.current) return;
+                    if (Math.abs(event.translationY) > Math.abs(event.translationX)) {
+                        isActualPan.current = false;
+                        return;
+                    }
+                    isActualPan.current = true;
+                    isPanValidated.current = false;
+                    // Reset panStartTime marker to indicate we haven't "started" the UI yet
+                    panStartTime.current = -1;
                 })
                 .onUpdate((event) => {
-                    if (!videoRef.current) return;
-                    const deltaSec = event.translationX * 0.15;
-                    const newTimeSec = Math.max(0, Math.min(duration, panStartTime.current + deltaSec));
+                    if (!videoRef?.current || !isActualPan.current) return;
 
-                    if (Math.abs(newTimeSec - currentTime) > 0.1) {
-                        videoRef.current.seek(newTimeSec);
-                        setCurrentTime(newTimeSec);
+                    // 1. Ratio Check & Validation
+                    if (!isPanValidated.current) {
+                        if (Math.abs(event.translationY) > Math.abs(event.translationX)) {
+                            // If we already started the UI, reset it
+                            if (panStartTime.current !== -1) {
+                                setPanSeekTime(null);
+                                setCentralIndicator(null);
+                                if (wasPlayingBeforePan.current) setPaused(false);
+                            }
+                            isActualPan.current = false;
+                            return;
+                        }
+
+                        // Once we move enough horizontally (20px), we validate the pan
+                        if (Math.abs(event.translationX) > 20) {
+                            isPanValidated.current = true;
+                        }
                     }
-                    setPanSeekTime(newTimeSec);
+
+                    // 2. UI Activation (Happens once we've confirmed it's horizontal or moved enough)
+                    // We wait for 15px total to show the indicator to avoid the +0s flicker on vertical swipes
+                    if (panStartTime.current === -1 && Math.abs(event.translationX) > 15) {
+                        panStartTime.current = currentTime;
+                        wasPlayingBeforePan.current = !paused;
+                        setPaused(true);
+                        setCentralIndicator({ icon: "seek" });
+                    }
+
+                    // 3. Seeking Logic (only if UI is active)
+                    if (panStartTime.current !== -1) {
+                        // 160 dp = 1 inch, 1 inch = 2.54 cm. So 1 cm = 160 / 2.54 ≈ 62.99 dp.
+                        const dpPerCm = 160 / 2.54;
+                        const deltaSec = (event.translationX / dpPerCm) * settings.panSeekSensitivity;
+                        const newTimeSec = Math.max(0, Math.min(duration, panStartTime.current + deltaSec));
+
+                        if (Math.abs(newTimeSec - currentTime) > 0.1) {
+                            videoRef.current.seek(newTimeSec);
+                            setCurrentTime(newTimeSec);
+                        }
+                        setPanSeekTime(newTimeSec);
+                    }
                 })
                 .onEnd(() => {
+                    if (!isActualPan.current || panStartTime.current === -1) return;
                     if (wasPlayingBeforePan.current) setPaused(false);
                     setPanSeekTime(null);
                     setCentralIndicator(null);
+                    isActualPan.current = false;
+                    isPanValidated.current = false;
                 }),
         [duration, currentTime, paused],
     );
 
     // ── Compose ─────────────────────────────────────────────────────────────
     const composedGesture = useMemo(() => {
-        const holdOrSlide = Gesture.Race(longPressGesture, panGesture);
+        // Taps are exclusive to prevent double-firings
         const taps = Gesture.Exclusive(doubleTapGesture, singleTapGesture);
-        return Gesture.Simultaneous(taps, holdOrSlide);
+
+        // Everything else is simultaneous for maximum responsiveness
+        // Pan and LongPress are manually guarded via isSpeedHolding.current
+        return Gesture.Simultaneous(taps, panGesture, longPressGesture);
     }, [doubleTapGesture, singleTapGesture, longPressGesture, panGesture]);
 
     return <GestureDetector gesture={composedGesture}>{children}</GestureDetector>;

@@ -2,7 +2,6 @@ import { AlbumItem } from "@/components/AlbumItem";
 import { AlbumItemDetailsModal } from "@/components/AlbumItemDetailsModal";
 import { EmptyAlbumState } from "@/components/EmptyAlbumState";
 import { Header } from "@/components/Header";
-import { Icon } from "@/components/Icon";
 import { LoadingStatus } from "@/components/LoadingStatus";
 import { SortMenu } from "@/components/SortMenu";
 import { ThemedSafeAreaView } from "@/components/Themed";
@@ -10,15 +9,22 @@ import { useTheme } from "@/context/ThemeContext";
 import { useMedia } from "@/hooks/useMedia";
 import { router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { Calendar, Clock, Search, SortAsc } from "lucide-react-native";
+import { Calendar, Clock, SortAsc } from "lucide-react-native";
 import React from "react";
-import { FlatList, RefreshControl, TouchableOpacity } from "react-native";
+import { FlatList, RefreshControl, View } from "react-native";
 
 const AlbumListScreen = () => {
-    const { albums, loadingTask, albumSort, setAlbumSort, fetchAlbums, requestPermissionAndFetch, setIsSearchVisible } =
-        useMedia();
+    const {
+        albums,
+        loadingTask,
+        albumSort,
+        setAlbumSort,
+        fetchAlbums,
+        requestPermissionAndFetch,
+        permissionResponse,
+        isInitialScanComplete,
+    } = useMedia();
     const { colors } = useTheme();
-    const REFRESH_TASK_ID = "albumListRefresh";
     const [selectedAlbumId, setSelectedAlbumId] = React.useState<string | null>(null);
     const selectedAlbum = React.useMemo(() => albums.find((a) => a.id === selectedAlbumId), [albums, selectedAlbumId]);
 
@@ -31,7 +37,7 @@ const AlbumListScreen = () => {
     ];
 
     const onRefresh = React.useCallback(async () => {
-        fetchAlbums(true, false, REFRESH_TASK_ID);
+        fetchAlbums();
     }, [fetchAlbums]);
 
     const renderAlbum = ({ item }: { item: any }) => {
@@ -49,6 +55,12 @@ const AlbumListScreen = () => {
         );
     };
 
+    const dataToDisplay = React.useMemo(() => {
+        if (!isInitialScanComplete) return [];
+        if (loadingTask && albums.length === 0) return skeletonData;
+        return albums;
+    }, [isInitialScanComplete, loadingTask, albums, skeletonData]);
+
     return (
         <ThemedSafeAreaView className="flex-1">
             <StatusBar style="light" />
@@ -59,15 +71,18 @@ const AlbumListScreen = () => {
                 <Header.Actions>
                     <LoadingStatus />
                     <Header.SearchAction />
-                    <SortMenu currentSort={albumSort} onSortChange={setAlbumSort} options={albumSortOptions} />
                 </Header.Actions>
             </Header>
 
             <FlatList
-                data={loadingTask?.id === REFRESH_TASK_ID ? skeletonData : albums}
+                data={dataToDisplay}
                 keyExtractor={(item) => item.id}
                 numColumns={2}
-                columnWrapperStyle={{ justifyContent: "space-between", paddingHorizontal: 16 }}
+                ListHeaderComponent={
+                    <View className="flex-row justify-end items-center mb-4 pr-2">
+                        <SortMenu currentSort={albumSort} onSortChange={setAlbumSort} options={albumSortOptions} />
+                    </View>
+                }
                 renderItem={renderAlbum}
                 refreshControl={
                     <RefreshControl
@@ -75,10 +90,11 @@ const AlbumListScreen = () => {
                         onRefresh={onRefresh}
                         tintColor={colors.primary}
                         colors={[colors.primary]}
+                        enabled={permissionResponse?.status === "granted"}
                     />
                 }
                 ListEmptyComponent={<EmptyAlbumState loading={!!loadingTask} onScan={requestPermissionAndFetch} />}
-                contentContainerStyle={{ paddingTop: 22, paddingBottom: 22 }}
+                contentContainerStyle={{ paddingTop: 16, paddingHorizontal: 8, paddingRight: 14 }}
             />
 
             <AlbumItemDetailsModal visible={!!selectedAlbumId} album={selectedAlbum} onClose={() => setSelectedAlbumId(null)} />

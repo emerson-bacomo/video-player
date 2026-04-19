@@ -7,9 +7,7 @@ import {
 } from "@gorhom/bottom-sheet";
 import { cssInterop } from "nativewind";
 import React, { useCallback } from "react";
-import { Dimensions } from "react-native";
-
-const { height: SCREEN_HEIGHT } = Dimensions.get("window");
+import { useWindowDimensions, View } from "react-native";
 
 // 1. Define the interface for our new interop props
 interface StyledBottomSheetModalProps extends BottomSheetModalProps {
@@ -35,6 +33,7 @@ interface ThemedBottomSheetProps {
 }
 
 export const ThemedBottomSheet = ({ isVisible, children, onClose }: ThemedBottomSheetProps) => {
+    const { height: screenHeight } = useWindowDimensions();
     const bottomSheetModalRef = React.useRef<GBottomSheetModal>(null);
 
     React.useEffect(() => {
@@ -52,17 +51,21 @@ export const ThemedBottomSheet = ({ isVisible, children, onClose }: ThemedBottom
         [],
     );
 
+    const snapPoints = React.useMemo(() => ["80%"], []);
+
     return (
         <BottomSheetModal
             ref={bottomSheetModalRef}
+            snapPoints={snapPoints}
+            index={0}
             enableDynamicSizing={true}
-            maxDynamicContentSize={SCREEN_HEIGHT * 0.8}
+            maxDynamicContentSize={screenHeight * 0.8}
             onDismiss={onClose}
             backdropComponent={renderBackdrop}
             backgroundClassName="bg-card"
             handleIndicatorClassName="bg-secondary w-10"
         >
-            <BottomSheetView className="pb-5">{children}</BottomSheetView>
+            <BottomSheetView>{children}</BottomSheetView>
         </BottomSheetModal>
     );
 };

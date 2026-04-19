@@ -51,10 +51,16 @@ set "HAS_STAGED_CHANGES=!errorlevel!"
 echo HAS_STAGED_CHANGES: !HAS_STAGED_CHANGES!
 
 :: Commit Logic
-if "!AMEND_FLAG!"=="true" (
-    echo Amending last commit...
-    git commit --amend --no-edit
-) else if !HAS_STAGED_CHANGES! neq 0 (
+set "SHOULD_COMMIT=false"
+if "!AMEND_FLAG!"=="true" set "SHOULD_COMMIT=true"
+if !HAS_STAGED_CHANGES! neq 0 set "SHOULD_COMMIT=true"
+
+if "!SHOULD_COMMIT!"=="true" (
+    set "COMMIT_CMD=git commit"
+    if "!AMEND_FLAG!"=="true" (
+        set "COMMIT_CMD=git commit --amend"
+        echo Amending last commit...
+    )
     if exist "%~dp0git-commit-message.txt" (
         set "MSG_SIZE=0"
         for %%I in ("%~dp0git-commit-message.txt") do set "MSG_SIZE=%%~zI"
@@ -68,20 +74,28 @@ if "!AMEND_FLAG!"=="true" (
             git add "%~dp0git-commit-message.txt"
 
             :: Commit using the bak copy as the message source
-            git commit -F "%~dp0git-commit-message.txt.bak"
+            !COMMIT_CMD! -F "%~dp0git-commit-message.txt.bak"
             if !errorlevel! neq 0 (
                 :: Restore original message on failure
                 copy /y "%~dp0git-commit-message.txt.bak" "%~dp0git-commit-message.txt" >nul
-                echo Commit failed. Original message restored to git-commit-message.txt
+                echo Commit failed. Original message restored.
                 exit /b !errorlevel!
             )
             del /q "%~dp0git-commit-message.txt.bak" 2>nul
         ) else (
-            git commit
+            if "!AMEND_FLAG!"=="true" (
+                !COMMIT_CMD! --no-edit
+            ) else (
+                !COMMIT_CMD!
+            )
             if !errorlevel! neq 0 exit /b !errorlevel!
         )
     ) else (
-        git commit
+        if "!AMEND_FLAG!"=="true" (
+            !COMMIT_CMD! --no-edit
+        ) else (
+            !COMMIT_CMD!
+        )
         if !errorlevel! neq 0 exit /b !errorlevel!
     )
 ) else (

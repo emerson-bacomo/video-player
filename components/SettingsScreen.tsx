@@ -7,7 +7,9 @@ import { useTheme } from "@/context/ThemeContext";
 import { useMedia } from "@/hooks/useMedia";
 import { Orientation, useSettings } from "@/hooks/useSettings";
 import { cn } from "@/lib/utils";
+import { normalizeClipDestination } from "@/utils/clipDestination";
 import { Directory } from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import { router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import {
@@ -22,8 +24,9 @@ import {
     Smartphone,
     Sun,
     Trash2,
+    X,
 } from "lucide-react-native";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 
 const SENSITIVITY_PRESETS = [
@@ -42,12 +45,40 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
     const { switchPreset, activePresetId, presets } = useTheme();
     const [themeDropdownOpen, setThemeDropdownOpen] = useState(false);
     const [sensitivityInput, setSensitivityInput] = useState("");
+    const [panSensitivityInput, setPanSensitivityInput] = useState("");
     const [seekAmountInput, setSeekAmountInput] = useState("");
+    const [isDestinationValid, setIsDestinationValid] = useState(true);
+
+    const validateDestination = useCallback(async () => {
+        if (!settings.clipDestination) {
+            setIsDestinationValid(true);
+            return;
+        }
+
+        const resolved = normalizeClipDestination(settings.clipDestination);
+        if (!resolved) {
+            setIsDestinationValid(false);
+            return;
+        }
+
+        try {
+            const info = await FileSystem.getInfoAsync(`file://${resolved}`);
+            setIsDestinationValid(info.exists && info.isDirectory);
+        } catch (e) {
+            console.warn("Failed to validate clip destination", e);
+            setIsDestinationValid(false);
+        }
+    }, [settings.clipDestination]);
+
+    useEffect(() => {
+        validateDestination();
+    }, [settings.clipDestination, validateDestination]);
 
     useEffect(() => {
         if (!settingsLoading) {
-            setSensitivityInput(String(settings.brightnessSensitivity ?? 0.3));
-            setSeekAmountInput(String(settings.doubleTapSeekAmount ?? 10));
+            setSensitivityInput(String(settings.brightnessSensitivity));
+            setPanSensitivityInput(String(settings.panSeekSensitivity));
+            setSeekAmountInput(String(settings.doubleTapSeekAmount));
         }
     }, [settingsLoading]);
 
@@ -70,6 +101,17 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
         }
     };
 
+    const commitPanSensitivity = (raw: string) => {
+        const parsed = parseFloat(raw);
+        if (!isNaN(parsed) && parsed > 0) {
+            const clamped = Math.max(1, Math.min(60, parsed));
+            updateSettings({ panSeekSensitivity: clamped });
+            setPanSensitivityInput(String(clamped));
+        } else {
+            setPanSensitivityInput(String(settings.panSeekSensitivity));
+        }
+    };
+
     const commitSeekAmount = (raw: string) => {
         const parsed = parseInt(raw, 10);
         if (!isNaN(parsed) && parsed > 0) {
@@ -83,8 +125,13 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
     const pickDirectory = async () => {
         try {
             const directory = await Directory.pickDirectoryAsync();
-            if (directory) {
-                updateSettings({ clipDestination: directory.uri });
+            if (directory?.uri) {
+                const resolvedDestination = normalizeClipDestination(directory.uri);
+                if (!resolvedDestination) {
+                    console.warn("Failed to resolve picked clip destination", directory.uri);
+                    return;
+                }
+                updateSettings({ clipDestination: resolvedDestination });
             }
         } catch (err) {
             console.warn("Failed to pick directory", err);
@@ -112,7 +159,7 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
             <StatusBar style="light" />
 
             <Header>
-                {router.canGoBack() && <Header.Back onPress={() => router.back()} />}
+                {router.canGoBack() && fromPlayer && <Header.Back onPress={() => router.back()} />}
                 <Header.Title
                     title={fromPlayer ? "Player Settings" : "Settings"}
                     subtitle={fromPlayer ? "Playback & display options" : "Personalize your experience"}
@@ -173,15 +220,38 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
                     <Text className="text-zinc-500 text-sm font-bold uppercase tracking-wider mb-4">Clipping</Text>
                     <ThemedCard className="p-4">
                         <Text className="text-text font-semibold mb-2">Clip Destination Folder</Text>
-                        <TouchableOpacity
-                            className="p-4 rounded-xl border border-border bg-background flex-row items-center justify-between"
-                            onPress={pickDirectory}
-                        >
-                            <Text className="text-text flex-1 mr-2" numberOfLines={1}>
-                                {settings.clipDestination || "Select folder..."}
+                        <View className="flex-row items-stretch gap-2">
+                            <TouchableOpacity
+                                className={cn(
+                                    "flex-1 p-4 rounded-xl border bg-background flex-row items-center justify-between",
+                                    !isDestinationValid ? "border-red-500/50" : "border-border",
+                                )}
+                                onPress={pickDirectory}
+                            >
+                                <Text
+                                    className={cn("text-text flex-1 mr-2", !settings.clipDestination && "text-secondary")}
+                                    numberOfLines={1}
+                                >
+                                    {settings.clipDestination || "Select folder..."}
+                                </Text>
+                                <Icon icon={FolderOpen} size={20} className="text-primary" />
+                            </TouchableOpacity>
+
+                            {settings.clipDestination ? (
+                                <TouchableOpacity
+                                    className="px-4 items-center justify-center bg-red-500/10 rounded-xl border border-red-500/20"
+                                    onPress={() => updateSettings({ clipDestination: "" })}
+                                >
+                                    <Icon icon={X} size={20} className="text-red-500" />
+                                </TouchableOpacity>
+                            ) : null}
+                        </View>
+
+                        {!isDestinationValid && (
+                            <Text className="text-red-500 text-[10px] font-bold uppercase tracking-tighter mt-2 ml-1">
+                                ! Invalid path: Folder not found or inaccessible
                             </Text>
-                            <Icon icon={FolderOpen} size={20} className="text-primary" />
-                        </TouchableOpacity>
+                        )}
                         <Text className="text-secondary text-xs mt-3">
                             Videos will be saved to this folder in your media library.
                         </Text>
@@ -383,7 +453,10 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
                             <OrientationOption label="Landscape" value="landscape" icon={Monitor} />
                             <OrientationOption label="System" value="system" icon={Cpu} />
                         </View>
-                        <Text className="text-zinc-500 text-xs mt-4">Override system orientation when starting a video.</Text>
+                        <Text className="text-zinc-500 text-xs mt-4">
+                            Override system orientation when starting a video. This only works as long as the orientation
+                            is not yet changed for this session.
+                        </Text>
                     </ThemedCard>
 
                     <ThemedCard className="p-4 mb-4">
@@ -418,6 +491,54 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
                                         }}
                                     >
                                         <Text className={cn("font-semibold", isActive ? "text-white" : "text-text")}>{val}s</Text>
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </View>
+                    </ThemedCard>
+
+                    <ThemedCard className="p-4 mb-4">
+                        <View className="flex-row justify-between items-center mb-1">
+                            <Text className="text-text font-semibold">Pan Seek Sensitivity</Text>
+                            <TouchableOpacity
+                                onPress={() => router.push("/test-gesture")}
+                                className="bg-primary/10 px-3 py-1.5 rounded-full"
+                            >
+                                <Text className="text-primary text-[10px] font-bold">TEST GESTURES</Text>
+                            </TouchableOpacity>
+                        </View>
+                        <Text className="text-zinc-500 text-xs mb-4">Seconds per centimeter. (DPI-aware)</Text>
+
+                        <TextInput
+                            className="bg-background border border-border rounded-xl px-4 py-3 text-text text-base mb-4"
+                            keyboardType="decimal-pad"
+                            value={panSensitivityInput}
+                            onChangeText={setPanSensitivityInput}
+                            onBlur={() => commitPanSensitivity(panSensitivityInput)}
+                            onSubmitEditing={() => commitPanSensitivity(panSensitivityInput)}
+                            returnKeyType="done"
+                            placeholderTextColor="#71717a"
+                            placeholder="e.g. 10"
+                        />
+
+                        <View className="flex-row gap-2">
+                            {[5, 10, 20, 30].map((val) => {
+                                const isActive = settings.panSeekSensitivity === val;
+                                return (
+                                    <TouchableOpacity
+                                        key={val}
+                                        className={cn(
+                                            "flex-1 items-center justify-center py-3 rounded-xl border",
+                                            isActive ? "bg-primary border-primary" : "bg-card border-border",
+                                        )}
+                                        onPress={() => {
+                                            updateSettings({ panSeekSensitivity: val });
+                                            setPanSensitivityInput(String(val));
+                                        }}
+                                    >
+                                        <Text className={cn("font-semibold", isActive ? "text-white" : "text-text")}>
+                                            {val} s/cm
+                                        </Text>
                                     </TouchableOpacity>
                                 );
                             })}

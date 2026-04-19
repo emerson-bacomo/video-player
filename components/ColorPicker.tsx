@@ -2,7 +2,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Dimensions, StyleSheet, Text, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import Animated, { runOnJS, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
+import Animated, { useAnimatedStyle, useSharedValue } from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 
 const { width } = Dimensions.get("window");
 const PICKER_SIZE = width - 80;
@@ -156,7 +157,7 @@ export const ColorPicker = ({
         const nextX = Math.min(Math.max(event.x, 0), PICKER_SIZE);
         hX.value = nextX;
         const nextHsv = { ...hsvRef.current, h: nextX / PICKER_SIZE };
-        runOnJS(applyHsv)(nextHsv);
+        scheduleOnRN(applyHsv, nextHsv);
     });
 
     const svGesture = Gesture.Pan().onUpdate((event) => {
@@ -169,7 +170,7 @@ export const ColorPicker = ({
             s: nextX / PICKER_SIZE,
             v: 1 - nextY / PICKER_SIZE,
         };
-        runOnJS(applyHsv)(nextHsv);
+        scheduleOnRN(applyHsv, nextHsv);
     });
 
     const hueIndicatorStyle = useAnimatedStyle(() => ({

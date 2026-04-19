@@ -20,6 +20,7 @@ const AlbumVideosScreen = () => {
     const { id, title } = useLocalSearchParams<{ id: string; title: string }>();
     const {
         currentAlbumVideos,
+        setCurrentAlbumVideos,
         loadingTask,
         fetchVideosInAlbum,
         videoSort,
@@ -29,9 +30,10 @@ const AlbumVideosScreen = () => {
         setCurrentAlbum,
         folderFilters,
         setFolderFilter,
+        permissionResponse,
+        albums,
     } = useMedia();
     const { colors } = useTheme();
-    const REFRESH_TASK_ID = "albumVideosRefresh";
 
     // Filtering State (Persisted)
     const selectedPrefixes = folderFilters[id] || [];
@@ -42,8 +44,12 @@ const AlbumVideosScreen = () => {
     const deferredPrefixes = useDeferredValue(selectedPrefixes);
 
     const [selectedVideoId, setSelectedVideoId] = React.useState<string | null>(null);
-    const selectedVideo = React.useMemo(() => currentAlbumVideos.find((v) => v.id === selectedVideoId), [currentAlbumVideos, selectedVideoId]);
+    const selectedVideo = React.useMemo(
+        () => currentAlbumVideos.find((v) => v.id === selectedVideoId) || null,
+        [currentAlbumVideos, selectedVideoId],
+    );
     const [showAlbumInfo, setShowAlbumInfo] = React.useState(false);
+    const isInitialLoading = !!loadingTask && currentAlbumVideos.length === 0;
 
     // Clear focus natively when routing backward so FFMPEG falls back to global priorities
     useEffect(() => {
@@ -53,14 +59,23 @@ const AlbumVideosScreen = () => {
     }, []);
 
     const currentAlbumData = useMemo(() => {
+        // Use the already-loaded albums state as the source of truth for count,
+        // so the subtitle is correct immediately on enter, before async fetch completes.
+        const albumFromList = albums.find((a) => a.id === id);
         return {
             id,
-            title: title || currentAlbum?.displayName || currentAlbum?.title || "",
-            assetCount: currentAlbum?.assetCount || currentAlbumVideos.length,
-            thumbnail: currentAlbum?.thumbnail,
-            lastModified: currentAlbum?.lastModified || 0,
+            title:
+                title ||
+                currentAlbum?.displayName ||
+                currentAlbum?.title ||
+                albumFromList?.displayName ||
+                albumFromList?.title ||
+                "",
+            assetCount: albumFromList?.assetCount || currentAlbum?.assetCount || currentAlbumVideos.length,
+            thumbnail: currentAlbum?.thumbnail || albumFromList?.thumbnail,
+            lastModified: currentAlbum?.lastModified || albumFromList?.lastModified || 0,
         };
-    }, [id, title, currentAlbum, currentAlbumVideos.length]);
+    }, [id, title, currentAlbum, currentAlbumVideos.length, albums]);
 
     // 1. Pre-calculate metadata (prefix, rawPrefix, episode) to avoid expensive regex during sorting/filtering
     // 1. Efficient metadata caching — Reactive to thumbnail updates but optimized via Ref Map
@@ -127,7 +142,7 @@ const AlbumVideosScreen = () => {
 
     const onRefresh = () => {
         if (id) {
-            fetchVideosInAlbum({ id, title: title || "" }, true, REFRESH_TASK_ID);
+            fetchVideosInAlbum({ id, title: title || "" });
         }
     };
 
@@ -139,14 +154,6 @@ const AlbumVideosScreen = () => {
         setSelectedPrefixes([]);
     };
 
-    const onPlayVideo = (item: any) => {
-        setSelectedVideoId(null);
-        router.push({
-            pathname: "/player",
-            params: { videoId: item.id },
-        });
-    };
-
     useFocusEffect(
         useCallback(() => {
             // Update UI with any database playback changes made in the player screen
@@ -156,9 +163,11 @@ const AlbumVideosScreen = () => {
 
     useEffect(() => {
         if (id) {
-            fetchVideosInAlbum({ id, title: title || "" }, false);
+            // Clear previous videos instantly so user doesn't see ghost content
+            setCurrentAlbumVideos([]);
+            fetchVideosInAlbum({ id, title: title || "" });
         }
-    }, [id, videoSort]);
+    }, [id]);
 
     return (
         <ThemedSafeAreaView className="flex-1">
@@ -178,13 +187,6 @@ const AlbumVideosScreen = () => {
                                 : null
                         }
                     />
-                    <PrefixFilterMenu
-                        options={prefixOptions}
-                        selectedOptions={selectedPrefixes}
-                        onOptionToggle={handleToggleFilter}
-                        onClearAll={handleClearFilters}
-                    />
-                    <SortMenu currentSort={videoSort} onSortChange={setVideoSort} options={videoSortOptions} />
                     <Header.SearchAction />
                     <TouchableOpacity
                         onPress={() => setShowAlbumInfo(true)}
@@ -196,16 +198,33 @@ const AlbumVideosScreen = () => {
             </Header>
 
             <FlatList
-                data={loadingTask?.id === REFRESH_TASK_ID ? skeletonData : processedVideos}
+                data={isInitialLoading ? skeletonData : processedVideos}
                 keyExtractor={(item) => item.id}
                 numColumns={2}
                 renderItem={({ item }: { item: any }) => <VideoItem item={item} setSelectedVideoId={setSelectedVideoId} />}
+                ListHeaderComponent={
+                    <View className="flex-row justify-end items-center gap-2 mb-4 pr-2">
+                        <PrefixFilterMenu
+                            options={prefixOptions}
+                            selectedOptions={selectedPrefixes}
+                            onOptionToggle={handleToggleFilter}
+                            onClearAll={handleClearFilters}
+                        />
+                        <SortMenu currentSort={videoSort} onSortChange={setVideoSort} options={videoSortOptions} />
+                    </View>
+                }
                 initialNumToRender={10}
                 maxToRenderPerBatch={10}
                 windowSize={5}
                 removeClippedSubviews={true}
                 refreshControl={
-                    <RefreshControl refreshing={false} onRefresh={onRefresh} tintColor={colors.text} colors={[colors.primary]} />
+                    <RefreshControl
+                        refreshing={false}
+                        onRefresh={onRefresh}
+                        tintColor={colors.text}
+                        colors={[colors.primary]}
+                        enabled={permissionResponse?.status === "granted"}
+                    />
                 }
                 ListEmptyComponent={
                     loadingTask ? null : (
@@ -215,15 +234,10 @@ const AlbumVideosScreen = () => {
                         </View>
                     )
                 }
-                contentContainerStyle={{ paddingHorizontal: 8, paddingTop: 20, paddingBottom: 20 }}
+                contentContainerStyle={{ paddingHorizontal: 8, paddingTop: 16, paddingRight: 14 }}
             />
 
-            <VideoItemDetailsModal
-                visible={!!selectedVideoId}
-                video={selectedVideo}
-                onClose={() => setSelectedVideoId(null)}
-                onPlay={onPlayVideo}
-            />
+            <VideoItemDetailsModal visible={!!selectedVideoId} video={selectedVideo} onClose={() => setSelectedVideoId(null)} />
 
             <AlbumItemDetailsModal
                 visible={showAlbumInfo}

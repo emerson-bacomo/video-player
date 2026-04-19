@@ -310,7 +310,7 @@ const Content = ({ children, className }: { children: React.ReactNode; className
                             }}
                         >
                             <View
-                                className={cn("rounded-2xl shadow-2xl border bg-menu border-border", className)}
+                                className={cn("rounded-xl shadow-2xl border bg-menu border-border", className)}
                                 style={{
                                     maxWidth: maxWidth === "fit-content" ? undefined : maxWidth,
                                     maxHeight: popupMaxHeight,

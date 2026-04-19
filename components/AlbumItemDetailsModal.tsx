@@ -1,7 +1,9 @@
+import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { router } from "expo-router";
 import { Calendar, Folder, Info } from "lucide-react-native";
 import React from "react";
-import { Image, ScrollView, Text, View } from "react-native";
+import { Image, Text, View } from "react-native";
+import { Icon } from "./Icon";
 import { ThemedButton } from "./Themed";
 import { ThemedBottomSheet } from "./ThemedBottomSheet";
 
@@ -17,52 +19,43 @@ export const AlbumItemDetailsModal = ({ visible, album, onClose, hideOpenFolderA
 
     return (
         <ThemedBottomSheet isVisible={visible} onClose={onClose}>
-            <View className="p-6 pb-2">
-                <View className="flex-row items-center gap-5 mb-6">
-                    {album.thumbnail ? (
-                        <Image
-                            source={{ uri: album.thumbnail }}
-                            className="w-32 aspect-video rounded-xl bg-card"
-                        />
-                    ) : (
-                        <View
-                            className="w-32 aspect-video rounded-xl justify-center items-center bg-card border border-border"
-                        >
-                            <Folder size={24} className="text-primary" />
+            <BottomSheetScrollView
+                contentContainerStyle={{ paddingBottom: 24 }}
+            >
+                <View className="p-6 pb-2">
+                    <View className="flex-row items-center gap-5 mb-6">
+                        {album.thumbnail ? (
+                            <Image source={{ uri: album.thumbnail }} className="w-32 aspect-video rounded-xl bg-card" />
+                        ) : (
+                            <View className="w-32 aspect-video rounded-xl justify-center items-center bg-card border border-border">
+                                <Icon icon={Folder} size={24} className="text-primary" />
+                            </View>
+                        )}
+                        <View className="flex-1">
+                            <Text className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">
+                                Folder Metadata
+                            </Text>
+                            <Text className="text-text text-xl font-bold">{album.title}</Text>
                         </View>
-                    )}
-                    <View className="flex-1">
-                        <Text className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">
-                            Folder Metadata
-                        </Text>
-                        <Text className="text-text text-xl font-bold">
-                            {album.title}
-                        </Text>
                     </View>
+
+                    <View className="border-b border-border" />
                 </View>
 
-                <View className="border-b border-border" />
-            </View>
-
-            <View className="flex flex-col gap-6 p-6 pt-0">
-                <ScrollView className="max-h-[250px]" contentContainerStyle={{ gap: 24, paddingBottom: 12 }}>
+                <View className="px-6 gap-6">
                     <View className="flex-row items-center gap-4">
                         <View className="w-8 h-8 rounded-full items-center justify-center bg-zinc-800">
-                            <Folder size={16} className="text-primary" />
+                            <Icon icon={Folder} size={16} className="text-primary" />
                         </View>
                         <View>
-                            <Text className="text-secondary text-[10px] uppercase font-bold tracking-wider">
-                                Folder Contents
-                            </Text>
-                            <Text className="text-text text-sm">
-                                {album.assetCount || 0} Videos
-                            </Text>
+                            <Text className="text-secondary text-[10px] uppercase font-bold tracking-wider">Folder Contents</Text>
+                            <Text className="text-text text-sm">{album.assetCount || 0} Videos</Text>
                         </View>
                     </View>
 
                     <View className="flex-row items-center gap-4">
                         <View className="w-8 h-8 rounded-full items-center justify-center bg-zinc-800">
-                            <Calendar size={16} className="text-primary" />
+                            <Icon icon={Calendar} size={16} className="text-primary" />
                         </View>
                         <View>
                             <Text className="text-secondary text-[10px] uppercase font-bold tracking-wider">
@@ -82,12 +75,10 @@ export const AlbumItemDetailsModal = ({ visible, album, onClose, hideOpenFolderA
 
                     <View className="flex-row items-center gap-4">
                         <View className="w-8 h-8 rounded-full items-center justify-center bg-zinc-800">
-                            <Info size={16} className="text-primary" />
+                            <Icon icon={Info} size={16} className="text-primary" />
                         </View>
                         <View>
-                            <Text className="text-secondary text-[10px] uppercase font-bold tracking-wider">
-                                Directory Info
-                            </Text>
+                            <Text className="text-secondary text-[10px] uppercase font-bold tracking-wider">Directory Info</Text>
                             <Text className="text-text text-xs mt-1 leading-5">
                                 Approx. Video-Only Storage:{" "}
                                 {album.assetCount * 45 >= 1000
@@ -96,27 +87,25 @@ export const AlbumItemDetailsModal = ({ visible, album, onClose, hideOpenFolderA
                             </Text>
                         </View>
                     </View>
-                </ScrollView>
-
-                {(!hideOpenFolderAction) && (
-                    <>
-                        <View className="border-b border-border" />
-
-                        <View className="pb-8">
-                            <ThemedButton
-                                title="Open Folder"
-                                onPress={() => {
-                                    onClose();
-                                    router.push({
-                                        pathname: "/(tabs)/(videos)/[id]",
-                                        params: { id: album.id, title: album.title },
-                                    });
-                                }}
-                            />
+                    {!hideOpenFolderAction && (
+                        <View className="mt-2">
+                            <View className="border-b border-border mb-6" />
+                            <View className="pb-4">
+                                <ThemedButton
+                                    title="Open Folder"
+                                    onPress={() => {
+                                        onClose();
+                                        router.push({
+                                            pathname: "/(tabs)/(videos)/[id]",
+                                            params: { id: album.id, title: album.title },
+                                        });
+                                    }}
+                                />
+                            </View>
                         </View>
-                    </>
-                )}
-            </View>
+                    )}
+                </View>
+            </BottomSheetScrollView>
         </ThemedBottomSheet>
     );
 };

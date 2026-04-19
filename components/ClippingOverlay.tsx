@@ -1,68 +1,94 @@
 import { cn } from "@/lib/utils";
 import React from "react";
-import { TouchableOpacity, View } from "react-native";
+import { View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import { runOnJS } from "react-native-reanimated";
 import { Marker, MarkerPair } from "../hooks/useClipping";
 
-interface ClippingOverlayProps {
-    markerPairs: MarkerPair[];
+interface MarkerThumbProps {
+    marker: Marker;
     duration: number;
-    width: number;
+    activeWidth: number;
+    isActiveMarker: boolean;
     onUpdateMarkerTime: (id: string, time: number) => void;
     onSelectMarker: (id: string) => void;
-    activeMarkerId: string | null;
+    onDoublePress?: (markerTime: number) => void;
     onDragStart?: () => void;
     onDragEnd?: () => void;
-    previewActive?: boolean;
 }
 
-export const ClippingOverlay: React.FC<ClippingOverlayProps> = ({
-    markerPairs,
-    duration,
-    width,
-    onUpdateMarkerTime,
-    onSelectMarker,
-    activeMarkerId,
-    onDragStart,
-    onDragEnd,
-    previewActive = false,
-}) => {
-    if (duration <= 0 || width <= 0) return null;
-
-    const dragStartTime = React.useRef<number | null>(null);
-    const HORIZONTAL_PADDING = 15;
-    const activeWidth = width - HORIZONTAL_PADDING * 2;
-
-    const renderMarker = (marker: Marker) => {
-        const left = HORIZONTAL_PADDING + (marker.time / duration) * activeWidth;
-        const isActiveMarker = activeMarkerId === marker.markerId;
+const MarkerThumb = React.memo(
+    ({
+        marker,
+        duration,
+        activeWidth,
+        isActiveMarker,
+        onUpdateMarkerTime,
+        onSelectMarker,
+        onDoublePress,
+        onDragStart,
+        onDragEnd,
+    }: MarkerThumbProps) => {
+        const dragStartTime = React.useRef<number | null>(null);
+        const HORIZONTAL_PADDING = 15;
         const DRAG_DAMPING = 0.85;
 
-        // New Gesture API implementation
+        const left = HORIZONTAL_PADDING + (marker.time / duration) * activeWidth;
+
+        if (marker.markerId === "realtime") {
+            return (
+                <View
+                    key={`marker-${marker.markerId}`}
+                    className="absolute w-12 h-6 -ml-6 items-center z-10"
+                    style={{ left }}
+                    pointerEvents="none"
+                >
+                    <View className="w-1.5 h-6 bg-white/50 rounded-full" />
+                </View>
+            );
+        }
+
         const pan = Gesture.Pan()
+            .runOnJS(true)
             .onStart(() => {
                 dragStartTime.current = marker.time;
-                runOnJS(onSelectMarker)(marker.markerId);
-                if (onDragStart) runOnJS(onDragStart)();
+                onSelectMarker(marker.markerId);
+                if (onDragStart) onDragStart();
             })
             .onUpdate((event) => {
                 if (dragStartTime.current === null) return;
                 const deltaX = event.translationX * DRAG_DAMPING;
                 const deltaT = (deltaX / activeWidth) * duration;
                 const newTime = Math.max(0, Math.min(duration, dragStartTime.current + deltaT));
-                runOnJS(onUpdateMarkerTime)(marker.markerId, newTime);
+                onUpdateMarkerTime(marker.markerId, newTime);
             })
             .onEnd(() => {
                 dragStartTime.current = null;
-                if (onDragEnd) runOnJS(onDragEnd)();
+                if (onDragEnd) onDragEnd();
             });
 
+        const doubleTap = Gesture.Tap()
+            .numberOfTaps(2)
+            .runOnJS(true)
+            .onEnd(() => {
+                if (onDoublePress) {
+                    onDoublePress(marker.time);
+                    onSelectMarker(marker.markerId);
+                }
+            });
+
+        const singleTap = Gesture.Tap()
+            .numberOfTaps(1)
+            .runOnJS(true)
+            .onEnd(() => {
+                onSelectMarker(marker.markerId);
+            });
+
+        const taps = Gesture.Exclusive(doubleTap, singleTap);
+        const composed = Gesture.Race(pan, taps);
+
         return (
-            <GestureDetector key={`marker-${marker.markerId}`} gesture={pan}>
-                <TouchableOpacity
-                    activeOpacity={1}
-                    onPress={() => onSelectMarker(marker.markerId)}
+            <GestureDetector gesture={composed}>
+                <View
                     className="absolute items-center justify-center"
                     style={{
                         left: left - 15,
@@ -86,14 +112,45 @@ export const ClippingOverlay: React.FC<ClippingOverlayProps> = ({
                             borderTopColor: isActiveMarker ? "#fbbf24" : "white",
                             transform: [
                                 { scale: isActiveMarker ? 1.3 : 1 },
-                                { translateY: isActiveMarker ? -1.5 : 0 } // Counter-offset to keep bottom aligned
+                                { translateY: isActiveMarker ? -1.5 : 0 }, // Counter-offset to keep bottom aligned
                             ],
                         }}
                     />
-                </TouchableOpacity>
+                </View>
             </GestureDetector>
         );
-    };
+    },
+);
+
+interface ClippingOverlayProps {
+    markerPairs: MarkerPair[];
+    duration: number;
+    width: number;
+    onUpdateMarkerTime: (id: string, time: number) => void;
+    onSelectMarker: (id: string) => void;
+    onDoublePressMarker?: (markerTime: number) => void;
+    activeMarkerId: string | null;
+    onDragStart?: () => void;
+    onDragEnd?: () => void;
+    previewActive?: boolean;
+}
+
+export const ClippingOverlay: React.FC<ClippingOverlayProps> = ({
+    markerPairs,
+    duration,
+    width,
+    onUpdateMarkerTime,
+    onSelectMarker,
+    onDoublePressMarker,
+    activeMarkerId,
+    onDragStart,
+    onDragEnd,
+    previewActive = false,
+}) => {
+    if (duration <= 0 || width <= 0) return null;
+
+    const HORIZONTAL_PADDING = 15;
+    const activeWidth = width - HORIZONTAL_PADDING * 2;
 
     return (
         <View className="absolute inset-0 h-10 z-10" style={{ width }}>
@@ -127,7 +184,21 @@ export const ClippingOverlay: React.FC<ClippingOverlayProps> = ({
             {/* Clip Markers */}
             {markerPairs
                 .flatMap((pair) => (pair.end ? [pair.start, pair.end] : [pair.start]))
-                .map((marker) => renderMarker(marker))}
+                .filter((m) => m.markerId !== "realtime")
+                .map((marker) => (
+                    <MarkerThumb
+                        key={`marker-${marker.markerId}`}
+                        marker={marker}
+                        duration={duration}
+                        activeWidth={activeWidth}
+                        isActiveMarker={activeMarkerId === marker.markerId}
+                        onUpdateMarkerTime={onUpdateMarkerTime}
+                        onSelectMarker={onSelectMarker}
+                        onDoublePress={onDoublePressMarker}
+                        onDragStart={onDragStart}
+                        onDragEnd={onDragEnd}
+                    />
+                ))}
         </View>
     );
 };
