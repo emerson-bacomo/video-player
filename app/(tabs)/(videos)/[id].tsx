@@ -234,7 +234,7 @@ const AlbumVideosScreen = () => {
                         </View>
                     )
                 }
-                contentContainerStyle={{ paddingHorizontal: 8, paddingTop: 16, paddingRight: 14 }}
+                contentContainerStyle={{ paddingHorizontal: 8, paddingTop: 16 }}
             />
 
             <VideoItemDetailsModal visible={!!selectedVideoId} video={selectedVideo} onClose={() => setSelectedVideoId(null)} />

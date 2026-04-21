@@ -209,16 +209,6 @@ export const getLastSyncTimestampDb = (): number => {
     return result ? parseInt(result.value) : 0;
 };
 
-export const setIsInitialScanCompleteDb = (complete: boolean) => {
-    const stmt = db.prepareSync("INSERT OR REPLACE INTO sync_metadata (key, value) VALUES (?, ?)");
-    stmt.executeSync(["isInitialScanComplete", complete ? "1" : "0"]);
-};
-
-export const getIsInitialScanCompleteDb = (): boolean => {
-    const result = db.getFirstSync<{ value: string }>("SELECT value FROM sync_metadata WHERE key = ?", ["isInitialScanComplete"]);
-    return result?.value === "1";
-};
-
 export const saveSettingDb = (key: string, value: string) => {
     const stmt = db.prepareSync("INSERT OR REPLACE INTO sync_metadata (key, value) VALUES (?, ?)");
     stmt.executeSync([key, value]);

@@ -14,16 +14,8 @@ import React from "react";
 import { FlatList, RefreshControl, View } from "react-native";
 
 const AlbumListScreen = () => {
-    const {
-        albums,
-        loadingTask,
-        albumSort,
-        setAlbumSort,
-        fetchAlbums,
-        requestPermissionAndFetch,
-        permissionResponse,
-        isInitialScanComplete,
-    } = useMedia();
+    const { albums, loadingTask, albumSort, setAlbumSort, fetchAlbums, requestPermissionAndFetch, permissionResponse } =
+        useMedia();
     const { colors } = useTheme();
     const [selectedAlbumId, setSelectedAlbumId] = React.useState<string | null>(null);
     const selectedAlbum = React.useMemo(() => albums.find((a) => a.id === selectedAlbumId), [albums, selectedAlbumId]);
@@ -56,10 +48,10 @@ const AlbumListScreen = () => {
     };
 
     const dataToDisplay = React.useMemo(() => {
-        if (!isInitialScanComplete) return [];
-        if (loadingTask && albums.length === 0) return skeletonData;
+        // Show skeleton if we're scanning and have no data yet
+        if (loadingTask?.id === "media-sync" && albums.length === 0) return skeletonData;
         return albums;
-    }, [isInitialScanComplete, loadingTask, albums, skeletonData]);
+    }, [loadingTask, albums, skeletonData]);
 
     return (
         <ThemedSafeAreaView className="flex-1">
@@ -94,7 +86,7 @@ const AlbumListScreen = () => {
                     />
                 }
                 ListEmptyComponent={<EmptyAlbumState loading={!!loadingTask} onScan={requestPermissionAndFetch} />}
-                contentContainerStyle={{ paddingTop: 16, paddingHorizontal: 8, paddingRight: 14 }}
+                contentContainerStyle={{ paddingTop: 16, paddingHorizontal: 8 }}
             />
 
             <AlbumItemDetailsModal visible={!!selectedAlbumId} album={selectedAlbum} onClose={() => setSelectedAlbumId(null)} />

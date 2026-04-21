@@ -72,6 +72,8 @@ interface PlayerHeaderProps {
 
 export const PlayerHeader: React.FC<PlayerHeaderProps> = ({ video, onLayout }) => {
     const [isInfoModalVisible, setIsInfoModalVisible] = React.useState(false);
+    const { width, height } = useWindowDimensions();
+    const isPortrait = height > width;
     const displayTitle = video?.displayName || "Video Player";
 
     const handleSettings = () => {
@@ -87,7 +89,9 @@ export const PlayerHeader: React.FC<PlayerHeaderProps> = ({ video, onLayout }) =
                 <SettingsIcon size={22} color="white" />
             </TouchableOpacity>
 
-            <LoadingStatus />
+            {/* Portrait: indicator sits on the right strip → popup opens to the left.
+                Landscape: indicator is inline in the header → default bottom popup. */}
+            <LoadingStatus popupSide={isPortrait ? "left" : "bottom"} />
 
             <Menu>
                 <Menu.Trigger className="p-2">

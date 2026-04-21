@@ -7,6 +7,7 @@ import { useMedia } from "../hooks/useMedia";
 import { cn } from "../lib/utils";
 
 export interface LoadingTask {
+    id?: string;
     label: string;
     detail: string;
     isImportant: boolean;
@@ -17,10 +18,16 @@ export interface LoadingTask {
 
 export interface LoadingStatusProps {
     task?: LoadingTask | null;
+    /**
+     * "bottom" (default) — popup opens below the indicator, horizontally centered on screen.
+     * "left"             — popup opens to the left of the indicator, top-aligned with it,
+     *                      expanding downward only. Useful when the indicator is on the right edge.
+     */
+    popupSide?: "bottom" | "left";
 }
 
-export const LoadingStatus: React.FC<LoadingStatusProps> = ({ task: manualTask = null }) => {
-    const { loadingTask, isLoadingVisible, setIsLoadingVisible, isLoadingExpanded, setIsLoadingExpanded } = useMedia();
+export const LoadingStatus: React.FC<LoadingStatusProps> = ({ task: manualTask = null, popupSide = "bottom" }) => {
+    const { loadingTask, isLoadingPopupVisible, setIsLoadingPopupVisible, isLoadingExpanded, setIsLoadingExpanded } = useMedia();
     const screenWidth = Dimensions.get("window").width;
     const MENU_OFFSET = 40;
     const ARROW_HEIGHT = 10;
@@ -36,11 +43,21 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ task: manualTask =
     // Ref to prevent auto-show from firing more than once per task session
     const hasAutoShownRef = useRef(false);
 
+    // ── Geometry ────────────────────────────────────────────────────────────────
+
+    // "bottom" mode: horizontally centered tooltip below the indicator
     const tooltipWidth = Math.min(screenWidth - 32, 380);
     const globalTargetX = (screenWidth - tooltipWidth) / 2;
-    const leftOffset = globalTargetX - iconX;
+    const leftOffset = globalTargetX - iconX; // shift left so the box centres on screen
 
-    const effectiveTask = manualTask || loadingTask;
+    // "left" mode: the popup sits immediately to the left of the indicator,
+    // with its right edge flush against the indicator's left edge.
+    // We cap the width so it never overflows the left side of the screen.
+    const LEFT_GAP = 8; // gap between popup right edge and indicator left edge
+    const leftSideWidth = Math.min(iconX - LEFT_GAP, 320); // available space to the left
+
+    // Prioritize global important tasks (sync, thumb gen) over local manual tasks (UI sorting)
+    const effectiveTask = loadingTask?.isImportant ? loadingTask : manualTask || loadingTask;
 
     // Sync taskToDisplay with deferred clear — no setState for visibility here
     useEffect(() => {
@@ -59,32 +76,32 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ task: manualTask =
             const timeout = setTimeout(() => {
                 setTaskToDisplay(null);
                 hasAutoShownRef.current = false;
-                setIsLoadingVisible(false);
+                setIsLoadingPopupVisible(false);
             }, 250);
             return () => clearTimeout(timeout);
         }
     }, [effectiveTask]);
 
     // Animation only — no setState calls, safe from loops
-    // Auto-show logic uses a ref guard so setIsLoadingVisible fires at most once per task
+    // Auto-show logic uses a ref guard so setIsLoadingPopupVisible fires at most once per task
     useEffect(() => {
         if (taskToDisplay) {
             if (taskToDisplay.isImportant && !hasAutoShownRef.current) {
                 hasAutoShownRef.current = true;
-                setIsLoadingVisible(true);
+                setIsLoadingPopupVisible(true);
             }
-            fadeAnim.value = withTiming(isLoadingVisible ? 1 : 0, { duration: 200 });
+            fadeAnim.value = withTiming(isLoadingPopupVisible ? 1 : 0, { duration: 120 });
         } else {
-            fadeAnim.value = withTiming(0, { duration: 250 });
+            fadeAnim.value = withTiming(0, { duration: 150 });
         }
-    }, [taskToDisplay, isLoadingVisible, setIsLoadingVisible, fadeAnim]);
+    }, [taskToDisplay, isLoadingPopupVisible, setIsLoadingPopupVisible, fadeAnim]);
 
     // Animate when user manually toggles visibility
     useEffect(() => {
-        fadeAnim.value = withTiming(isLoadingVisible && !!taskToDisplay ? 1 : 0, { duration: 200 });
-    }, [isLoadingVisible, taskToDisplay, fadeAnim]);
+        fadeAnim.value = withTiming(isLoadingPopupVisible && !!taskToDisplay ? 1 : 0, { duration: 120 });
+    }, [isLoadingPopupVisible, taskToDisplay, fadeAnim]);
 
-    const toggleVisible = () => setIsLoadingVisible((prev) => !prev);
+    const toggleVisible = () => setIsLoadingPopupVisible((prev) => !prev);
     const toggleExpanded = () => {
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
         setIsLoadingExpanded((prev) => !prev);
@@ -117,77 +134,145 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ task: manualTask =
         return <Info size={14} color="#3b82f6" />;
     };
 
+    // ── Render ──────────────────────────────────────────────────────────────────
     return (
         <View ref={containerRef} onLayout={handleLayout} className="relative items-end">
             <TouchableOpacity activeOpacity={0.7} onPress={toggleVisible} className="p-1">
                 <ActivityIndicator size="small" color="#3b82f6" />
             </TouchableOpacity>
 
-            {isLoadingVisible && (
-                <Animated.View
-                    style={[animatedStyle, { left: leftOffset, width: tooltipWidth, top: MENU_OFFSET }]}
-                    className="absolute z-50"
-                    pointerEvents="box-none"
-                >
-                    {/* Triangle Arrow */}
-                    <View
-                        style={{
-                            width: 0,
-                            height: 0,
-                            backgroundColor: "transparent",
-                            borderStyle: "solid",
-                            borderLeftWidth: ARROW_WIDTH / 2,
-                            borderRightWidth: ARROW_WIDTH / 2,
-                            borderBottomWidth: ARROW_HEIGHT,
-                            borderLeftColor: "transparent",
-                            borderRightColor: "transparent",
-                            borderBottomColor: "#18181b",
-                            position: "absolute",
-                            top: -ARROW_HEIGHT,
-                            left: iconX + iconWidth / 2 - globalTargetX - ARROW_WIDTH / 2,
-                        }}
-                    />
-
-                    {/* Tooltip Box */}
-                    <View
-                        className={cn(
-                            "bg-zinc-900 rounded-2xl border border-zinc-800 shadow-2xl overflow-hidden backdrop-blur-xl",
-                            isLoadingExpanded ? "pb-2" : "",
-                        )}
-                    >
-                        <View className="p-4">
-                            <View className="flex-row items-center gap-2 mb-2">
-                                {getIcon()}
-                                <Text className="text-blue-400 text-[10px] font-bold uppercase tracking-widest flex-1">
-                                    {activeTask.label}
-                                </Text>
-                            </View>
-
-                            <View className="flex-row items-start gap-2">
-                                <Text
-                                    className="text-zinc-100 text-sm leading-5 flex-1 pl-1"
-                                    numberOfLines={isLoadingExpanded ? 0 : 1}
-                                    onTextLayout={(e) => {
-                                        const isTruncated =
-                                            e.nativeEvent.lines.length > 1 || e.nativeEvent.lines[0]?.width > tooltipWidth - 64;
-                                        if (isTruncated && !canExpand) setCanExpand(true);
-                                    }}
-                                >
-                                    {activeTask.detail}
-                                </Text>
-                                {canExpand && (
-                                    <TouchableOpacity onPress={toggleExpanded} className="p-1 -mt-1 pt-1">
-                                        {isLoadingExpanded ? (
-                                            <ChevronDown size={16} color="#3b82f6" />
-                                        ) : (
-                                            <ChevronLeft size={16} color="#3b82f6" />
-                                        )}
-                                    </TouchableOpacity>
+            {isLoadingPopupVisible && (
+                <>
+                    {popupSide === "left" ? (
+                        /* ── Left-side popup ──────────────────────────────────────────────────
+                         * Right edge is flush with the indicator's left edge (minus gap).
+                         * Top is aligned with the top of the activity indicator (top: 0).
+                         * Expanding the popup only grows downward — no displacement.
+                         */
+                        <Animated.View
+                            style={[
+                                animatedStyle,
+                                {
+                                    // Position relative to the indicator container:
+                                    // right = iconWidth + gap puts the popup's right edge just left of the indicator
+                                    right: iconWidth + LEFT_GAP,
+                                    width: leftSideWidth,
+                                    top: 0,
+                                },
+                            ]}
+                            className="absolute z-50"
+                            pointerEvents="box-none"
+                        >
+                            {/* Tooltip Box — no arrow needed for left-side mode */}
+                            <View
+                                className={cn(
+                                    "bg-zinc-900 rounded-2xl border border-zinc-800 shadow-2xl overflow-hidden backdrop-blur-xl",
+                                    isLoadingExpanded ? "pb-2" : "",
                                 )}
+                            >
+                                <View className="p-4">
+                                    <View className="flex-row items-center gap-2 mb-2">
+                                        {getIcon()}
+                                        <Text className="text-blue-400 text-[10px] font-bold uppercase tracking-widest flex-1">
+                                            {activeTask.label}
+                                        </Text>
+                                    </View>
+
+                                    <View className="flex-row items-start gap-2">
+                                        <Text
+                                            className="text-zinc-100 text-sm leading-5 flex-1 pl-1"
+                                            numberOfLines={isLoadingExpanded ? 0 : 1}
+                                            onTextLayout={(e) => {
+                                                const isTruncated =
+                                                    e.nativeEvent.lines.length > 1 ||
+                                                    e.nativeEvent.lines[0]?.width > leftSideWidth - 64;
+                                                if (isTruncated && !canExpand) setCanExpand(true);
+                                            }}
+                                        >
+                                            {activeTask.detail}
+                                        </Text>
+                                        {canExpand && (
+                                            <TouchableOpacity onPress={toggleExpanded} className="p-1 -mt-1 pt-1">
+                                                {isLoadingExpanded ? (
+                                                    <ChevronDown size={16} color="#3b82f6" />
+                                                ) : (
+                                                    <ChevronLeft size={16} color="#3b82f6" />
+                                                )}
+                                            </TouchableOpacity>
+                                        )}
+                                    </View>
+                                </View>
                             </View>
-                        </View>
-                    </View>
-                </Animated.View>
+                        </Animated.View>
+                    ) : (
+                        /* ── Bottom popup (default) ───────────────────────────────────────── */
+                        <Animated.View
+                            style={[animatedStyle, { left: leftOffset, width: tooltipWidth, top: MENU_OFFSET }]}
+                            className="absolute z-50"
+                            pointerEvents="box-none"
+                        >
+                            {/* Triangle Arrow */}
+                            <View
+                                style={{
+                                    width: 0,
+                                    height: 0,
+                                    backgroundColor: "transparent",
+                                    borderStyle: "solid",
+                                    borderLeftWidth: ARROW_WIDTH / 2,
+                                    borderRightWidth: ARROW_WIDTH / 2,
+                                    borderBottomWidth: ARROW_HEIGHT,
+                                    borderLeftColor: "transparent",
+                                    borderRightColor: "transparent",
+                                    borderBottomColor: "#18181b",
+                                    position: "absolute",
+                                    top: -ARROW_HEIGHT,
+                                    left: iconX + iconWidth / 2 - globalTargetX - ARROW_WIDTH / 2,
+                                }}
+                            />
+
+                            {/* Tooltip Box */}
+                            <View
+                                className={cn(
+                                    "bg-zinc-900 rounded-2xl border border-zinc-800 shadow-2xl overflow-hidden backdrop-blur-xl",
+                                    isLoadingExpanded ? "pb-2" : "",
+                                )}
+                            >
+                                <View className="p-4">
+                                    <View className="flex-row items-center gap-2 mb-2">
+                                        {getIcon()}
+                                        <Text className="text-blue-400 text-[10px] font-bold uppercase tracking-widest flex-1">
+                                            {activeTask.label}
+                                        </Text>
+                                    </View>
+
+                                    <View className="flex-row items-start gap-2">
+                                        <Text
+                                            className="text-zinc-100 text-sm leading-5 flex-1 pl-1"
+                                            numberOfLines={isLoadingExpanded ? 0 : 1}
+                                            onTextLayout={(e) => {
+                                                const isTruncated =
+                                                    e.nativeEvent.lines.length > 1 ||
+                                                    e.nativeEvent.lines[0]?.width > tooltipWidth - 64;
+                                                if (isTruncated && !canExpand) setCanExpand(true);
+                                            }}
+                                        >
+                                            {activeTask.detail}
+                                        </Text>
+                                        {canExpand && (
+                                            <TouchableOpacity onPress={toggleExpanded} className="p-1 -mt-1 pt-1">
+                                                {isLoadingExpanded ? (
+                                                    <ChevronDown size={16} color="#3b82f6" />
+                                                ) : (
+                                                    <ChevronLeft size={16} color="#3b82f6" />
+                                                )}
+                                            </TouchableOpacity>
+                                        )}
+                                    </View>
+                                </View>
+                            </View>
+                        </Animated.View>
+                    )}
+                </>
             )}
         </View>
     );

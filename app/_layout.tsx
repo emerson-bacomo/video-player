@@ -1,4 +1,5 @@
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
+import { DarkTheme, ThemeProvider as NavigationThemeProvider } from "@react-navigation/native";
 import { Stack } from "expo-router";
 import { View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -14,7 +15,7 @@ import { MediaProvider } from "../hooks/useMedia";
 import { initDB } from "../utils/db";
 
 function InnerRoot() {
-    const { themeVars } = useTheme();
+    const { themeVars, colors } = useTheme();
     return (
         <View className="bg-background flex-1" style={[themeVars]}>
             <SettingsProvider>
@@ -22,11 +23,25 @@ function InnerRoot() {
                     <MediaProvider>
                         <BottomSheetModalProvider>
                             <SafeAreaProvider>
-                                <Stack screenOptions={{ headerShown: false }}>
-                                    <Stack.Screen name="(tabs)" />
-                                    <Stack.Screen name="player" />
-                                    <Stack.Screen name="search" />
-                                </Stack>
+                                <NavigationThemeProvider
+                                    value={{
+                                        ...DarkTheme,
+                                        colors: {
+                                            ...DarkTheme.colors,
+                                            background: colors.background,
+                                        },
+                                    }}
+                                >
+                                    <Stack
+                                        screenOptions={{
+                                            headerShown: false,
+                                        }}
+                                    >
+                                        <Stack.Screen name="(tabs)" />
+                                        <Stack.Screen name="player" />
+                                        <Stack.Screen name="search" />
+                                    </Stack>
+                                </NavigationThemeProvider>
                             </SafeAreaProvider>
                             {/* Floats above all screens, hidden automatically on the player route */}
                             <FloatingPlayer />

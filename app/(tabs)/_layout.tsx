@@ -1,6 +1,6 @@
 import { useTheme } from "@/context/ThemeContext";
 import { Tabs } from "expo-router";
-import { Film, Search, Settings } from "lucide-react-native";
+import { Film, Settings } from "lucide-react-native";
 import React from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
