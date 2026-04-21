@@ -6,8 +6,8 @@ import {
     BottomSheetModal as GBottomSheetModal,
 } from "@gorhom/bottom-sheet";
 import { cssInterop } from "nativewind";
-import React, { useCallback } from "react";
-import { useWindowDimensions, View } from "react-native";
+import React, { useCallback, useEffect } from "react";
+import { BackHandler, useWindowDimensions, View } from "react-native";
 
 // 1. Define the interface for our new interop props
 interface StyledBottomSheetModalProps extends BottomSheetModalProps {
@@ -43,6 +43,19 @@ export const ThemedBottomSheet = ({ isVisible, children, onClose }: ThemedBottom
             bottomSheetModalRef.current?.dismiss();
         }
     }, [isVisible]);
+
+    useEffect(() => {
+        const onBackPress = () => {
+            if (isVisible) {
+                onClose();
+                return true;
+            }
+            return false;
+        };
+
+        const subscription = BackHandler.addEventListener("hardwareBackPress", onBackPress);
+        return () => subscription.remove();
+    }, [isVisible, onClose]);
 
     const renderBackdrop = useCallback(
         (props: BottomSheetBackdropProps) => (

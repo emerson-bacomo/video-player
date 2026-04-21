@@ -12,19 +12,26 @@ import {
     getAlbumsDb,
     getAllPlaybackDataDb,
     getAllVideosDb,
-    getLastSyncTimestampDb,
+    getHiddenAlbumsDb,
+    getHiddenVideosDb,
     getSettingDb,
     getVideoByIdDb,
     getVideosForAlbumDb,
+    renameAlbumDb,
+    renameVideoDb,
     resetDatabaseDb,
     saveAlbumsDb,
     savePlaybackDataDb,
     saveSettingDb,
     saveVideosDb,
+    setAlbumHiddenDb,
+    setVideoHiddenDb,
     searchVideosByNameDb,
+    getLastSyncTimestampDb,
     setLastSyncTimestampDb,
     updateAlbumThumbnailDb,
     updateVideoThumbnailDb,
+    updateAlbumSortDb,
 } from "../utils/db";
 import { useSettings } from "./useSettings";
 
@@ -56,6 +63,7 @@ export interface VideoMedia {
 }
 
 export type SortBy = "name" | "date" | "duration" | "episode";
+export type AlbumSortBy = "name" | "date" | "count";
 
 // Centralized task IDs for tracking specific background work
 const TASK_IDS = {
@@ -72,11 +80,13 @@ export interface Album {
     title: string;
     displayName: string;
     assetCount: number;
+    path?: string;
     type?: string;
     thumbnail?: string;
     lastModified?: number;
     hasNew?: boolean;
     isPlaceholder?: boolean;
+    sortConfig?: string;
 }
 
 export interface MediaContextType {
@@ -87,8 +97,8 @@ export interface MediaContextType {
     setCurrentAlbum: (album: Album | null) => void;
     loadingTask: LoadingTask | null;
     error: string | null;
-    albumSort: { by: SortBy; order: SortOrder };
-    setAlbumSort: React.Dispatch<React.SetStateAction<{ by: SortBy; order: SortOrder }>>;
+    albumSort: { by: AlbumSortBy; order: SortOrder };
+    setAlbumSort: React.Dispatch<React.SetStateAction<{ by: AlbumSortBy; order: SortOrder }>>;
     videoSort: { by: SortBy; order: SortOrder };
     setVideoSort: React.Dispatch<React.SetStateAction<{ by: SortBy; order: SortOrder }>>;
     fetchAlbums: () => Promise<void>;
@@ -117,8 +127,33 @@ export interface MediaContextType {
     isLoadingExpanded: boolean;
     setIsLoadingExpanded: React.Dispatch<React.SetStateAction<boolean>>;
     setLoadingTask: React.Dispatch<React.SetStateAction<LoadingTask | null>>;
+    renameVideo: (videoId: string, newName: string) => void;
+    renameAlbum: (albumId: string, newName: string) => void;
+    updateMultipleVideoProgress: (videoIds: string[], sec: number) => void;
+    isSelectionMode: boolean;
+    selectedIds: Set<string>;
+    toggleSelection: (id: string) => void;
+    clearSelection: () => void;
+    selectAll: () => void;
+    togglePrefixSelection: (prefix: string) => void;
+    selectPrefixesOfSelected: () => void;
+    hideVideo: (videoId: string) => Promise<void>;
+    hideAlbum: (albumId: string) => Promise<void>;
+    hideMultipleVideos: (videoIds: string[]) => Promise<void>;
+    hideMultipleAlbums: (albumIds: string[]) => Promise<void>;
+    unhideVideo: (videoId: string) => Promise<void>;
+    unhideAlbum: (albumId: string) => Promise<void>;
+    unhideMultipleVideos: (videoIds: string[]) => Promise<void>;
+    unhideMultipleAlbums: (albumIds: string[]) => Promise<void>;
+    fetchHiddenMedia: () => Promise<{ albums: Album[]; videos: VideoMedia[] }>;
     searchMedia: (query: string) => VideoMedia[];
+    getVideoById: (id: string) => VideoMedia | null;
     permissionResponse: MediaLibrary.PermissionResponse | null;
+    videoSortMode: "global" | "local";
+    switchVideoSortMode: (mode: "global" | "local") => void;
+    albumSortOverrides: Record<string, { by: SortBy; order: SortOrder }>;
+    compareByVideoSort: (a: VideoMedia, b: VideoMedia, vSort?: { by: SortBy; order: SortOrder }) => number;
+    compareByAlbumSort: (a: Album, b: Album, aSort?: { by: AlbumSortBy; order: SortOrder }) => number;
 }
 
 const MediaContext = createContext<MediaContextType | null>(null);
@@ -137,6 +172,47 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
     const setLoadingTask = useCallback((task: LoadingTask | null | ((prev: LoadingTask | null) => LoadingTask | null)) => {
         setLoadingTaskInternal(task);
     }, []);
+
+    const [isSelectionMode, setIsSelectionMode] = useState(false);
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+    const toggleSelection = useCallback((id: string) => {
+        setIsSelectionMode(true);
+        setSelectedIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) {
+                next.delete(id);
+            } else {
+                next.add(id);
+            }
+            return next;
+        });
+    }, []);
+
+    const clearSelection = useCallback(() => {
+        setIsSelectionMode(false);
+        setSelectedIds(new Set());
+    }, []);
+
+    const selectAll = useCallback(() => {
+        if (currentAlbum) {
+            const allIds = currentAlbumVideos.map((v) => v.id);
+            if (selectedIds.size === allIds.length) {
+                setSelectedIds(new Set());
+            } else {
+                setSelectedIds(new Set(allIds));
+                setIsSelectionMode(true);
+            }
+        } else {
+            const allIds = albums.map((a) => a.id);
+            if (selectedIds.size === allIds.length) {
+                setSelectedIds(new Set());
+            } else {
+                setSelectedIds(new Set(allIds));
+                setIsSelectionMode(true);
+            }
+        }
+    }, [currentAlbum, currentAlbumVideos, albums, selectedIds.size]);
     const lastTaskIdRef = React.useRef<string | null>(null);
 
     // Side-effects for loading task changes: Visibility & Auto-Expansion
@@ -165,8 +241,12 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
     const [error, setError] = useState<string | null>(null);
     const [isLoadingPopupVisible, setIsLoadingPopupVisible] = useState(false);
     const [isLoadingExpanded, setIsLoadingExpanded] = useState(false);
-    const [albumSort, setAlbumSortState] = useState<{ by: SortBy; order: SortOrder }>({ by: "date", order: "desc" });
+    const [albumSort, setAlbumSortState] = useState<{ by: AlbumSortBy; order: SortOrder }>({ by: "date", order: "desc" });
     const [videoSort, setVideoSortState] = useState<{ by: SortBy; order: SortOrder }>({ by: "episode", order: "asc" });
+    const [globalVideoSort, setGlobalVideoSort] = useState<{ by: SortBy; order: SortOrder }>({ by: "episode", order: "asc" });
+    const [videoSortMode, setVideoSortMode] = useState<"global" | "local">("global");
+    const [albumSortOverrides, setAlbumSortOverrides] = useState<Record<string, { by: SortBy; order: SortOrder }>>({});
+    const albumSortOverridesRef = React.useRef<Record<string, { by: SortBy; order: SortOrder }>>({});
     const dismissTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const minimizeTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingDismissRef = React.useRef<(() => void) | null>(null);
@@ -212,7 +292,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
     // Live State Refs to prevent stale closures inside background queue async workers
     const currentAlbumRef = React.useRef<Album | null>(null);
     const videoSortRef = React.useRef({ by: "episode" as SortBy, order: "asc" as SortOrder });
-    const albumSortRef = React.useRef({ by: "date" as SortBy, order: "desc" as SortOrder });
+    const albumSortRef = React.useRef({ by: "date" as AlbumSortBy, order: "desc" as SortOrder });
     const albumsRef = React.useRef<Record<string, Album>>({}); // Dictionary for O(1) lookup
     const albumRankRef = React.useRef<Map<string, number>>(new Map()); // id → sort rank, O(1) lookup
     const allVideosCacheRef = React.useRef<Record<string, VideoMedia[]>>({});
@@ -226,16 +306,73 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
         setCurrentAlbumState(a);
     }, []);
 
-    const setVideoSort = useCallback((s: React.SetStateAction<{ by: SortBy; order: SortOrder }>) => {
-        setVideoSortState((prev) => {
+    const setVideoSort = useCallback(
+        (s: React.SetStateAction<{ by: SortBy; order: SortOrder }>) => {
+            const prev = videoSortRef.current;
             const next = typeof s === "function" ? s(prev) : s;
-            if (prev.by === next.by && prev.order === next.order) return prev;
-            videoSortRef.current = next;
-            return next;
-        });
-    }, []);
 
-    const setAlbumSort = useCallback((s: React.SetStateAction<{ by: SortBy; order: SortOrder }>) => {
+            if (prev.by === next.by && prev.order === next.order) return;
+
+            // 1. Update State & Ref (Pure)
+            setVideoSortState(next);
+            videoSortRef.current = next;
+
+            // 2. Perform Side Effects (Outside of State Updater)
+            if (videoSortMode === "global") {
+                setGlobalVideoSort(next);
+                saveSettingDb("videoSort", JSON.stringify(next));
+            } else if (currentAlbumRef.current) {
+                const albumId = currentAlbumRef.current.id;
+                console.log("[Media] Saving local sort for album:", albumId, next);
+                
+                updateAlbumSortDb(albumId, JSON.stringify(next));
+                
+                setAlbumSortOverrides(prev => {
+                    const nextOverrides = { ...prev, [albumId]: next };
+                    albumSortOverridesRef.current = nextOverrides;
+                    return nextOverrides;
+                });
+            }
+        },
+        [videoSortMode],
+    );
+
+    const switchVideoSortMode = useCallback(
+        (mode: "global" | "local") => {
+            if (mode === videoSortMode) return;
+            setVideoSortMode(mode);
+
+            if (mode === "global") {
+                setVideoSortState(globalVideoSort);
+                videoSortRef.current = globalVideoSort;
+            } else if (currentAlbumRef.current) {
+                const albumId = currentAlbumRef.current.id;
+                const localSort = albumSortOverridesRef.current[albumId];
+                
+                console.log("[Media] Switching to local mode for album:", albumId, "LocalSort:", localSort);
+                
+                if (localSort) {
+                    setVideoSortState(localSort);
+                    videoSortRef.current = localSort;
+                } else {
+                    // Default local to global if not set, and IMMEDIATELY persist it
+                    console.log("[Media] Initializing local sort from global for album:", albumId);
+                    setVideoSortState(globalVideoSort);
+                    videoSortRef.current = globalVideoSort;
+                    
+                    updateAlbumSortDb(albumId, JSON.stringify(globalVideoSort));
+                    setAlbumSortOverrides(prev => {
+                        const nextOverrides = { ...prev, [albumId]: globalVideoSort };
+                        albumSortOverridesRef.current = nextOverrides;
+                        return nextOverrides;
+                    });
+                }
+            }
+        },
+        [videoSortMode, globalVideoSort],
+    );
+
+    const setAlbumSort = useCallback((s: React.SetStateAction<{ by: AlbumSortBy; order: SortOrder }>) => {
         setAlbumSortState((prev) => {
             const next = typeof s === "function" ? s(prev) : s;
             if (prev.by === next.by && prev.order === next.order) return prev;
@@ -319,10 +456,6 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
 
     useEffect(() => {
         saveSettingDb("videoSort", JSON.stringify(videoSort));
-        // Also re-sort current videos in state if they exist
-        if (currentAlbumVideos.length > 0) {
-            setCurrentAlbumVideos((prev) => [...prev].sort((a, b) => compareByVideoSort(a, b, videoSort)));
-        }
     }, [videoSort]);
 
     const [permissionResponse, requestPermission] = MediaLibrary.usePermissions();
@@ -367,8 +500,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             comp = (a.lastModified || 0) - (b.lastModified || 0);
         } else if (aSort.by === "name") {
             comp = a.displayName.localeCompare(b.displayName);
-        } else if (aSort.by === "duration") {
-            // "duration" maps to assetCount for albums
+        } else if (aSort.by === "count") {
             comp = (a.assetCount || 0) - (b.assetCount || 0);
         }
         return aSort.order === "asc" ? comp : -comp;
@@ -892,6 +1024,16 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                     displayName: cleanName(a.title),
                 }));
                 setAlbums(cleanA);
+                cleanA.forEach((a) => {
+                    albumsRef.current[a.id] = a;
+                    if (a.sortConfig) {
+                        try {
+                            const parsed = JSON.parse(a.sortConfig);
+                            albumSortOverridesRef.current[a.id] = parsed;
+                        } catch (e) {}
+                    }
+                });
+                setAlbumSortOverrides({ ...albumSortOverridesRef.current });
 
                 const fullVideoCache: Record<string, VideoMedia[]> = {};
                 for (const album of cachedAlbums) {
@@ -933,7 +1075,12 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             const savedAlbumSort = getSettingDb("albumSort");
             if (savedAlbumSort) setAlbumSort(JSON.parse(savedAlbumSort));
             const savedVideoSort = getSettingDb("videoSort");
-            if (savedVideoSort) setVideoSort(JSON.parse(savedVideoSort));
+            if (savedVideoSort) {
+                const parsed = JSON.parse(savedVideoSort);
+                setVideoSortState(parsed);
+                setGlobalVideoSort(parsed);
+                videoSortRef.current = parsed;
+            }
             const savedFilters = getSettingDb("folderFilters");
             if (savedFilters) setFolderFilters(JSON.parse(savedFilters));
         } catch (e) {
@@ -1079,11 +1226,16 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                             saveVideosDb(a.id, sorted);
                             allVideosCacheRef.current[a.id] = sorted;
 
+                            const firstVideoPath = sorted[0]?.path;
+                            const albumPath = firstVideoPath
+                                ? firstVideoPath.substring(0, firstVideoPath.lastIndexOf("/"))
+                                : undefined;
                             const albumObj: Album = {
                                 id: a.id,
                                 title: albumTitleMap.get(a.id) || "Unknown",
                                 displayName: cleanName(albumTitleMap.get(a.id) || "Unknown"),
                                 assetCount: sorted.length,
+                                path: albumPath,
                                 thumbnail: getAlbumThumbnailForVideos(sorted),
                                 hasNew: true,
                                 lastModified: Math.max(...sorted.map((v) => v.modificationTime || 0)),
@@ -1142,6 +1294,18 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
         }
     };
 
+    const searchMedia = useCallback((query: string) => {
+        const q = query.toLowerCase().trim();
+        if (!q) return [];
+        const results: VideoMedia[] = [];
+        for (const video of videoDictRef.current.values()) {
+            if (video.displayName.toLowerCase().includes(q)) {
+                results.push(video);
+            }
+        }
+        return results;
+    }, []);
+
     const fetchAlbums = async () => {
         await performSmartSync();
         await loadDataFromDB();
@@ -1169,10 +1333,19 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
         thumbnail?: string;
         lastModified?: number;
     }) => {
-        // 0. Update currentAlbumRef FIRST so performSmartSync knows which album
-        //    is active and doesn't push stale data from the previous album.
-        currentAlbumRef.current = albumsRef.current[album.id] || (album as Album);
-        const fullAlbum = () => albumsRef.current[album.id] || (album as Album);
+        // 0. Resolve the FULL album record to ensure we have 'sortConfig'
+        let fullAlbumRecord = albumsRef.current[album.id];
+        if (!fullAlbumRecord) {
+            const allCached = getAlbumsDb();
+            const matching = allCached.find((a) => a.id === album.id);
+            if (matching) {
+                fullAlbumRecord = { ...matching, displayName: cleanName(matching.title) };
+                albumsRef.current[album.id] = fullAlbumRecord;
+            }
+        }
+
+        currentAlbumRef.current = fullAlbumRecord || (album as Album);
+        setCurrentAlbum(currentAlbumRef.current);
 
         // 1. Show data IMMEDIATELY from in-memory cache (zero latency)
         const cached = allVideosCacheRef.current[album.id];
@@ -1182,11 +1355,20 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             // 2. Cache miss — load synchronously from DB (fast, no async I/O)
             loadAlbumFromDb(album.id);
         }
-        setCurrentAlbum(fullAlbum());
 
-        // 3. Fire sync in the background — updates state if anything changed.
-        //    When the sync finishes, reconcile the latest cache back into state
-        //    so any additions or deletions are reflected automatically.
+        // 3. Initialize sorting mode based on local config
+        const localSort = albumSortOverridesRef.current[album.id];
+        if (localSort) {
+            console.log("[Media] Initializing folder with local sort:", album.id, localSort);
+            setVideoSortState(localSort);
+            videoSortRef.current = localSort;
+            setVideoSortMode("local");
+        } else {
+            setVideoSortMode("global");
+            setVideoSortState(globalVideoSort);
+            videoSortRef.current = globalVideoSort;
+        }
+
         performSmartSync().then(() => {
             const activeId = currentAlbumRef.current?.id;
             if (activeId !== album.id) return; // User navigated away, skip
@@ -1250,8 +1432,6 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
 
     const refreshPlaybackProgress = React.useCallback(() => {
         try {
-            // @ts-ignore
-            const { getAllPlaybackDataDb } = require("../utils/db");
             const playbackData = getAllPlaybackDataDb();
             const playbackMap = new Map<string, number>();
             playbackData.forEach((p: any) => playbackMap.set(p.video_id, p.last_played_sec));
@@ -1378,9 +1558,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
 
     // Re-sort albums immediately when sort order changes
     useEffect(() => {
-        if (albums.length > 0 && !loadingTask) {
-            setAlbums((prev) => [...prev].sort((a, b) => compareByAlbumSort(a, b)));
-        }
+        saveSettingDb("albumSort", JSON.stringify(albumSort));
     }, [albumSort]);
 
     // Update album thumbnails when video sort or prefix filters change
@@ -1420,21 +1598,268 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
         }
     }, [videoSort, allVideosCache, folderFilters]);
 
-    const searchMedia = (query: string) => {
-        const dbResults = searchVideosByNameDb(query);
-        return dbResults.map((v: any) => {
-            const rawName = v.displayName || v.filename;
-            const displayName = cleanName(rawName);
-            return {
-                ...v,
-                displayName,
-                thumbnail: v.thumbnail || undefined,
-                baseThumbnailUri: getThumbnailUri(v.id),
-                prefix: extractPrefix(displayName),
-                episode: extractEpisode(displayName),
-            };
+    const togglePrefixSelection = useCallback((prefix: string) => {
+        if (!prefix) return;
+        
+        setIsSelectionMode(true);
+        setSelectedIds((prev) => {
+            const next = new Set(prev);
+            const prefixedVideos = currentAlbumVideos.filter(v => v.prefix === prefix);
+            prefixedVideos.forEach(v => next.add(v.id));
+            return next;
         });
-    };
+    }, [currentAlbumVideos]);
+
+    const hideVideo = useCallback(async (videoId: string) => {
+        setVideoHiddenDb(videoId, true);
+        
+        setCurrentAlbumVideos(prev => prev.filter(v => v.id !== videoId));
+        setAllVideosCache(prev => {
+            const next = { ...prev };
+            for (const albumId in next) {
+                next[albumId] = next[albumId].filter(v => v.id !== videoId);
+            }
+            return next;
+        });
+    }, []);
+
+    const hideAlbum = useCallback(async (albumId: string) => {
+        setAlbumHiddenDb(albumId, true);
+        setAlbums(prev => prev.filter(a => a.id !== albumId));
+    }, []);
+
+    const hideMultipleVideos = useCallback(async (videoIds: string[]) => {
+        const idSet = new Set(videoIds);
+        videoIds.forEach(id => setVideoHiddenDb(id, true));
+
+        setCurrentAlbumVideos(prev => prev.filter(v => !idSet.has(v.id)));
+        setAllVideosCache(prev => {
+            const next = { ...prev };
+            for (const albumId in next) {
+                next[albumId] = next[albumId].filter(v => !idSet.has(v.id));
+            }
+            return next;
+        });
+        clearSelection();
+    }, [clearSelection]);
+
+    const hideMultipleAlbums = useCallback(async (albumIds: string[]) => {
+        const idSet = new Set(albumIds);
+        albumIds.forEach(id => setAlbumHiddenDb(id, true));
+        setAlbums(prev => prev.filter(a => !idSet.has(a.id)));
+        clearSelection();
+    }, [clearSelection]);
+
+    const unhideVideo = useCallback(async (videoId: string) => {
+        setVideoHiddenDb(videoId, false);
+        // Refresh albums and videos
+        fetchAlbums();
+        if (currentAlbumRef.current) fetchVideosInAlbum(currentAlbumRef.current);
+    }, [fetchAlbums, fetchVideosInAlbum]);
+
+    const unhideAlbum = useCallback(async (albumId: string) => {
+        setAlbumHiddenDb(albumId, false);
+        fetchAlbums();
+    }, [fetchAlbums]);
+
+    const unhideMultipleVideos = useCallback(async (videoIds: string[]) => {
+        videoIds.forEach(id => setVideoHiddenDb(id, false));
+        fetchAlbums();
+        if (currentAlbumRef.current) fetchVideosInAlbum(currentAlbumRef.current);
+        clearSelection();
+    }, [fetchAlbums, fetchVideosInAlbum, clearSelection]);
+
+    const unhideMultipleAlbums = useCallback(async (albumIds: string[]) => {
+        albumIds.forEach(id => setAlbumHiddenDb(id, false));
+        fetchAlbums();
+        clearSelection();
+    }, [fetchAlbums, clearSelection]);
+
+    const fetchHiddenMedia = useCallback(async () => {
+        const albums = getHiddenAlbumsDb();
+        const videos = getHiddenVideosDb();
+        return { albums, videos };
+    }, []);
+
+    const selectPrefixesOfSelected = useCallback(() => {
+        if (selectedIds.size === 0) return;
+        
+        const currentPrefixes = new Set<string>();
+        currentAlbumVideos.forEach(v => {
+            if (selectedIds.has(v.id) && v.prefix) {
+                currentPrefixes.add(v.prefix);
+            }
+        });
+        
+        if (currentPrefixes.size === 0) return;
+        
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            currentAlbumVideos.forEach(v => {
+                if (v.prefix && currentPrefixes.has(v.prefix)) {
+                    next.add(v.id);
+                }
+            });
+            return next;
+        });
+    }, [selectedIds, currentAlbumVideos]);
+
+    const renameVideo = useCallback(async (videoId: string, newName: string) => {
+        // 1. Rename in DB
+        renameVideoDb(videoId, newName);
+
+        // 2. Physical rename (best effort)
+        const video = videoDictRef.current.get(videoId);
+        if (video && video.path && video.path.startsWith("file://")) {
+            try {
+                const oldPath = video.path;
+                const extension = oldPath.substring(oldPath.lastIndexOf("."));
+                const parentPath = oldPath.substring(0, oldPath.lastIndexOf("/"));
+                const newPath = `${parentPath}/${newName}${extension}`;
+
+                console.log(`[Media] Physically renaming file from ${oldPath} to ${newPath}`);
+                await FileSystem.moveAsync({
+                    from: oldPath,
+                    to: newPath,
+                });
+            } catch (e) {
+                console.error("[Media] Physical file rename failed:", e);
+            }
+        }
+
+        // Update local state
+        setCurrentAlbumVideos((prev) => {
+            const index = prev.findIndex((v) => v.id === videoId);
+            if (index === -1) return prev;
+            const next = [...prev];
+            next[index] = { ...next[index], displayName: newName };
+            return next;
+        });
+
+        setAllVideosCache((prev) => {
+            const next = { ...prev };
+            for (const key in next) {
+                const arr = next[key];
+                const vIndex = arr.findIndex((v) => v.id === videoId);
+                if (vIndex !== -1) {
+                    const nextArr = [...arr];
+                    nextArr[vIndex] = { ...nextArr[vIndex], displayName: newName };
+                    next[key] = nextArr;
+                    break;
+                }
+            }
+            return next;
+        });
+    }, []);
+
+    const renameAlbum = useCallback(async (albumId: string, newName: string) => {
+        // 1. Rename in DB
+        renameAlbumDb(albumId, newName);
+
+        // 2. Physical rename (best effort)
+        const albumVids = allVideosCacheRef.current[albumId] || [];
+        if (albumVids.length > 0) {
+            const firstVid = albumVids[0];
+            if (firstVid.path && firstVid.path.startsWith("file://")) {
+                try {
+                    const oldPath = firstVid.path;
+                    const pathParts = oldPath.split("/");
+                    pathParts.pop(); // remove filename
+                    const dirPath = pathParts.join("/");
+                    const lastDirName = pathParts.pop();
+                    const parentPath = pathParts.join("/");
+                    const newDirPath = `${parentPath}/${newName}`;
+
+                    if (dirPath !== newDirPath) {
+                        console.log(`[Media] Physically renaming folder from ${dirPath} to ${newDirPath}`);
+                        await FileSystem.moveAsync({
+                            from: dirPath,
+                            to: newDirPath,
+                        });
+
+                        // 3. Update all videos in this album to their new paths to maintain consistency
+                        const updatedVideos = albumVids.map((v) => {
+                            const filename = v.path.split("/").pop();
+                            const newVPath = `${newDirPath}/${filename}`;
+                            return { ...v, path: newVPath, uri: newVPath };
+                        });
+
+                        saveVideosDb(albumId, updatedVideos);
+                        allVideosCacheRef.current[albumId] = updatedVideos;
+                        setAllVideosCache((prev) => ({ ...prev, [albumId]: updatedVideos }));
+                        if (currentAlbumRef.current?.id === albumId) {
+                            setCurrentAlbumVideos(updatedVideos);
+                        }
+                    }
+                } catch (e) {
+                    console.error("[Media] Physical folder rename failed:", e);
+                }
+            }
+        }
+
+        setAlbums((prev) => {
+            const index = prev.findIndex((a) => a.id === albumId);
+            if (index === -1) return prev;
+            const next = [...prev];
+            next[index] = { ...next[index], displayName: newName };
+            return next.sort((a, b) => compareByAlbumSort(a, b));
+        });
+
+        if (currentAlbum?.id === albumId) {
+            setCurrentAlbum({ ...currentAlbum, displayName: newName });
+        }
+    }, [currentAlbum]);
+
+    const updateMultipleVideoProgress = useCallback((videoIds: string[], sec: number) => {
+        // 1. Update DB
+        videoIds.forEach((id) => savePlaybackDataDb(id, sec));
+
+        // 2. Update local state
+        setCurrentAlbumVideos((prev) => {
+            let changed = false;
+            const next = prev.map((v) => {
+                if (videoIds.includes(v.id)) {
+                    changed = true;
+                    return { ...v, lastPlayedSec: sec };
+                }
+                return v;
+            });
+            return changed ? next : prev;
+        });
+
+        setAllVideosCache((prev) => {
+            const next = { ...prev };
+            let changedGlobal = false;
+            for (const albumId in next) {
+                let changedInAlbum = false;
+                next[albumId] = next[albumId].map((v) => {
+                    if (videoIds.includes(v.id)) {
+                        changedInAlbum = true;
+                        changedGlobal = true;
+                        return { ...v, lastPlayedSec: sec };
+                    }
+                    return v;
+                });
+            }
+            return changedGlobal ? next : prev;
+        });
+    }, []);
+
+
+    const getVideoById = useCallback((id: string) => {
+        const v = getVideoByIdDb(id);
+        if (!v) return null;
+        const rawName = v.displayName || v.filename;
+        const displayName = cleanName(rawName);
+        return {
+            ...v,
+            displayName,
+            thumbnail: v.thumbnail || undefined,
+            baseThumbnailUri: getThumbnailUri(v.id),
+            prefix: extractPrefix(displayName),
+            episode: extractEpisode(displayName),
+        } as VideoMedia;
+    }, []);
 
     const contextValue = useMemo(
         () => ({
@@ -1473,7 +1898,32 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             isLoadingExpanded,
             setIsLoadingExpanded,
             searchMedia,
+            renameVideo,
+            renameAlbum,
+            updateMultipleVideoProgress,
+            isSelectionMode,
+            selectedIds,
+            toggleSelection,
+            clearSelection,
+            selectAll,
+            togglePrefixSelection,
+            selectPrefixesOfSelected,
+            hideVideo,
+            hideAlbum,
+            hideMultipleVideos,
+            hideMultipleAlbums,
+            unhideVideo,
+            unhideAlbum,
+            unhideMultipleVideos,
+            unhideMultipleAlbums,
+            fetchHiddenMedia,
+            getVideoById,
             permissionResponse,
+            videoSortMode,
+            switchVideoSortMode,
+            albumSortOverrides,
+            compareByVideoSort,
+            compareByAlbumSort,
         }),
         [
             albums,
@@ -1507,7 +1957,33 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             isLoadingExpanded,
             setIsLoadingExpanded,
             searchMedia,
+            renameVideo,
+            renameAlbum,
+            hideVideo,
+            hideAlbum,
+            hideMultipleVideos,
+            hideMultipleAlbums,
+            unhideVideo,
+            unhideAlbum,
+            unhideMultipleVideos,
+            unhideMultipleAlbums,
+            fetchHiddenMedia,
+            getVideoById,
+            searchMedia,
+            updateMultipleVideoProgress,
+            isSelectionMode,
+            selectedIds,
+            toggleSelection,
+            clearSelection,
+            selectAll,
+            togglePrefixSelection,
+            selectPrefixesOfSelected,
             permissionResponse,
+            videoSortMode,
+            switchVideoSortMode,
+            albumSortOverrides,
+            compareByVideoSort,
+            compareByAlbumSort,
         ],
     );
 

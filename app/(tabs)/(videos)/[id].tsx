@@ -3,8 +3,9 @@ import { Header } from "@/components/Header";
 import { Icon } from "@/components/Icon";
 import { LoadingStatus } from "@/components/LoadingStatus";
 import { PrefixFilterMenu } from "@/components/PrefixFilterMenu";
+import { RenameModal } from "@/components/RenameModal";
 import { SortMenu } from "@/components/SortMenu";
-import { ThemedSafeAreaView } from "@/components/Themed";
+import { ThemedView } from "@/components/Themed";
 import { VideoItem } from "@/components/VideoItem";
 import { VideoItemDetailsModal } from "@/components/VideoItemDetailsModal";
 import { useTheme } from "@/context/ThemeContext";
@@ -14,7 +15,8 @@ import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { Calendar, Clock, Film, Hash, Info, LucideIcon, SortAsc } from "lucide-react-native";
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef } from "react";
-import { FlatList, RefreshControl, Text, TouchableOpacity, View } from "react-native";
+import { BackHandler, FlatList, RefreshControl, Text, TouchableOpacity, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const AlbumVideosScreen = () => {
     const { id, title } = useLocalSearchParams<{ id: string; title: string }>();
@@ -32,8 +34,29 @@ const AlbumVideosScreen = () => {
         setFolderFilter,
         permissionResponse,
         albums,
+        isSelectionMode,
+        toggleSelection,
+        clearSelection,
+        renameVideo,
+        videoSortMode,
+        switchVideoSortMode,
+        compareByVideoSort,
     } = useMedia();
     const { colors } = useTheme();
+    const insets = useSafeAreaInsets();
+
+    useEffect(() => {
+        const backAction = () => {
+            if (isSelectionMode) {
+                clearSelection();
+                return true;
+            }
+            return false;
+        };
+
+        const backHandler = BackHandler.addEventListener("hardwareBackPress", backAction);
+        return () => backHandler.remove();
+    }, [isSelectionMode, clearSelection]);
 
     // Filtering State (Persisted)
     const selectedPrefixes = folderFilters[id] || [];
@@ -44,12 +67,15 @@ const AlbumVideosScreen = () => {
     const deferredPrefixes = useDeferredValue(selectedPrefixes);
 
     const [selectedVideoId, setSelectedVideoId] = React.useState<string | null>(null);
+    const [showAlbumInfo, setShowAlbumInfo] = React.useState(false);
+    const [renamingVideo, setRenamingVideo] = React.useState<any | null>(null);
+    const [isLoading, setIsLoading] = React.useState(true);
+
     const selectedVideo = React.useMemo(
         () => currentAlbumVideos.find((v) => v.id === selectedVideoId) || null,
         [currentAlbumVideos, selectedVideoId],
     );
-    const [showAlbumInfo, setShowAlbumInfo] = React.useState(false);
-    const isInitialLoading = !!loadingTask && currentAlbumVideos.length === 0;
+    const isInitialLoading = (!!loadingTask && currentAlbumVideos.length === 0) || isLoading;
 
     // Clear focus natively when routing backward so FFMPEG falls back to global priorities
     useEffect(() => {
@@ -98,7 +124,7 @@ const AlbumVideosScreen = () => {
 
     // 2. Prefix Calculation
     const prefixOptions = useMemo(() => {
-        if (videosWithMetadata.length === 0) return [];
+        if (isLoading || videosWithMetadata.length === 0) return [];
         // Map of rawPrefix -> { displayNamePrefix, count }
         const counts: Record<string, { label: string; count: number }> = {};
         videosWithMetadata.forEach((v) => {
@@ -125,8 +151,12 @@ const AlbumVideosScreen = () => {
         if (deferredPrefixes.length > 0) {
             result = result.filter((v) => deferredPrefixes.includes(v.rawPrefix));
         }
+
+        // Sort - Use deferred value so the SortMenu UI updates instantly
+        result.sort((a, b) => compareByVideoSort(a, b, deferredVideoSort));
+
         return result;
-    }, [videosWithMetadata, deferredPrefixes]);
+    }, [videosWithMetadata, deferredPrefixes, deferredVideoSort, compareByVideoSort]);
 
     const skeletonData = React.useMemo(
         () => Array.from({ length: 10 }).map((_, i) => ({ id: `skel-${i}`, isPlaceholder: true })),
@@ -154,6 +184,13 @@ const AlbumVideosScreen = () => {
         setSelectedPrefixes([]);
     };
 
+    const handleRenameVideo = (newName: string) => {
+        if (renamingVideo) {
+            renameVideo(renamingVideo.id, newName);
+            setRenamingVideo(null);
+        }
+    };
+
     useFocusEffect(
         useCallback(() => {
             // Update UI with any database playback changes made in the player screen
@@ -165,12 +202,15 @@ const AlbumVideosScreen = () => {
         if (id) {
             // Clear previous videos instantly so user doesn't see ghost content
             setCurrentAlbumVideos([]);
-            fetchVideosInAlbum({ id, title: title || "" });
+            setIsLoading(true);
+            fetchVideosInAlbum({ id, title: title || "" }).finally(() => {
+                setIsLoading(false);
+            });
         }
     }, [id]);
 
     return (
-        <ThemedSafeAreaView className="flex-1">
+        <ThemedView className="flex-1" style={{ paddingTop: insets.top }}>
             <StatusBar style="light" />
 
             <Header>
@@ -201,7 +241,14 @@ const AlbumVideosScreen = () => {
                 data={isInitialLoading ? skeletonData : processedVideos}
                 keyExtractor={(item) => item.id}
                 numColumns={2}
-                renderItem={({ item }: { item: any }) => <VideoItem item={item} setSelectedVideoId={setSelectedVideoId} />}
+                renderItem={({ item }: { item: any }) => (
+                    <VideoItem
+                        item={item}
+                        onLongPress={(v: any) => toggleSelection(v.id)}
+                        onInfoPress={(v: any) => setSelectedVideoId(v.id)}
+                        onRenamePress={(v: any) => setRenamingVideo(v)}
+                    />
+                )}
                 ListHeaderComponent={
                     <View className="flex-row justify-end items-center gap-2 mb-4 pr-2">
                         <PrefixFilterMenu
@@ -210,7 +257,14 @@ const AlbumVideosScreen = () => {
                             onOptionToggle={handleToggleFilter}
                             onClearAll={handleClearFilters}
                         />
-                        <SortMenu currentSort={videoSort} onSortChange={setVideoSort} options={videoSortOptions} />
+                        <SortMenu
+                            currentSort={videoSort}
+                            onSortChange={setVideoSort}
+                            options={videoSortOptions}
+                            mode={videoSortMode}
+                            onModeChange={switchVideoSortMode}
+                            showTabs={true}
+                        />
                     </View>
                 }
                 initialNumToRender={10}
@@ -245,7 +299,15 @@ const AlbumVideosScreen = () => {
                 onClose={() => setShowAlbumInfo(false)}
                 hideOpenFolderAction={true}
             />
-        </ThemedSafeAreaView>
+
+            <RenameModal
+                visible={!!renamingVideo}
+                onClose={() => setRenamingVideo(null)}
+                onRename={handleRenameVideo}
+                initialValue={renamingVideo?.displayName || ""}
+                title="Rename Video"
+            />
+        </ThemedView>
     );
 };
 

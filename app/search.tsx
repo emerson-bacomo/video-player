@@ -90,7 +90,7 @@ export default function SearchPage() {
                 renderItem={({ item }) => (
                     <VideoItem
                         item={item}
-                        setSelectedVideoId={setSelectedVideoId}
+                        onInfoPress={(v) => setSelectedVideoId(v.id)}
                         searchQuery={debouncedQuery}
                         noEllipsis={true}
                         onPress={handlePlayVideo}

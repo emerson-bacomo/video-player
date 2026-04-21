@@ -9,6 +9,7 @@ import {
     Pause,
     Play,
     Plus,
+    RotateCcw,
     Save,
     Scissors,
     SeparatorVertical,
@@ -58,6 +59,8 @@ interface PlayerControlsProps {
     onDragEnd?: () => void;
     onDoublePressMarker?: (markerTime: number) => void;
     isInitialLoadDone?: boolean;
+    isEnded: boolean;
+    onRestart: () => void;
     hasNext: boolean;
     hasPrevious: boolean;
 }
@@ -85,6 +88,8 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
     onDragEnd,
     onDoublePressMarker,
     isInitialLoadDone,
+    isEnded,
+    onRestart,
     hasNext,
     hasPrevious,
 }) => {
@@ -322,12 +327,18 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                     {/* Play/Pause */}
                     <TouchableOpacity
                         onPress={() => {
-                            setLocalIsPlaying(!localIsPlaying);
-                            onTogglePlay();
+                            if (isEnded) {
+                                onRestart();
+                            } else {
+                                setLocalIsPlaying(!localIsPlaying);
+                                onTogglePlay();
+                            }
                         }}
                         className={cn("bg-white/10 rounded-full border border-white/10", isLandscape ? "p-3" : "p-6")}
                     >
-                        {localIsPlaying ? (
+                        {isEnded ? (
+                            <RotateCcw size={isLandscape ? 32 : 42} color="white" />
+                        ) : localIsPlaying ? (
                             <Pause size={isLandscape ? 32 : 42} color="white" fill="white" />
                         ) : (
                             <Play size={isLandscape ? 32 : 42} color="white" fill="white" />

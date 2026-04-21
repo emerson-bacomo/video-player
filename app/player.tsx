@@ -20,7 +20,7 @@ import { PlayerGestureDetector } from "../components/PlayerGestureDetector";
 import { PlayerHeader } from "../components/PlayerHeader";
 import { SuccessBadge } from "../components/SuccessBadge";
 import { useClipping } from "../hooks/useClipping";
-import { useMedia } from "../hooks/useMedia";
+import { useMedia, VideoMedia } from "../hooks/useMedia";
 import { useSettings } from "../hooks/useSettings";
 import ExpoFFmpeg from "../modules/expo-ffmpeg/src/index";
 import { normalizeClipDestination } from "../utils/clipDestination";
@@ -29,8 +29,20 @@ export default function PlayerScreen() {
     const { videoId } = useLocalSearchParams<{ videoId?: string }>();
     const router = useRouter();
     const { settings, updateSettings } = useSettings();
-    const { currentAlbumVideos, setLoadingTask, fetchAlbums, updateVideoProgress } = useMedia();
-    const activeVideo = currentAlbumVideos.find((v) => v.id === videoId);
+    const { currentAlbumVideos, setLoadingTask, fetchAlbums, updateVideoProgress, getVideoById } = useMedia();
+    const [activeVideo, setActiveVideo] = useState<VideoMedia | null>(null);
+
+    useEffect(() => {
+        if (videoId) {
+            const cached = currentAlbumVideos.find((v) => v.id === videoId);
+            if (cached) {
+                setActiveVideo(cached);
+            } else {
+                const direct = getVideoById(videoId);
+                setActiveVideo(direct);
+            }
+        }
+    }, [videoId, currentAlbumVideos, getVideoById]);
 
     const [showControls, setShowControls] = useState(true);
     const [currentTime, setCurrentTime] = useState(0);
@@ -44,6 +56,7 @@ export default function PlayerScreen() {
     const insets = useSafeAreaInsets();
 
     const [paused, setPaused] = useState(true);
+    const [isEnded, setIsEnded] = useState(false);
     const [playbackRate, setPlaybackRate] = useState(1.0);
     const [duration, setDuration] = useState(0);
     const videoRef = useRef<VideoRef>(null);
@@ -158,6 +171,7 @@ export default function PlayerScreen() {
         setCurrentTime(0);
         currentTimeRef.current = 0;
         lastSaveSecRef.current = 0;
+        setIsEnded(false);
     }, [videoId]);
 
     const currentIndex = currentAlbumVideos.findIndex((v) => v.id === videoId);
@@ -242,6 +256,7 @@ export default function PlayerScreen() {
 
         setPaused(true);
         setCurrentTime(duration);
+        setIsEnded(true);
     }, [
         settings.autoPlayOnEnd,
         settings.autoPlaySimilarPrefixOnly,
@@ -252,6 +267,13 @@ export default function PlayerScreen() {
         duration,
     ]);
 
+    const handleRestart = useCallback(() => {
+        videoRef.current?.seek(0);
+        setCurrentTime(0);
+        setIsEnded(false);
+        setPaused(false);
+    }, []);
+
     const handleTogglePlay = useCallback(() => {
         setPaused((p) => !p);
         resetControlsTimer();
@@ -261,6 +283,7 @@ export default function PlayerScreen() {
         (value: number) => {
             videoRef.current?.seek(value);
             setCurrentTime(value);
+            setIsEnded(false);
             resetControlsTimer();
         },
         [resetControlsTimer],
@@ -376,13 +399,23 @@ export default function PlayerScreen() {
             const success = await ExpoFFmpeg.clipVideo(activeVideo.uri, outPathStr, segments);
 
             if (success) {
-                // Force Android Media Store to index the new file immediately
+                // 1. Force immediate indexing by creating a system asset
                 try {
-                    await MediaLibrary.createAssetAsync(`file://${outPathStr}`);
-                    // Trigger a refresh of the library state to pick up the new file
+                    const asset = await MediaLibrary.createAssetAsync(`file://${outPathStr}`);
+                    
+                    // 2. Try to move it from DCIM back to the intended folder (Album)
+                    const folderName = destDir.split("/").pop() || "Movies";
+                    const album = await MediaLibrary.getAlbumAsync(folderName);
+                    
+                    if (album) {
+                        await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
+                    }
+                    
+                    // 3. Refresh our local view
                     fetchAlbums();
                 } catch (idxError) {
-                    console.warn("[Player] Failed to register clip with MediaLibrary", idxError);
+                    console.warn("[Player] Failed to register and move asset:", idxError);
+                    fetchAlbums(); // fallback
                 }
 
                 setLoadingTask({
@@ -566,6 +599,8 @@ export default function PlayerScreen() {
                     hasPrevious={hasPrevious}
                     currentTime={currentTime}
                     duration={duration}
+                    isEnded={isEnded}
+                    onRestart={handleRestart}
                     // Clipping Props
                     isClipMode={isClipMode}
                     onToggleClipMode={() => setIsClipMode(!isClipMode)}
@@ -606,8 +641,8 @@ export default function PlayerScreen() {
                 headerLayout={headerLayout}
             />
 
-            <SuccessBadge 
-                visible={showSuccessBadge && !showControls} 
+            <SuccessBadge
+                visible={showSuccessBadge && !showControls}
                 onVisible={setShowSuccessBadge}
                 duration={1000}
                 style={{ top: insets.top + 15 }}

@@ -6,13 +6,23 @@ import { cn } from "../utils/cn";
 import { Menu } from "./Menu";
 import { Icon } from "./Icon";
 
-interface SortMenuProps {
-    currentSort: { by: SortBy; order: SortOrder };
-    onSortChange: (sort: { by: SortBy; order: SortOrder }) => void;
-    options: { label: string; value: SortBy; icon: any }[];
+interface SortMenuProps<T extends string = SortBy> {
+    currentSort: { by: T; order: SortOrder };
+    onSortChange: (sort: { by: T; order: SortOrder }) => void;
+    options: { label: string; value: T; icon: any }[];
+    mode?: "local" | "global";
+    onModeChange?: (mode: "local" | "global") => void;
+    showTabs?: boolean;
 }
 
-export const SortMenu = ({ currentSort, onSortChange, options }: SortMenuProps) => {
+export const SortMenu = <T extends string = SortBy>({
+    currentSort,
+    onSortChange,
+    options,
+    mode = "global",
+    onModeChange,
+    showTabs,
+}: SortMenuProps<T>) => {
     const CurrentIcon = options.find((o) => o.value === currentSort.by)?.icon || SortAsc;
 
     return (
@@ -26,8 +36,47 @@ export const SortMenu = ({ currentSort, onSortChange, options }: SortMenuProps) 
             </Menu.Trigger>
 
             <Menu.Content>
-                <View className="px-4 py-3 border-b border-border">
-                    <Text className="text-secondary font-bold text-[10px] uppercase tracking-widest">Sort By</Text>
+                {showTabs && onModeChange && (
+                    <View className="flex-row p-1 bg-zinc-900 mx-3 mt-3 mb-2 rounded-xl border border-white/5">
+                        <TouchableOpacity
+                            onPress={() => onModeChange("local")}
+                            className={cn(
+                                "flex-1 py-1.5 rounded-lg items-center justify-center",
+                                mode === "local" ? "bg-zinc-800" : "bg-transparent",
+                            )}
+                        >
+                            <Text
+                                className={cn(
+                                    "text-[10px] font-black uppercase tracking-widest",
+                                    mode === "local" ? "text-primary" : "text-secondary",
+                                )}
+                            >
+                                Local
+                            </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            onPress={() => onModeChange("global")}
+                            className={cn(
+                                "flex-1 py-1.5 rounded-lg items-center justify-center",
+                                mode === "global" ? "bg-zinc-800" : "bg-transparent",
+                            )}
+                        >
+                            <Text
+                                className={cn(
+                                    "text-[10px] font-black uppercase tracking-widest",
+                                    mode === "global" ? "text-primary" : "text-secondary",
+                                )}
+                            >
+                                Global
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
+
+                <View className="px-4 py-3 border-b border-white/5">
+                    <Text className="text-secondary font-bold text-[10px] uppercase tracking-widest">
+                        Sort {mode === "local" ? "this folder" : "globally"}
+                    </Text>
                 </View>
 
                 {options.map((option) => {

@@ -16,6 +16,7 @@ import {
     ChevronDown,
     ChevronRight,
     Cpu,
+    EyeOff,
     Filter,
     FolderOpen,
     Monitor,
@@ -166,8 +167,8 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
                 />
                 {!fromPlayer && (
                     <Header.Actions>
-                        <Header.SearchAction />
                         <LoadingStatus />
+                        <Header.SearchAction />
                     </Header.Actions>
                 )}
             </Header>
@@ -454,8 +455,8 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
                             <OrientationOption label="System" value="system" icon={Cpu} />
                         </View>
                         <Text className="text-zinc-500 text-xs mt-4">
-                            Override system orientation when starting a video. This only works as long as the orientation
-                            is not yet changed for this session.
+                            Override system orientation when starting a video. This only works as long as the orientation is not
+                            yet changed for this session.
                         </Text>
                     </ThemedCard>
 
@@ -644,9 +645,24 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
 
                 {/* About — hidden in player context */}
                 {!fromPlayer && (
-                    <ThemedCard className="p-6 items-center mb-10">
-                        <Text className="text-zinc-500 text-xs">Video Player Expo v1.0.0</Text>
-                    </ThemedCard>
+                    <>
+                        <ThemedCard className="p-4 mb-6">
+                            <TouchableOpacity
+                                className="p-4 rounded-xl border border-border bg-background flex-row items-center justify-between"
+                                onPress={() => router.push("/hidden-media")}
+                            >
+                                <View className="flex-row items-center gap-3">
+                                    <Icon icon={EyeOff} size={20} className="text-primary" />
+                                    <Text className="text-text font-semibold">Hidden Media</Text>
+                                </View>
+                                <Icon icon={ChevronRight} size={20} className="text-secondary" />
+                            </TouchableOpacity>
+                        </ThemedCard>
+
+                        <ThemedCard className="p-6 items-center mb-10">
+                            <Text className="text-zinc-500 text-xs text-center">Video Player Expo v1.1.0</Text>
+                        </ThemedCard>
+                    </>
                 )}
             </ScrollView>
         </ThemedSafeAreaView>

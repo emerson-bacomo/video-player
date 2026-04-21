@@ -1,6 +1,6 @@
 import { LinearGradient } from "expo-linear-gradient";
 import { router, usePathname } from "expo-router";
-import { ChevronLeft, ChevronRight, Maximize2, Play, X } from "lucide-react-native";
+import { ChevronLeft, ChevronRight, Maximize2, Play, RotateCcw, X } from "lucide-react-native";
 import React, { useEffect, useRef, useState } from "react";
 import { Dimensions, Text, TouchableOpacity, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -51,7 +51,7 @@ function getNearestCorner(cardCX: number, cardCY: number, screenW: number, scree
 
 export const FloatingPlayer: React.FC = () => {
     const { lastPlayed, showFloater, dismissFloater } = useFloatingPlayer();
-    const { currentAlbumVideos, openAlbumByVideoId } = useMedia();
+    const { currentAlbumVideos, allVideosCache, openAlbumByVideoId } = useMedia();
 
     const lastAttemptedIdRef = useRef<string | null>(null);
 
@@ -65,9 +65,23 @@ export const FloatingPlayer: React.FC = () => {
     const insets = useSafeAreaInsets();
     const pathname = usePathname();
     const { width: screenW, height: screenH } = Dimensions.get("window");
+    const videoRef = useRef<any>(null);
 
     // ── Live metadata ──────────────────────────────────────────────────────
-    const liveVideo = currentAlbumVideos.find((v) => v.id === lastPlayed?.id);
+    const liveVideo = React.useMemo(() => {
+        if (!lastPlayed?.id) return null;
+        // 1. Try currently viewed folder (for instant title/progress sync)
+        const currentMatch = currentAlbumVideos.find((v) => v.id === lastPlayed.id);
+        if (currentMatch) return currentMatch;
+
+        // 2. Search entire cache
+        for (const albumId in allVideosCache) {
+            const match = allVideosCache[albumId].find((v) => v.id === lastPlayed.id);
+            if (match) return match;
+        }
+        return null;
+    }, [lastPlayed?.id, currentAlbumVideos, allVideosCache]);
+
     const displayTitle = liveVideo?.displayName || "Video Player";
 
     // ── Initial position: bottom-right corner ─────────────────────────────
@@ -84,6 +98,7 @@ export const FloatingPlayer: React.FC = () => {
     const tabYRef = useRef(initY);
 
     const [isMinPaused, setIsMinPaused] = useState(true);
+    const [isMinEnded, setIsMinEnded] = useState(false);
     const [hasLoaded, setHasLoaded] = useState(false);
     const floaterOpacity = useSharedValue(0);
 
@@ -94,6 +109,7 @@ export const FloatingPlayer: React.FC = () => {
     // Reset load state when video source changes (e.g. from player screen back to home)
     useEffect(() => {
         setHasLoaded(false);
+        setIsMinEnded(false);
         floaterOpacity.value = 0;
 
         // Fail-safe for hot reload/slow ready events
@@ -228,10 +244,12 @@ export const FloatingPlayer: React.FC = () => {
                             {/* ── Video Player (Fades in over thumbnail) ──────────── */}
                             <Animated.View style={{ flex: 1, opacity: floaterOpacity }}>
                                 <CorePlayer
+                                    ref={videoRef}
                                     video={liveVideo!}
                                     paused={isMinPaused}
                                     resizeMode="cover"
                                     onReadyForDisplay={() => setHasLoaded(true)}
+                                    onEnd={() => setIsMinEnded(true)}
                                     style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
                                     isFloating={true}
                                 />
@@ -241,7 +259,15 @@ export const FloatingPlayer: React.FC = () => {
                             <TouchableOpacity
                                 className="absolute inset-0 z-20"
                                 activeOpacity={1}
-                                onPress={() => setIsMinPaused((p) => !p)}
+                                onPress={() => {
+                                    if (isMinEnded) {
+                                        videoRef.current?.seek(0);
+                                        setIsMinEnded(false);
+                                        setIsMinPaused(false);
+                                    } else {
+                                        setIsMinPaused((p) => !p);
+                                    }
+                                }}
                             />
 
                             {/* ── Overlays (Only on Pause) ────────────────── */}
@@ -270,9 +296,21 @@ export const FloatingPlayer: React.FC = () => {
                                         <View className="flex-row gap-2">
                                             <TouchableOpacity
                                                 className="w-7 h-7 rounded-full bg-black/40 items-center justify-center border border-white/20"
-                                                onPress={() => setIsMinPaused(false)}
+                                                onPress={() => {
+                                                    if (isMinEnded) {
+                                                        videoRef.current?.seek(0);
+                                                        setIsMinEnded(false);
+                                                        setIsMinPaused(false);
+                                                    } else {
+                                                        setIsMinPaused(false);
+                                                    }
+                                                }}
                                             >
-                                                <Play size={14} color="white" />
+                                                {isMinEnded ? (
+                                                    <RotateCcw size={14} color="white" />
+                                                ) : (
+                                                    <Play size={14} color="white" />
+                                                )}
                                             </TouchableOpacity>
                                             <TouchableOpacity
                                                 className="w-7 h-7 rounded-full bg-black/40 items-center justify-center border border-white/20"

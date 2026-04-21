@@ -6,11 +6,11 @@ import React from "react";
 import { Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { VideoMedia } from "../hooks/useMedia";
+import { LoadingStatus } from "./LoadingStatus";
 import { Menu } from "./Menu";
 import { PlayerOrientationButton } from "./PlayerOrientationButton";
 import { VideoBadges } from "./VideoBadges";
 import { VideoItemDetailsModal } from "./VideoItemDetailsModal";
-import { LoadingStatus } from "./LoadingStatus";
 
 interface BasePlayerHeaderProps {
     children?: React.ReactNode;
@@ -49,13 +49,25 @@ export const BasePlayerHeader: React.FC<BasePlayerHeaderProps> = ({ children, ri
 
                 {isPortrait ? (
                     /* Side Gradient for L-shape in Portrait */
-                    <View className="rounded-bl-[40px] -mt-12" style={{ marginRight: -Math.max(insets.right, 16) }}>
-                        <LinearGradient
-                            colors={["rgba(0, 0, 0, 0.9)", "rgba(0, 0, 0, 0.6)", "transparent"]}
-                            className="pt-12 pl-1 pr-4 pb-6 items-center"
-                        >
-                            <View className="flex-col-reverse items-center gap-2">{rightSection}</View>
-                        </LinearGradient>
+                    <View
+                        className="-mt-12"
+                        style={{ marginRight: -Math.max(insets.right, 16) }}
+                    >
+                        {/* Background Gradient with Rounding */}
+                        <View className="absolute inset-0 rounded-bl-[40px] overflow-hidden pointer-events-none">
+                            <LinearGradient
+                                colors={["rgba(0, 0, 0, 0.8)", "transparent"]}
+                                locations={[0, 1]}
+                                start={{ x: 1, y: 0 }}
+                                end={{ x: 0, y: 0.8 }}
+                                className="absolute inset-0"
+                            />
+                        </View>
+                        
+                        {/* Interactive Content (No overflow-hidden so popups can expand) */}
+                        <View className="pt-12 pl-1 pr-4 pb-6 items-center flex-col-reverse gap-2">
+                            {rightSection}
+                        </View>
                     </View>
                 ) : (
                     <View className="flex-row items-center space-x-1">{rightSection}</View>

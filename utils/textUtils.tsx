@@ -35,3 +35,11 @@ export const renderHighlight = (
         </Text>
     );
 };
+
+/**
+ * Inserts zero-width spaces after slashes to allow proper word breaking for paths
+ */
+export const breakPath = (path: string) => {
+    if (!path) return "";
+    return path.replace(/\//g, "/\u200B");
+};

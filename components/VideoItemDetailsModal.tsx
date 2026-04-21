@@ -1,12 +1,13 @@
 import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { router } from "expo-router";
-import { Clock, FileVideo, HardDrive, Info } from "lucide-react-native";
+import { Calendar, Clock, FileVideo, HardDrive, Info } from "lucide-react-native";
 import React from "react";
 import { Image, Text, View } from "react-native";
 import { VideoMedia } from "../hooks/useMedia";
 import { Icon } from "./Icon";
 import { ThemedButton } from "./Themed";
 import { ThemedBottomSheet } from "./ThemedBottomSheet";
+import { breakPath } from "@/utils/textUtils";
 
 interface VideoInfoModalProps {
     visible: boolean;
@@ -24,7 +25,7 @@ export const VideoItemDetailsModal: React.FC<VideoInfoModalProps> = ({ visible, 
         return `${(size / (1024 * 1024)).toFixed(1)} MB`;
     };
 
-    const cleanPath = video.path ? (video.path.includes("/0/") ? video.path.split("/0/").pop() : video.path) : "---";
+    const cleanPath = video.path ? (video.path.includes("/0/") ? (video.path.split("/0/").pop() ?? video.path) : video.path) : "---";
 
     const hasProgress = video.lastPlayedSec && video.lastPlayedSec > 0;
     const progressTime = hasProgress
@@ -81,6 +82,26 @@ export const VideoItemDetailsModal: React.FC<VideoInfoModalProps> = ({ visible, 
                             <Text className="text-text text-sm">{formatSize(video.size)}</Text>
                         </View>
                     </View>
+                    
+                    <View className="flex-row items-center gap-4">
+                        <View className="w-8 h-8 rounded-full items-center justify-center bg-zinc-800">
+                            <Icon icon={Calendar} size={16} className="text-primary" />
+                        </View>
+                        <View>
+                            <Text className="text-secondary text-[10px] uppercase font-bold tracking-wider">Creation Time</Text>
+                            <Text className="text-text text-sm">
+                                {video.modificationTime
+                                    ? new Date(video.modificationTime).toLocaleString(undefined, {
+                                          year: "numeric",
+                                          month: "short",
+                                          day: "numeric",
+                                          hour: "2-digit",
+                                          minute: "2-digit",
+                                      })
+                                    : "---"}
+                            </Text>
+                        </View>
+                    </View>
 
                     <View className="flex-row items-center gap-4">
                         <View className="w-8 h-8 rounded-full items-center justify-center bg-zinc-800">
@@ -89,7 +110,7 @@ export const VideoItemDetailsModal: React.FC<VideoInfoModalProps> = ({ visible, 
                         <View className="flex-1">
                             <Text className="text-secondary text-[10px] uppercase font-bold tracking-wider">File Path</Text>
                             <Text className="text-text text-xs mt-1 leading-5" numberOfLines={3}>
-                                {cleanPath}
+                                {breakPath(cleanPath)}
                             </Text>
                         </View>
                     </View>

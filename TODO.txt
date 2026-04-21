@@ -1,2 +1,0 @@
-do something about the small delay when doing video item operations like entering the page, invoking the properties modal
-    this is caused by sql querying so it's a given

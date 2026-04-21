@@ -16,7 +16,8 @@ export const initDB = () => {
       assetCount INTEGER,
       lastModified INTEGER,
       thumbnail TEXT,
-      hasNew INTEGER DEFAULT 0
+      hasNew INTEGER DEFAULT 0,
+      sortConfig TEXT
     );
     CREATE TABLE IF NOT EXISTS videos (
       id TEXT PRIMARY KEY,
@@ -57,6 +58,15 @@ export const initDB = () => {
     } catch {}
     try {
         db.execSync("ALTER TABLE videos ADD COLUMN path TEXT");
+    } catch {}
+    try {
+        db.execSync("ALTER TABLE albums ADD COLUMN isHidden INTEGER DEFAULT 0");
+    } catch {}
+    try {
+        db.execSync("ALTER TABLE videos ADD COLUMN isHidden INTEGER DEFAULT 0");
+    } catch {}
+    try {
+        db.execSync("ALTER TABLE albums ADD COLUMN sortConfig TEXT");
     } catch {}
 
     // v2: ms → sec unit migration
@@ -105,10 +115,15 @@ export const getAllPlaybackDataDb = () => {
 };
 
 // --- Album Functions ---
+export const getHiddenAlbumsDb = () => {
+    const results = db.getAllSync<any>("SELECT * FROM albums WHERE isHidden = 1");
+    return results.map((a) => ({ ...a, hasNew: !!a.hasNew, isHidden: !!a.isHidden }));
+};
+
 export const saveAlbumsDb = (albums: any[]) => {
     db.execSync("DELETE FROM albums");
     const stmt = db.prepareSync(
-        "INSERT INTO albums (id, title, displayName, assetCount, lastModified, thumbnail, hasNew) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO albums (id, title, displayName, assetCount, lastModified, thumbnail, hasNew, sortConfig) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     );
     albums.forEach((a) => {
         stmt.executeSync([
@@ -119,18 +134,35 @@ export const saveAlbumsDb = (albums: any[]) => {
             a.lastModified || 0,
             a.thumbnail || "",
             a.hasNew ? 1 : 0,
+            a.sortConfig || null,
         ]);
     });
 };
 
 export const getAlbumsDb = () => {
-    const results = db.getAllSync<any>("SELECT * FROM albums");
-    return results.map((a) => ({ ...a, hasNew: !!a.hasNew }));
+    const results = db.getAllSync<any>("SELECT * FROM albums WHERE isHidden = 0");
+    return results.map((a) => ({ ...a, hasNew: !!a.hasNew, isHidden: !!a.isHidden }));
+};
+
+export const setAlbumHiddenDb = (albumId: string, isHidden: boolean) => {
+    const stmt = db.prepareSync("UPDATE albums SET isHidden = ? WHERE id = ?");
+    stmt.executeSync([isHidden ? 1 : 0, albumId]);
 };
 
 export const updateAlbumThumbnailDb = (albumId: string, thumbUri: string) => {
     const stmt = db.prepareSync("UPDATE albums SET thumbnail = ? WHERE id = ?");
     stmt.executeSync([thumbUri, albumId]);
+};
+
+export const updateAlbumSortDb = (albumId: string, sortConfig: string | null) => {
+    console.log(`[DB] Updating album ${albumId} sortConfig:`, sortConfig);
+    const stmt = db.prepareSync("UPDATE albums SET sortConfig = ? WHERE id = ?");
+    stmt.executeSync([sortConfig, albumId]);
+};
+
+export const renameAlbumDb = (albumId: string, displayName: string) => {
+    const stmt = db.prepareSync("UPDATE albums SET displayName = ? WHERE id = ?");
+    stmt.executeSync([displayName, albumId]);
 };
 
 // --- Video Functions ---
@@ -168,6 +200,7 @@ export const getAllVideosDb = () => {
         SELECT v.*, COALESCE(p.last_played_sec, v.lastPlayedSec) as lastPlayedSec 
         FROM videos v 
         LEFT JOIN playback_data p ON v.id = p.video_id
+        WHERE v.isHidden = 0
     `);
 };
 
@@ -185,8 +218,13 @@ export const getVideosForAlbumDb = (albumId: string) => {
         SELECT v.*, COALESCE(p.last_played_sec, v.lastPlayedSec) as lastPlayedSec 
         FROM videos v 
         LEFT JOIN playback_data p ON v.id = p.video_id 
-        WHERE v.albumId = ?
+        WHERE v.albumId = ? AND v.isHidden = 0
     `, [albumId]);
+};
+
+export const setVideoHiddenDb = (videoId: string, isHidden: boolean) => {
+    const stmt = db.prepareSync("UPDATE videos SET isHidden = ? WHERE id = ?");
+    stmt.executeSync([isHidden ? 1 : 0, videoId]);
 };
 
 export const searchVideosByNameDb = (query: string) => {
@@ -196,6 +234,20 @@ export const searchVideosByNameDb = (query: string) => {
 export const updateVideoThumbnailDb = (videoId: string, thumbUri: string) => {
     const stmt = db.prepareSync("UPDATE videos SET thumbnail = ? WHERE id = ?");
     stmt.executeSync([thumbUri, videoId]);
+};
+
+export const renameVideoDb = (videoId: string, displayName: string) => {
+    const stmt = db.prepareSync("UPDATE videos SET displayName = ? WHERE id = ?");
+    stmt.executeSync([displayName, videoId]);
+};
+
+export const getHiddenVideosDb = () => {
+    return db.getAllSync<any>(`
+        SELECT v.*, COALESCE(p.last_played_sec, v.lastPlayedSec) as lastPlayedSec 
+        FROM videos v 
+        LEFT JOIN playback_data p ON v.id = p.video_id 
+        WHERE v.isHidden = 1
+    `);
 };
 
 // --- Sync Metadata ---

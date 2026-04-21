@@ -119,7 +119,7 @@ export function PlayerGestureDetector({
 
                     // 1. Check if we are in "Snowball Seek" mode (within 1s of last tap)
                     const isWithinSnowball = Date.now() - lastTapHandledAt.current < 1000;
-                    const side = event.x < screenWidth / 3 ? "back" : event.x > (screenWidth * 2) / 3 ? "fwd" : null;
+                    const side = event.x < screenWidth / 4 ? "back" : event.x > (screenWidth * 3) / 4 ? "fwd" : null;
 
                     if (isWithinSnowball && side && currentSeekDir.current === side) {
                         handleSnowballTap(side);
@@ -157,9 +157,9 @@ export function PlayerGestureDetector({
                     const isCornerY = event.y < screenHeight * 0.2 || event.y > screenHeight * 0.8;
                     if (isCornerX && isCornerY) return;
 
-                    if (event.x < screenWidth / 3) {
+                    if (event.x < screenWidth / 4) {
                         handleSnowballTap("back");
-                    } else if (event.x > (screenWidth * 2) / 3) {
+                    } else if (event.x > (screenWidth * 3) / 4) {
                         handleSnowballTap("fwd");
                     } else {
                         // Reset snowball on middle tap
@@ -177,6 +177,9 @@ export function PlayerGestureDetector({
                                 setShowControls(false);
                             }
                         }
+
+                        if (skipTimeout.current) clearTimeout(skipTimeout.current);
+                        skipTimeout.current = setTimeout(() => setCentralIndicator(null), 800);
                     }
                 }),
         [paused, showControls, setShowControls, handleSnowballTap],

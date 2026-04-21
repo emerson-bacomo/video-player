@@ -20,6 +20,7 @@ interface MenuContextType {
     visible: boolean;
     setVisible: (v: boolean) => void;
     triggerRef: React.RefObject<View>;
+    raiseRef: React.RefObject<View>;
     menuLayout: {
         top: number;
         left: number;
@@ -30,22 +31,32 @@ interface MenuContextType {
         triggerHeight: number;
         autoAnchor: "left" | "right" | "center";
     };
+    raisedLayout: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    } | null;
     variant: MenuVariant;
     anchorHorizontal?: "left" | "right" | "center";
     horizontalScreenFill: boolean;
     maxWidth: DimensionValue | "fit-content";
     updateLayout: () => Promise<void>;
     triggerElement: React.ReactElement<TouchableOpacityProps> | null;
+    raisedElement: React.ReactNode | null;
+    setRaisedElement: (el: React.ReactNode | null) => void;
     children: React.ReactNode;
     closeMenu: () => void;
     onClose?: () => void;
     shouldRender: boolean;
+    contentHeight: number;
+    setContentHeight: (h: number) => void;
 }
 
 const MenuContext = createContext<MenuContextType | null>(null);
 
 const MENU_OFFSET = 16;
-const ARROW_WIDTH = 16;
+const ARROW_SIZE = 12;
 
 export const Menu = ({
     children,
@@ -76,7 +87,11 @@ export const Menu = ({
         triggerHeight: 0,
         autoAnchor: "center" as "left" | "right" | "center",
     });
+    const [raisedLayout, setRaisedLayout] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
     const triggerRef = useRef<View>(null);
+    const raiseRef = useRef<View>(null);
+    const [raisedElement, setRaisedElement] = useState<React.ReactNode | null>(null);
+    const [contentHeight, setContentHeight] = useState(0);
     const visible = controlledVisible ?? internalVisible;
 
     // Synchronize shouldRender with visible
@@ -94,6 +109,17 @@ export const Menu = ({
 
     const updateLayout = () => {
         return new Promise<void>((resolve) => {
+            // Measure raised element first if it exists
+            if (raiseRef.current) {
+                raiseRef.current.measure((_x, _y, width, height, pageX, pageY) => {
+                    if (pageX !== 0 || pageY !== 0) {
+                        setRaisedLayout({ x: pageX, y: pageY, width, height });
+                    }
+                });
+            } else {
+                setRaisedLayout(null);
+            }
+
             triggerRef.current?.measure((_x, _y, width, height, pageX, pageY) => {
                 if (pageX !== 0 || pageY !== 0) {
                     const screenWidth = Dimensions.get("window").width;
@@ -142,17 +168,23 @@ export const Menu = ({
                 visible,
                 setVisible,
                 triggerRef: triggerRef as React.RefObject<View>,
+                raiseRef: raiseRef as React.RefObject<View>,
                 menuLayout,
+                raisedLayout,
                 variant,
                 anchorHorizontal,
                 horizontalScreenFill,
                 maxWidth,
                 updateLayout,
                 triggerElement: triggerElement || null,
+                raisedElement,
+                setRaisedElement,
                 children,
                 closeMenu: () => setVisible(false),
                 onClose: handleModalHide,
                 shouldRender,
+                contentHeight,
+                setContentHeight,
             }}
         >
             <View>{children}</View>
@@ -210,20 +242,36 @@ const Content = ({ children, className }: { children: React.ReactNode; className
         visible,
         setVisible,
         menuLayout,
+        raisedLayout,
         variant,
         anchorHorizontal,
         horizontalScreenFill,
         maxWidth,
         triggerElement,
+        raisedElement,
         onClose,
         shouldRender,
     } = context;
 
     const insets = useSafeAreaInsets();
     const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
+    const [contentHeight, setContentHeight] = useState(0);
 
-    // Height available between where the menu spawns and the bottom of the safe area
-    const popupMaxHeight = Math.max(80, screenHeight - menuLayout.top - insets.bottom - BOTTOM_PADDING);
+    // Auto-flip: If it would overflow the bottom, show it above the trigger
+    const spaceBelow = screenHeight - (menuLayout.triggerY + menuLayout.triggerHeight) - insets.bottom - BOTTOM_PADDING;
+    const spaceAbove = menuLayout.triggerY - insets.top - BOTTOM_PADDING;
+
+    // We flip if it overflows below AND there is more space above
+    const isAbove =
+        menuLayout.triggerY + menuLayout.triggerHeight + (contentHeight || 200) + MENU_OFFSET > screenHeight - insets.bottom &&
+        spaceAbove > spaceBelow;
+
+    const popupMaxHeight = isAbove ? Math.max(100, spaceAbove - MENU_OFFSET) : Math.max(100, spaceBelow - MENU_OFFSET);
+
+    const finalTop = isAbove
+        ? Math.max(insets.top + BOTTOM_PADDING, menuLayout.triggerY - Math.min(contentHeight, popupMaxHeight) - MENU_OFFSET)
+        : menuLayout.top;
+
     const finalAnchor = anchorHorizontal || menuLayout.autoAnchor;
 
     if (!shouldRender) return null;
@@ -249,6 +297,22 @@ const Content = ({ children, className }: { children: React.ReactNode; className
 
                 {variant === "POPUP" && (
                     <>
+                        {/* Raised Element Duplication */}
+                        {raisedElement && raisedLayout && (
+                            <View
+                                pointerEvents="none"
+                                style={{
+                                    position: "absolute",
+                                    top: raisedLayout.y,
+                                    left: raisedLayout.x,
+                                    width: raisedLayout.width,
+                                    height: raisedLayout.height,
+                                }}
+                            >
+                                {raisedElement}
+                            </View>
+                        )}
+
                         <View
                             style={{
                                 position: "absolute",
@@ -272,21 +336,22 @@ const Content = ({ children, className }: { children: React.ReactNode; className
                             </TouchableWithoutFeedback>
                         </View>
 
-                        {/* Positioned Content */}
                         <View
                             pointerEvents="none"
                             style={{
                                 position: "absolute",
-                                top: menuLayout.top - ARROW_WIDTH / 2 + 1,
-                                left: menuLayout.triggerX + menuLayout.triggerWidth / 2 - ARROW_WIDTH / 2,
+                                top: isAbove
+                                    ? menuLayout.triggerY - ARROW_SIZE / 2 - MENU_OFFSET - 1
+                                    : menuLayout.top - ARROW_SIZE / 2 + 1,
+                                left: menuLayout.triggerX + menuLayout.triggerWidth / 2 - ARROW_SIZE / 2,
                                 zIndex: 55,
                             }}
                         >
                             <View
-                                className="bg-menu border-t border-l border-border"
+                                className={cn("bg-menu border-border", isAbove ? "border-b border-r" : "border-t border-l")}
                                 style={{
-                                    width: ARROW_WIDTH,
-                                    height: ARROW_WIDTH,
+                                    width: ARROW_SIZE,
+                                    height: ARROW_SIZE,
                                     transform: [{ rotate: "45deg" }],
                                 }}
                             />
@@ -295,7 +360,7 @@ const Content = ({ children, className }: { children: React.ReactNode; className
                         <View
                             style={{
                                 position: "absolute",
-                                top: menuLayout.top,
+                                top: finalTop,
                                 ...(horizontalScreenFill
                                     ? { left: 16, right: 16 }
                                     : finalAnchor === "left"
@@ -310,6 +375,11 @@ const Content = ({ children, className }: { children: React.ReactNode; className
                             }}
                         >
                             <View
+                                onLayout={(e) => {
+                                    if (e.nativeEvent.layout.height > 0) {
+                                        setContentHeight(e.nativeEvent.layout.height);
+                                    }
+                                }}
                                 className={cn("rounded-xl shadow-2xl border bg-menu border-border", className)}
                                 style={{
                                     maxWidth: maxWidth === "fit-content" ? undefined : maxWidth,
@@ -347,7 +417,23 @@ const List = <T,>({ className, ...props }: FlatListProps<T>) => {
     );
 };
 
+const Raise = ({ children }: { children: React.ReactNode }) => {
+    const context = useContext(MenuContext);
+    if (!context) throw new Error("Raise must be used within Menu");
+
+    useLayoutEffect(() => {
+        context.setRaisedElement(children);
+    }, [children]);
+
+    return (
+        <View ref={context.raiseRef as any} collapsable={false}>
+            {children}
+        </View>
+    );
+};
+
 Menu.Trigger = Trigger;
+Menu.Raise = Raise;
 Menu.Item = Item;
 Menu.Content = Content;
 Menu.Header = Header;

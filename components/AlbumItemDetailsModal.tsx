@@ -6,6 +6,7 @@ import { Image, Text, View } from "react-native";
 import { Icon } from "./Icon";
 import { ThemedButton } from "./Themed";
 import { ThemedBottomSheet } from "./ThemedBottomSheet";
+import { breakPath } from "@/utils/textUtils";
 
 interface AlbumItemDetailsModalProps {
     visible: boolean;
@@ -77,13 +78,17 @@ export const AlbumItemDetailsModal = ({ visible, album, onClose, hideOpenFolderA
                         <View className="w-8 h-8 rounded-full items-center justify-center bg-zinc-800">
                             <Icon icon={Info} size={16} className="text-primary" />
                         </View>
-                        <View>
+                        <View className="flex-1">
                             <Text className="text-secondary text-[10px] uppercase font-bold tracking-wider">Directory Info</Text>
                             <Text className="text-text text-xs mt-1 leading-5">
                                 Approx. Video-Only Storage:{" "}
                                 {album.assetCount * 45 >= 1000
                                     ? `${((album.assetCount * 45) / 1024).toFixed(2)} GB`
                                     : `${(album.assetCount * 45).toFixed(0)} MB`}
+                            </Text>
+                            <Text className="text-secondary text-[10px] uppercase font-bold tracking-wider mt-3">Folder Path</Text>
+                            <Text className="text-text text-[11px] mt-1 leading-4" numberOfLines={2}>
+                            {breakPath(album.path || "---")}
                             </Text>
                         </View>
                     </View>

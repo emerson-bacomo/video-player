@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronLeft, Database, Film, Info } from "lucide-react-native";
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Dimensions, LayoutAnimation, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, BackHandler, Dimensions, LayoutAnimation, Text, TouchableOpacity, View } from "react-native";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { useMedia } from "../hooks/useMedia";
 
@@ -30,8 +30,7 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ task: manualTask =
     const { loadingTask, isLoadingPopupVisible, setIsLoadingPopupVisible, isLoadingExpanded, setIsLoadingExpanded } = useMedia();
     const screenWidth = Dimensions.get("window").width;
     const MENU_OFFSET = 40;
-    const ARROW_HEIGHT = 10;
-    const ARROW_WIDTH = 16;
+    const ARROW_WIDTH = 12;
 
     // Local display state — only for deferred clear (250ms fade-out delay)
     const [taskToDisplay, setTaskToDisplay] = useState(loadingTask);
@@ -70,6 +69,7 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ task: manualTask =
                 ) {
                     return prev;
                 }
+                hasAutoShownRef.current = false;
                 return { ...effectiveTask, isImportant: effectiveTask.isImportant ?? false };
             });
         } else {
@@ -100,6 +100,18 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ task: manualTask =
     useEffect(() => {
         fadeAnim.value = withTiming(isLoadingPopupVisible && !!taskToDisplay ? 1 : 0, { duration: 120 });
     }, [isLoadingPopupVisible, taskToDisplay, fadeAnim]);
+
+    useEffect(() => {
+        const onBackPress = () => {
+            if (isLoadingPopupVisible) {
+                setIsLoadingPopupVisible(false);
+                return true;
+            }
+            return false;
+        };
+        const subscription = BackHandler.addEventListener("hardwareBackPress", onBackPress);
+        return () => subscription.remove();
+    }, [isLoadingPopupVisible, setIsLoadingPopupVisible]);
 
     const toggleVisible = () => setIsLoadingPopupVisible((prev) => !prev);
     const toggleExpanded = () => {
@@ -134,7 +146,6 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ task: manualTask =
         return <Info size={14} color="#3b82f6" />;
     };
 
-    // ── Render ──────────────────────────────────────────────────────────────────
     return (
         <View ref={containerRef} onLayout={handleLayout} className="relative items-end">
             <TouchableOpacity activeOpacity={0.7} onPress={toggleVisible} className="p-1">
@@ -211,24 +222,24 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ task: manualTask =
                             className="absolute z-50"
                             pointerEvents="box-none"
                         >
-                            {/* Triangle Arrow */}
                             <View
+                                pointerEvents="none"
                                 style={{
-                                    width: 0,
-                                    height: 0,
-                                    backgroundColor: "transparent",
-                                    borderStyle: "solid",
-                                    borderLeftWidth: ARROW_WIDTH / 2,
-                                    borderRightWidth: ARROW_WIDTH / 2,
-                                    borderBottomWidth: ARROW_HEIGHT,
-                                    borderLeftColor: "transparent",
-                                    borderRightColor: "transparent",
-                                    borderBottomColor: "#18181b",
                                     position: "absolute",
-                                    top: -ARROW_HEIGHT,
+                                    top: -ARROW_WIDTH / 2,
                                     left: iconX + iconWidth / 2 - globalTargetX - ARROW_WIDTH / 2,
+                                    zIndex: 55,
                                 }}
-                            />
+                            >
+                                <View
+                                    className="bg-zinc-900 border-t border-l border-zinc-800"
+                                    style={{
+                                        width: ARROW_WIDTH,
+                                        height: ARROW_WIDTH,
+                                        transform: [{ rotate: "45deg" }],
+                                    }}
+                                />
+                            </View>
 
                             {/* Tooltip Box */}
                             <View
