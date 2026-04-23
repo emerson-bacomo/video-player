@@ -2,41 +2,50 @@ import { useTheme } from "@/context/ThemeContext";
 import { useMedia } from "@/hooks/useMedia";
 import { router } from "expo-router";
 import {
-    CheckCircle,
     CheckSquare,
     ChevronLeft,
-    Circle,
-    EyeOff,
-    Film,
     MoreVertical,
-    FolderInput,
     Search,
     Square,
-    Trash2,
     X,
 } from "lucide-react-native";
+import { LucideIcon } from "lucide-react-native";
 import React from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import { cn } from "../utils/cn";
 import { Icon } from "./Icon";
 import { Menu } from "./Menu";
 
+export interface SelectionAction {
+    label: string;
+    icon: LucideIcon;
+    onPress: (ids: Set<string>) => void;
+    destructive?: boolean;
+}
+
+interface SelectionActionsContextType {
+    actions: SelectionAction[] | null;
+    setActions: (actions: SelectionAction[] | null) => void;
+}
+
 interface HeaderProps {
     children: React.ReactNode;
 }
 
 const Header = ({ children }: HeaderProps) => {
-    const [overrideActions, setOverrideActions] = React.useState<any[] | null>(null);
+    const [customActions, setCustomActions] = React.useState<SelectionAction[] | null>(null);
 
     return (
-        <SelectionOverrideContext.Provider value={{ actions: overrideActions, setOverrideActions } as any}>
+        <SelectionActionsContext.Provider
+            value={{ actions: customActions, setActions: setCustomActions } as SelectionActionsContextType}
+        >
             <View className="relative">
                 <View className="px-4 pt-2 pb-4 border-b border-border bg-background flex-row items-center justify-between gap-4">
                     {children}
                 </View>
                 <SelectionMode />
             </View>
-        </SelectionOverrideContext.Provider>
+        </SelectionActionsContext.Provider>
     );
 };
 
@@ -76,50 +85,18 @@ const SearchAction = () => {
     );
 };
 
-const SelectionOverrideContext = React.createContext<{
-    actions: { label: string; icon: any; onPress: (ids: Set<string>) => void; destructive?: boolean }[] | null;
-} | null>(null);
+const SelectionActionsContext = React.createContext<SelectionActionsContextType | null>(null);
 
 const SelectionMode = () => {
-    const override = React.useContext(SelectionOverrideContext);
-    const {
-        selectedIds,
-        isSelectionMode,
-        clearSelection,
-        selectAll,
-        albums,
-        currentAlbum,
-        currentAlbumVideos,
-        updateMultipleVideoProgress,
-        selectPrefixesOfSelected,
-        hideMultipleVideos,
-        hideMultipleAlbums,
-    } = useMedia();
+    const selectionActions = React.useContext(SelectionActionsContext);
+    const { selectedIds, isSelectionMode, clearSelection, selectAll, albums, currentAlbum, currentAlbumVideos } =
+        useMedia();
     const { colors } = useTheme();
 
     if (!isSelectionMode) return null;
 
     const totalItems = currentAlbum ? currentAlbumVideos.length : albums.length;
     const isAllSelected = selectedIds.size === totalItems && totalItems > 0;
-
-    // Determine watched state based on first selected item
-    const firstSelectedId = Array.from(selectedIds)[0];
-    const firstItem = currentAlbumVideos.find((v) => v.id === firstSelectedId);
-    const isWatched = firstItem ? firstItem.lastPlayedSec >= firstItem.duration * 0.95 : false;
-
-    const hasAnyPrefixesInSelection = React.useMemo(() => {
-        return Array.from(selectedIds).some((id) => {
-            const v = currentAlbumVideos.find((vid) => vid.id === id);
-            return !!v?.prefix;
-        });
-    }, [selectedIds, currentAlbumVideos]);
-
-    const handleToggleWatched = () => {
-        const ids = Array.from(selectedIds);
-        const newProgress = isWatched ? 0 : firstItem?.duration || 0;
-        updateMultipleVideoProgress(ids, newProgress);
-        clearSelection();
-    };
 
     return (
         <View className="absolute inset-0 z-50 flex-row items-center justify-between px-4 bg-background border-b border-border">
@@ -139,20 +116,22 @@ const SelectionMode = () => {
                     />
                 </TouchableOpacity>
 
-                <Menu variant="POPUP" anchorHorizontal="right">
-                    <Menu.Trigger className="w-10 h-10 items-center justify-center">
-                        <Icon icon={MoreVertical} size={24} className="text-text" />
-                    </Menu.Trigger>
-                    <Menu.Content className="w-48">
-                        {override?.actions ? (
-                            override.actions.map((act, idx) => (
+                {selectionActions?.actions && (
+                    <Menu variant="POPUP" anchorHorizontal="right">
+                        <Menu.Trigger className="w-10 h-10 items-center justify-center">
+                            <Icon icon={MoreVertical} size={24} className="text-text" />
+                        </Menu.Trigger>
+                        <Menu.Content className="w-48">
+                            {selectionActions.actions.map((act, idx) => (
                                 <Menu.Item
                                     key={idx}
                                     className={cn(
                                         "flex-row items-center px-4 py-3 gap-3",
-                                        idx < override.actions!.length - 1 && "border-b border-white/5",
+                                        idx < selectionActions.actions!.length - 1 && "border-b border-white/5",
                                     )}
-                                    onPress={() => act.onPress(selectedIds)}
+                                    onPress={() => {
+                                        act.onPress(selectedIds);
+                                    }}
                                 >
                                     <Icon
                                         icon={act.icon}
@@ -163,56 +142,10 @@ const SelectionMode = () => {
                                         {act.label}
                                     </Text>
                                 </Menu.Item>
-                            ))
-                        ) : (
-                            <>
-                                <Menu.Item
-                                    className="flex-row items-center px-4 py-3 gap-3 border-b border-white/5"
-                                    onPress={handleToggleWatched}
-                                >
-                                    <Icon icon={isWatched ? Circle : CheckCircle} size={18} className="text-secondary" />
-                                    <Text className="text-white text-sm font-medium">
-                                        {isWatched ? "Mark as Unwatched" : "Mark as Watched"}
-                                    </Text>
-                                </Menu.Item>
-                                {hasAnyPrefixesInSelection && (
-                                    <Menu.Item
-                                        className="flex-row items-center px-4 py-3 gap-3 border-b border-white/5"
-                                        onPress={selectPrefixesOfSelected}
-                                    >
-                                        <Icon icon={Film} size={18} className="text-secondary" />
-                                        <Text className="text-white text-sm font-medium">Select same prefix</Text>
-                                    </Menu.Item>
-                                )}
-                                <Menu.Item
-                                    className="flex-row items-center px-4 py-3 gap-3 border-b border-white/5"
-                                    onPress={() => console.log("Move multiple", Array.from(selectedIds))}
-                                >
-                                    <Icon icon={FolderInput} size={18} className="text-secondary" />
-                                    <Text className="text-white text-sm font-medium">Move</Text>
-                                </Menu.Item>
-                                <Menu.Item
-                                    className="flex-row items-center px-4 py-3 gap-3 border-b border-white/5"
-                                    onPress={() => {
-                                        const ids = Array.from(selectedIds);
-                                        if (currentAlbum) hideMultipleVideos(ids);
-                                        else hideMultipleAlbums(ids);
-                                    }}
-                                >
-                                    <Icon icon={EyeOff} size={18} className="text-secondary" />
-                                    <Text className="text-white text-sm font-medium">Hide Selected</Text>
-                                </Menu.Item>
-                                <Menu.Item
-                                    className="flex-row items-center px-4 py-3 gap-3"
-                                    onPress={() => console.log("Delete multiple", Array.from(selectedIds))}
-                                >
-                                    <Icon icon={Trash2} size={18} className="text-error" />
-                                    <Text className="text-error text-sm font-medium">Delete</Text>
-                                </Menu.Item>
-                            </>
-                        )}
-                    </Menu.Content>
-                </Menu>
+                            ))}
+                        </Menu.Content>
+                    </Menu>
+                )}
             </View>
         </View>
     );
@@ -223,17 +156,15 @@ const HeaderNamespace = Object.assign(Header, {
     Title,
     Actions,
     SearchAction,
-    SelectionOverrideActions: ({ actions }: { actions: any[] }) => {
-        const context = React.useContext(SelectionOverrideContext);
+    SelectionActions: ({ actions }: { actions: SelectionAction[] }) => {
+        const context = React.useContext(SelectionActionsContext);
         React.useEffect(() => {
             if (context) {
-                // @ts-ignore
-                context.setOverrideActions(actions);
+                context.setActions(actions);
             }
             return () => {
                 if (context) {
-                    // @ts-ignore
-                    context.setOverrideActions(null);
+                    context.setActions(null);
                 }
             };
         }, [actions, context]);

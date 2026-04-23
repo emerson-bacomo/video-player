@@ -10,9 +10,16 @@ interface PrefixFilterMenuProps {
     selectedOptions: string[];
     onOptionToggle: (option: string) => void;
     onClearAll: () => void;
+    isLoading?: boolean;
 }
 
-export const PrefixFilterMenu = ({ options, selectedOptions, onOptionToggle, onClearAll }: PrefixFilterMenuProps) => {
+export const PrefixFilterMenu = ({
+    options,
+    selectedOptions,
+    onOptionToggle,
+    onClearAll,
+    isLoading = false,
+}: PrefixFilterMenuProps) => {
     const hasFilters = selectedOptions.length > 0;
 
     return (
@@ -20,16 +27,18 @@ export const PrefixFilterMenu = ({ options, selectedOptions, onOptionToggle, onC
             <Menu.Trigger
                 activeOpacity={0.7}
                 className={cn(
-                    "flex-row items-center p-2 rounded-full border gap-1.5",
+                    "flex-row items-center p-2 px-3 rounded-full border gap-1.5",
                     hasFilters ? "bg-primary/20 border-primary/50" : "bg-card border-border",
                 )}
             >
-                <Icon icon={ListFilter} size={18} className={hasFilters ? "text-primary" : "text-secondary"} />
-                {hasFilters && (
-                    <View className="bg-primary rounded-full px-1.5 min-w-[18px] h-[18px] items-center justify-center">
-                        <Text className="text-white text-[10px] font-bold">{selectedOptions.length}</Text>
-                    </View>
-                )}
+                <View className="flex-row items-center gap-1.5" style={{ opacity: isLoading ? 0 : 1 }}>
+                    <Icon icon={ListFilter} size={18} className={hasFilters ? "text-primary" : "text-secondary"} />
+                    {hasFilters && (
+                        <View className="bg-primary rounded-full px-1.5 min-w-[18px] h-[18px] items-center justify-center">
+                            <Text className="text-white text-[10px] font-bold">{selectedOptions.length}</Text>
+                        </View>
+                    )}
+                </View>
             </Menu.Trigger>
 
             <Menu.Content>

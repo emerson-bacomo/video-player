@@ -1,6 +1,6 @@
 import { useTheme } from "@/context/ThemeContext";
 import { useMedia, VideoMedia } from "@/hooks/useMedia";
-import { router } from "expo-router";
+import { useSafeNavigation } from "@/hooks/useSafeNavigation";
 import { StatusBar } from "expo-status-bar";
 import { ChevronLeft, Search, X } from "lucide-react-native";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -15,6 +15,7 @@ export default function SearchPage() {
     const { colors } = useTheme();
     const insets = useSafeAreaInsets();
     const inputRef = useRef<TextInput>(null);
+    const { safePush, safeBack } = useSafeNavigation();
 
     const [query, setQuery] = useState("");
     const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -25,7 +26,7 @@ export default function SearchPage() {
 
     const handlePlayVideo = (item: any) => {
         setSelectedVideoId(null);
-        router.push({
+        safePush({
             pathname: "/player",
             params: { videoId: item.id },
         });
@@ -57,7 +58,7 @@ export default function SearchPage() {
 
             {/* Search Header */}
             <View className="flex-row items-center px-4 py-3 gap-3 border-b border-border shadow-sm">
-                <TouchableOpacity onPress={() => router.back()} className="w-10 h-10 items-center justify-center rounded-full">
+                <TouchableOpacity onPress={safeBack} className="w-10 h-10 items-center justify-center rounded-full">
                     <Icon icon={ChevronLeft} size={24} className="text-text" />
                 </TouchableOpacity>
 

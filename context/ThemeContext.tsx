@@ -34,7 +34,8 @@ interface ThemeContextType {
 export const ThemeContext = createContext<ThemeContextType | null>(null);
 
 const hexToRgb = (hex: string) => {
-    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    // Handle both 6-digit (#RRGGBB) and 8-digit (#RRGGBBAA) hex
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})?$/i.exec(hex);
     if (!result) return "0 0 0";
     return `${parseInt(result[1], 16)} ${parseInt(result[2], 16)} ${parseInt(result[3], 16)}`;
 };
@@ -52,7 +53,18 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
     const [presets, setPresets] = useState<any[]>([]);
 
     const refreshPresets = () => {
-        const allPresets = getThemePresetsDb();
+        let allPresets = getThemePresetsDb();
+
+        // Sync theme.json with database if it's a system theme
+        const systemTheme = allPresets.find((p: any) => p.is_system === 1 && p.name === defaultTheme.name);
+        if (systemTheme) {
+            const currentConfig = JSON.stringify(defaultTheme.colors);
+            if (systemTheme.config !== currentConfig) {
+                updateThemePresetDb(systemTheme.id, currentConfig);
+                allPresets = getThemePresetsDb(); // refresh after update
+            }
+        }
+
         setPresets(allPresets);
         const active = allPresets.find((p: any) => p.is_active === 1);
         if (active) {

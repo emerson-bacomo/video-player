@@ -17,7 +17,8 @@ export const initDB = () => {
       lastModified INTEGER,
       thumbnail TEXT,
       hasNew INTEGER DEFAULT 0,
-      sortConfig TEXT
+      videoSortSettingScope TEXT DEFAULT 'global',
+      videoSortType TEXT
     );
     CREATE TABLE IF NOT EXISTS videos (
       id TEXT PRIMARY KEY,
@@ -66,7 +67,10 @@ export const initDB = () => {
         db.execSync("ALTER TABLE videos ADD COLUMN isHidden INTEGER DEFAULT 0");
     } catch {}
     try {
-        db.execSync("ALTER TABLE albums ADD COLUMN sortConfig TEXT");
+        db.execSync("ALTER TABLE albums ADD COLUMN videoSortSettingScope TEXT DEFAULT 'global'");
+    } catch {}
+    try {
+        db.execSync("ALTER TABLE albums ADD COLUMN videoSortType TEXT");
     } catch {}
 
     // v2: ms → sec unit migration
@@ -123,7 +127,7 @@ export const getHiddenAlbumsDb = () => {
 export const saveAlbumsDb = (albums: any[]) => {
     db.execSync("DELETE FROM albums");
     const stmt = db.prepareSync(
-        "INSERT INTO albums (id, title, displayName, assetCount, lastModified, thumbnail, hasNew, sortConfig) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO albums (id, title, displayName, assetCount, lastModified, thumbnail, hasNew, videoSortSettingScope, videoSortType) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
     albums.forEach((a) => {
         stmt.executeSync([
@@ -134,7 +138,8 @@ export const saveAlbumsDb = (albums: any[]) => {
             a.lastModified || 0,
             a.thumbnail || "",
             a.hasNew ? 1 : 0,
-            a.sortConfig || null,
+            a.videoSortSettingScope || "global",
+            a.videoSortType || null,
         ]);
     });
 };
@@ -154,10 +159,16 @@ export const updateAlbumThumbnailDb = (albumId: string, thumbUri: string) => {
     stmt.executeSync([thumbUri, albumId]);
 };
 
-export const updateAlbumSortDb = (albumId: string, sortConfig: string | null) => {
-    console.log(`[DB] Updating album ${albumId} sortConfig:`, sortConfig);
-    const stmt = db.prepareSync("UPDATE albums SET sortConfig = ? WHERE id = ?");
-    stmt.executeSync([sortConfig, albumId]);
+export const updateAlbumVideoSortTypeDb = (albumId: string, sortType: string | null) => {
+    console.log(`[DB] Updating album ${albumId} videoSortType:`, sortType);
+    const stmt = db.prepareSync("UPDATE albums SET videoSortType = ? WHERE id = ?");
+    stmt.executeSync([sortType, albumId]);
+};
+
+export const updateAlbumVideoSortScopeDb = (albumId: string, scope: string) => {
+    console.log(`[DB] Updating album ${albumId} videoSortSettingScope:`, scope);
+    const stmt = db.prepareSync("UPDATE albums SET videoSortSettingScope = ? WHERE id = ?");
+    stmt.executeSync([scope, albumId]);
 };
 
 export const renameAlbumDb = (albumId: string, displayName: string) => {
