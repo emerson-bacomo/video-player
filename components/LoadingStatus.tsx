@@ -17,7 +17,6 @@ export interface LoadingTask {
 }
 
 export interface LoadingStatusProps {
-    task?: LoadingTask | null;
     /**
      * "bottom" (default) — popup opens below the indicator, horizontally centered on screen.
      * "left"             — popup opens to the left of the indicator, top-aligned with it,
@@ -26,7 +25,7 @@ export interface LoadingStatusProps {
     popupSide?: "bottom" | "left";
 }
 
-export const LoadingStatus: React.FC<LoadingStatusProps> = ({ task: manualTask = null, popupSide = "bottom" }) => {
+export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "bottom" }) => {
     const { loadingTask, isLoadingPopupVisible, setIsLoadingPopupVisible, isLoadingExpanded, setIsLoadingExpanded } = useMedia();
     const screenWidth = Dimensions.get("window").width;
     const MENU_OFFSET = 40;
@@ -55,22 +54,19 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ task: manualTask =
     const LEFT_GAP = 8; // gap between popup right edge and indicator left edge
     const leftSideWidth = Math.min(iconX - LEFT_GAP, 320); // available space to the left
 
-    // Prioritize global important tasks (sync, thumb gen) over local manual tasks (UI sorting)
-    const effectiveTask = loadingTask?.isImportant ? loadingTask : manualTask || loadingTask;
-
     // Sync taskToDisplay with deferred clear — no setState for visibility here
     useEffect(() => {
-        if (effectiveTask) {
+        if (loadingTask) {
             setTaskToDisplay((prev) => {
                 if (
-                    prev?.label === effectiveTask.label &&
-                    prev?.detail === effectiveTask.detail &&
-                    prev?.isImportant === effectiveTask.isImportant
+                    prev?.label === loadingTask.label &&
+                    prev?.detail === loadingTask.detail &&
+                    prev?.isImportant === loadingTask.isImportant
                 ) {
                     return prev;
                 }
                 hasAutoShownRef.current = false;
-                return { ...effectiveTask, isImportant: effectiveTask.isImportant ?? false };
+                return { ...loadingTask, isImportant: loadingTask.isImportant ?? false };
             });
         } else {
             const timeout = setTimeout(() => {
@@ -80,7 +76,7 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ task: manualTask =
             }, 250);
             return () => clearTimeout(timeout);
         }
-    }, [effectiveTask]);
+    }, [loadingTask]);
 
     // Animation only — no setState calls, safe from loops
     // Auto-show logic uses a ref guard so setIsLoadingPopupVisible fires at most once per task

@@ -3,6 +3,7 @@ import { getSettingDb, saveSettingDb } from "../utils/db";
 
 export interface LastPlayedVideo {
     id: string;
+    albumId: string;
 }
 
 interface FloatingPlayerContextType {

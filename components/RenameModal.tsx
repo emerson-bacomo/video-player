@@ -10,7 +10,6 @@ import {
     TouchableWithoutFeedback,
     View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 interface RenameModalProps {
     visible: boolean;
@@ -22,7 +21,6 @@ interface RenameModalProps {
 
 export const RenameModal = ({ visible, onClose, onRename, initialValue, title }: RenameModalProps) => {
     const [value, setValue] = useState(initialValue);
-    const insets = useSafeAreaInsets();
 
     useEffect(() => {
         if (visible) {

@@ -18,18 +18,9 @@ import {
     Trash2,
 } from "lucide-react-native";
 import React, { useEffect, useState } from "react";
-import {
-    Alert,
-    LayoutChangeEvent,
-    Platform,
-    Text,
-    ToastAndroid,
-    TouchableOpacity,
-    View,
-    useWindowDimensions,
-} from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { LayoutChangeEvent, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MarkerPair } from "../hooks/useClipping";
 import { useSettings } from "../hooks/useSettings";
 import { ClippingOverlay } from "./ClippingOverlay";
@@ -146,14 +137,6 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         setSliderWidth(e.nativeEvent.layout.width);
     };
 
-    const showToast = (msg: string) => {
-        if (Platform.OS === "android") {
-            ToastAndroid.show(msg, ToastAndroid.SHORT);
-        } else {
-            Alert.alert("Notice", msg);
-        }
-    };
-
     const insets = useSafeAreaInsets();
 
     return (
@@ -224,10 +207,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
 
                                 {/* Save */}
                                 <TouchableOpacity
-                                    onPress={async () => {
-                                        const res = await onSaveClip();
-                                        if (!res.success && res.message) showToast(res.message);
-                                    }}
+                                    onPress={() => onSaveClip}
                                     disabled={!markerPairs.some((p) => p.id !== "pair-realtime")}
                                     className={cn(
                                         "p-2.5 rounded-full",

@@ -5,7 +5,7 @@ import { ChevronLeft, MoreVertical, Settings as SettingsIcon } from "lucide-reac
 import React from "react";
 import { Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { VideoMedia } from "../hooks/useMedia";
+import { VideoMedia } from "../types/useMedia";
 import { LoadingStatus } from "./LoadingStatus";
 import { Menu } from "./Menu";
 import { PlayerOrientationButton } from "./PlayerOrientationButton";
@@ -49,10 +49,7 @@ export const BasePlayerHeader: React.FC<BasePlayerHeaderProps> = ({ children, ri
 
                 {isPortrait ? (
                     /* Side Gradient for L-shape in Portrait */
-                    <View
-                        className="-mt-12"
-                        style={{ marginRight: -Math.max(insets.right, 16) }}
-                    >
+                    <View className="-mt-12" style={{ marginRight: -Math.max(insets.right, 16) }}>
                         {/* Background Gradient with Rounding */}
                         <View className="absolute inset-0 rounded-bl-[40px] overflow-hidden pointer-events-none">
                             <LinearGradient
@@ -63,11 +60,9 @@ export const BasePlayerHeader: React.FC<BasePlayerHeaderProps> = ({ children, ri
                                 className="absolute inset-0"
                             />
                         </View>
-                        
+
                         {/* Interactive Content (No overflow-hidden so popups can expand) */}
-                        <View className="pt-12 pl-1 pr-4 pb-6 items-center flex-col-reverse gap-2">
-                            {rightSection}
-                        </View>
+                        <View className="pt-12 pl-1 pr-4 pb-6 items-center flex-col-reverse gap-2">{rightSection}</View>
                     </View>
                 ) : (
                     <View className="flex-row items-center space-x-1">{rightSection}</View>
@@ -86,7 +81,7 @@ export const PlayerHeader: React.FC<PlayerHeaderProps> = ({ video, onLayout }) =
     const [isInfoModalVisible, setIsInfoModalVisible] = React.useState(false);
     const { width, height } = useWindowDimensions();
     const isPortrait = height > width;
-    const displayTitle = video?.displayName || "Video Player";
+    const displayTitle = video?.title || "Video Player";
 
     const handleSettings = () => {
         ScreenOrientation.unlockAsync();

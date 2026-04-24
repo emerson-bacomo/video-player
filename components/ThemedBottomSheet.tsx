@@ -7,7 +7,7 @@ import {
 } from "@gorhom/bottom-sheet";
 import { cssInterop } from "nativewind";
 import React, { useCallback, useEffect } from "react";
-import { BackHandler, useWindowDimensions, View } from "react-native";
+import { BackHandler, useWindowDimensions } from "react-native";
 
 // 1. Define the interface for our new interop props
 interface StyledBottomSheetModalProps extends BottomSheetModalProps {

@@ -1,13 +1,13 @@
+import { VideoMedia } from "@/types/useMedia";
+import { breakPath } from "@/utils/textUtils";
 import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { router } from "expo-router";
 import { Calendar, Clock, FileVideo, HardDrive, Info } from "lucide-react-native";
 import React from "react";
 import { Image, Text, View } from "react-native";
-import { VideoMedia } from "../hooks/useMedia";
 import { Icon } from "./Icon";
 import { ThemedButton } from "./Themed";
 import { ThemedBottomSheet } from "./ThemedBottomSheet";
-import { breakPath } from "@/utils/textUtils";
 
 interface VideoInfoModalProps {
     visible: boolean;
@@ -25,7 +25,11 @@ export const VideoItemDetailsModal: React.FC<VideoInfoModalProps> = ({ visible, 
         return `${(size / (1024 * 1024)).toFixed(1)} MB`;
     };
 
-    const cleanPath = video.path ? (video.path.includes("/0/") ? (video.path.split("/0/").pop() ?? video.path) : video.path) : "---";
+    const cleanPath = video.path
+        ? video.path.includes("/0/")
+            ? (video.path.split("/0/").pop() ?? video.path)
+            : video.path
+        : "---";
 
     const hasProgress = video.lastPlayedSec && video.lastPlayedSec > 0;
     const progressTime = hasProgress
@@ -50,7 +54,7 @@ export const VideoItemDetailsModal: React.FC<VideoInfoModalProps> = ({ visible, 
                             <Text className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">
                                 Video Metadata
                             </Text>
-                            <Text className="text-text text-xl font-bold">{video.displayName}</Text>
+                            <Text className="text-text text-xl font-bold">{video.title}</Text>
                         </View>
                     </View>
 
@@ -82,7 +86,7 @@ export const VideoItemDetailsModal: React.FC<VideoInfoModalProps> = ({ visible, 
                             <Text className="text-text text-sm">{formatSize(video.size)}</Text>
                         </View>
                     </View>
-                    
+
                     <View className="flex-row items-center gap-4">
                         <View className="w-8 h-8 rounded-full items-center justify-center bg-zinc-800">
                             <Icon icon={Calendar} size={16} className="text-primary" />
@@ -125,7 +129,7 @@ export const VideoItemDetailsModal: React.FC<VideoInfoModalProps> = ({ visible, 
                                         onClose();
                                         router.push({
                                             pathname: "/player",
-                                            params: { videoId: video.id },
+                                            params: { videoId: video.id, albumId: video.albumId },
                                         });
                                     }}
                                 />

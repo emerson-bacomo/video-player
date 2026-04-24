@@ -26,6 +26,9 @@ export interface SelectionAction {
 interface SelectionActionsContextType {
     actions: SelectionAction[] | null;
     setActions: (actions: SelectionAction[] | null) => void;
+    totalItems: number;
+    setTotalItems: (n: number) => void;
+    dataRef: React.RefObject<any[] | null>;
 }
 
 interface HeaderProps {
@@ -34,10 +37,20 @@ interface HeaderProps {
 
 const Header = ({ children }: HeaderProps) => {
     const [customActions, setCustomActions] = React.useState<SelectionAction[] | null>(null);
+    const [totalItems, setTotalItems] = React.useState(0);
+    const dataRef = React.useRef<any[] | null>(null);
 
     return (
         <SelectionActionsContext.Provider
-            value={{ actions: customActions, setActions: setCustomActions } as SelectionActionsContextType}
+            value={
+                {
+                    actions: customActions,
+                    setActions: setCustomActions,
+                    totalItems,
+                    setTotalItems,
+                    dataRef,
+                } as SelectionActionsContextType
+            }
         >
             <View className="relative">
                 <View className="px-4 pt-2 pb-4 border-b border-border bg-background flex-row items-center justify-between gap-4">
@@ -89,13 +102,12 @@ const SelectionActionsContext = React.createContext<SelectionActionsContextType 
 
 const SelectionMode = () => {
     const selectionActions = React.useContext(SelectionActionsContext);
-    const { selectedIds, isSelectionMode, clearSelection, selectAll, albums, currentAlbum, currentAlbumVideos } =
-        useMedia();
+    const { selectedIds, isSelectionMode, clearSelection, selectAll } = useMedia();
     const { colors } = useTheme();
 
     if (!isSelectionMode) return null;
 
-    const totalItems = currentAlbum ? currentAlbumVideos.length : albums.length;
+    const totalItems = selectionActions?.totalItems || 0;
     const isAllSelected = selectedIds.size === totalItems && totalItems > 0;
 
     return (
@@ -108,13 +120,15 @@ const SelectionMode = () => {
             </View>
 
             <View className="flex-row items-center gap-4">
-                <TouchableOpacity onPress={selectAll} activeOpacity={0.7}>
-                    <Icon
-                        icon={isAllSelected ? CheckSquare : Square}
-                        size={24}
-                        color={isAllSelected ? colors.primary : colors.text}
-                    />
-                </TouchableOpacity>
+                {totalItems > 0 && (
+                    <TouchableOpacity onPress={() => selectAll(selectionActions?.dataRef.current || [])} activeOpacity={0.7}>
+                        <Icon
+                            icon={isAllSelected ? CheckSquare : Square}
+                            size={24}
+                            color={isAllSelected ? colors.primary : colors.text}
+                        />
+                    </TouchableOpacity>
+                )}
 
                 {selectionActions?.actions && (
                     <Menu variant="POPUP" anchorHorizontal="right">
@@ -156,18 +170,30 @@ const HeaderNamespace = Object.assign(Header, {
     Title,
     Actions,
     SearchAction,
-    SelectionActions: ({ actions }: { actions: SelectionAction[] }) => {
+    SelectionActions: ({
+        actions,
+        data,
+    }: {
+        actions: SelectionAction[];
+        data?: any[];
+    }) => {
         const context = React.useContext(SelectionActionsContext);
+        if (context) {
+            context.dataRef.current = data || null;
+        }
+
         React.useEffect(() => {
             if (context) {
                 context.setActions(actions);
+                context.setTotalItems(data?.length || 0);
             }
             return () => {
                 if (context) {
                     context.setActions(null);
+                    context.setTotalItems(0);
                 }
             };
-        }, [actions, context]);
+        }, [actions, data?.length, context]);
         return null;
     },
 });

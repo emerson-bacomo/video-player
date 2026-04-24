@@ -6,6 +6,7 @@ import { Dimensions, Text, TouchableOpacity, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { toast } from "sonner-native";
 import { useFloatingPlayer } from "../context/FloatingPlayerContext";
 import { useMedia } from "../hooks/useMedia";
 import { cn } from "../utils/cn";
@@ -51,17 +52,7 @@ function getNearestCorner(cardCX: number, cardCY: number, screenW: number, scree
 
 export const FloatingPlayer: React.FC = () => {
     const { lastPlayed, showFloater, dismissFloater } = useFloatingPlayer();
-    const { currentAlbumVideos, allVideosCache, openAlbumByVideoId } = useMedia();
-
-    const lastAttemptedIdRef = useRef<string | null>(null);
-
-    useEffect(() => {
-        if (lastPlayed?.id && currentAlbumVideos.length === 0 && lastAttemptedIdRef.current !== lastPlayed.id) {
-            lastAttemptedIdRef.current = lastPlayed.id;
-            openAlbumByVideoId(lastPlayed.id);
-        }
-    }, [lastPlayed?.id, currentAlbumVideos.length]);
-
+    const { allAlbumsVideos, getVideoById } = useMedia();
     const insets = useSafeAreaInsets();
     const pathname = usePathname();
     const { width: screenW, height: screenH } = Dimensions.get("window");
@@ -69,20 +60,30 @@ export const FloatingPlayer: React.FC = () => {
 
     // ── Live metadata ──────────────────────────────────────────────────────
     const liveVideo = React.useMemo(() => {
-        if (!lastPlayed?.id) return null;
-        // 1. Try currently viewed folder (for instant title/progress sync)
-        const currentMatch = currentAlbumVideos.find((v) => v.id === lastPlayed.id);
-        if (currentMatch) return currentMatch;
+        if (!lastPlayed?.id || !lastPlayed?.albumId) return null;
+        const albumVids = allAlbumsVideos[lastPlayed.albumId];
+        let video = albumVids?.find((v) => v.id === lastPlayed.id) || null;
 
-        // 2. Search entire cache
-        for (const albumId in allVideosCache) {
-            const match = allVideosCache[albumId].find((v) => v.id === lastPlayed.id);
-            if (match) return match;
+        if (!video) {
+            video = getVideoById(lastPlayed.id);
         }
-        return null;
-    }, [lastPlayed?.id, currentAlbumVideos, allVideosCache]);
 
-    const displayTitle = liveVideo?.displayName || "Video Player";
+        return video;
+    }, [lastPlayed?.id, lastPlayed?.albumId, allAlbumsVideos, getVideoById]);
+
+    useEffect(() => {
+        if (lastPlayed?.id) {
+            // Do not dismiss if allAlbumsVideos is completely empty (still initializing)
+            if (Object.keys(allAlbumsVideos).length === 0) return;
+
+            if (!liveVideo) {
+                toast.error("Last played video not found.");
+                dismissFloater();
+            }
+        }
+    }, [lastPlayed?.id, liveVideo, dismissFloater, allAlbumsVideos]);
+
+    const displayTitle = liveVideo?.title || "Video Player";
 
     // ── Initial position: bottom-right corner ─────────────────────────────
     const initX = screenW - PLAYER_W - CORNER_INSET;
@@ -210,6 +211,7 @@ export const FloatingPlayer: React.FC = () => {
             pathname: "/player",
             params: {
                 videoId: lastPlayed.id,
+                albumId: lastPlayed.albumId,
             },
         });
     };

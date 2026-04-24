@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Dimensions, FlatList, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated from "react-native-reanimated";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CornerPosition, PlayerOperation } from "@/context/SettingsContext";
 import { useSettings } from "@/hooks/useSettings";
@@ -36,7 +35,6 @@ export const PlayerCorner: React.FC<PlayerCornerProps> = ({
     onModalChange,
 }) => {
     const { settings, updateSettings } = useSettings();
-    const insets = useSafeAreaInsets();
     const isTop = position.startsWith("top");
     const isLeft = position.endsWith("left");
 
@@ -122,7 +120,6 @@ export const PlayerCorner: React.FC<PlayerCornerProps> = ({
     const [configModal, setConfigModal] = useState<{ slotIndex: number; op: PlayerOperation | null } | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
     const [editOp, setEditOp] = useState<Partial<PlayerOperation>>({});
-    const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const [iconPickerOpen, setIconPickerOpen] = useState(false);
 
     // Notify parent when any modal opens/closes so it can hide the controls layer

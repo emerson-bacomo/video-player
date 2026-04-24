@@ -1,7 +1,7 @@
 import { ArrowDown, ArrowUp, ArrowUpDown, SortAsc } from "lucide-react-native";
 import React from "react";
-import { Text, TouchableOpacity, View } from "react-native";
-import { SortBy, SortOrder } from "../hooks/useMedia";
+import { ActivityIndicator, Text, TouchableOpacity, View } from "react-native";
+import { SortBy, SortOrder, useMedia } from "../hooks/useMedia";
 import { cn } from "../utils/cn";
 import { Icon } from "./Icon";
 import { Menu } from "./Menu";
@@ -26,6 +26,7 @@ export const SortMenu = <T extends string = SortBy>({
     isLoading = false,
 }: SortMenuProps<T>) => {
     const CurrentIcon = options.find((o) => o.value === currentSort.by)?.icon || SortAsc;
+    const { loadingTask } = useMedia();
 
     return (
         <Menu variant="POPUP">
@@ -119,6 +120,11 @@ export const SortMenu = <T extends string = SortBy>({
                                     {option.label}
                                 </Text>
                             </View>
+                            {isSelected && loadingTask && (
+                                <View className="absolute right-4 inset-y-0 justify-center">
+                                    <ActivityIndicator size="small" color="#3b82f6" />
+                                </View>
+                            )}
                         </TouchableOpacity>
                     );
                 })}

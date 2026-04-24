@@ -12,6 +12,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { OnLoadData, OnProgressData, VideoRef } from "react-native-video";
 
 import { useTheme } from "@/context/ThemeContext";
+import { VideoMedia } from "@/types/useMedia";
+import { toast } from "sonner-native";
 import { CorePlayer } from "../components/CorePlayer";
 import { PlayerCentralIndicator, PlayerCentralIndicatorProps } from "../components/PlayerCentralIndicator";
 import { PlayerControls } from "../components/PlayerControls";
@@ -20,29 +22,36 @@ import { PlayerGestureDetector } from "../components/PlayerGestureDetector";
 import { PlayerHeader } from "../components/PlayerHeader";
 import { SuccessBadge } from "../components/SuccessBadge";
 import { useClipping } from "../hooks/useClipping";
-import { useMedia, VideoMedia } from "../hooks/useMedia";
+import { useMedia } from "../hooks/useMedia";
+import { useSafeNavigation } from "../hooks/useSafeNavigation";
 import { useSettings } from "../hooks/useSettings";
 import ExpoFFmpeg from "../modules/expo-ffmpeg/src/index";
 import { normalizeClipDestination } from "../utils/clipDestination";
 
 export default function PlayerScreen() {
-    const { videoId } = useLocalSearchParams<{ videoId?: string }>();
+    const { videoId, albumId } = useLocalSearchParams<{ videoId?: string; albumId?: string }>();
     const router = useRouter();
+    const { safeBack } = useSafeNavigation();
     const { settings, updateSettings } = useSettings();
-    const { currentAlbumVideos, setLoadingTask, fetchAlbums, updateVideoProgress, getVideoById } = useMedia();
+    const { getVideosForAlbum, setLoadingTask, fetchAlbums, updateVideoProgress } = useMedia();
     const [activeVideo, setActiveVideo] = useState<VideoMedia | null>(null);
 
+    const [playlist, setPlaylist] = useState<VideoMedia[]>([]);
+
     useEffect(() => {
-        if (videoId) {
-            const cached = currentAlbumVideos.find((v) => v.id === videoId);
-            if (cached) {
-                setActiveVideo(cached);
+        if (videoId && albumId) {
+            const albumVids = getVideosForAlbum(albumId);
+            const activeVid = albumVids.find((v) => v.id === videoId);
+
+            if (activeVid) {
+                setActiveVideo(activeVid);
+                setPlaylist(albumVids);
             } else {
-                const direct = getVideoById(videoId);
-                setActiveVideo(direct);
+                toast.error("Video not found.");
+                safeBack();
             }
         }
-    }, [videoId, currentAlbumVideos, getVideoById]);
+    }, [videoId, albumId, getVideosForAlbum, safeBack]);
 
     const [showControls, setShowControls] = useState(true);
     const [currentTime, setCurrentTime] = useState(0);
@@ -174,8 +183,8 @@ export default function PlayerScreen() {
         setIsEnded(false);
     }, [videoId]);
 
-    const currentIndex = currentAlbumVideos.findIndex((v) => v.id === videoId);
-    const hasNext = currentIndex !== -1 && currentIndex < currentAlbumVideos.length - 1;
+    const currentIndex = playlist.findIndex((v) => v.id === videoId);
+    const hasNext = currentIndex !== -1 && currentIndex < playlist.length - 1;
     const hasPrevious = currentIndex > 0;
 
     const isDraggingMarker = useRef(false);
@@ -239,7 +248,7 @@ export default function PlayerScreen() {
 
     const handleCorePlayerEnd = useCallback(() => {
         if (settings.autoPlayOnEnd && hasNext) {
-            const nextVideo = currentAlbumVideos[currentIndex + 1];
+            const nextVideo = playlist[currentIndex + 1];
             let shouldAutoPlay = true;
 
             if (settings.autoPlaySimilarPrefixOnly) {
@@ -249,7 +258,7 @@ export default function PlayerScreen() {
             }
 
             if (shouldAutoPlay) {
-                router.setParams({ videoId: nextVideo.id });
+                router.setParams({ videoId: nextVideo.id, albumId });
                 return;
             }
         }
@@ -257,15 +266,7 @@ export default function PlayerScreen() {
         setPaused(true);
         setCurrentTime(duration);
         setIsEnded(true);
-    }, [
-        settings.autoPlayOnEnd,
-        settings.autoPlaySimilarPrefixOnly,
-        hasNext,
-        currentAlbumVideos,
-        currentIndex,
-        activeVideo,
-        duration,
-    ]);
+    }, [settings.autoPlayOnEnd, settings.autoPlaySimilarPrefixOnly, hasNext, playlist, currentIndex, activeVideo, albumId]);
 
     const handleRestart = useCallback(() => {
         videoRef.current?.seek(0);
@@ -291,17 +292,17 @@ export default function PlayerScreen() {
 
     const handleSkipNext = useCallback(() => {
         if (hasNext) {
-            const nextVideo = currentAlbumVideos[currentIndex + 1];
-            router.setParams({ videoId: nextVideo.id });
+            const nextVideo = playlist[currentIndex + 1];
+            router.setParams({ videoId: nextVideo.id, albumId });
         }
-    }, [hasNext, currentAlbumVideos, currentIndex, router]);
+    }, [hasNext, playlist, currentIndex, router, albumId]);
 
     const handleSkipPrevious = useCallback(() => {
         if (hasPrevious) {
-            const prevVideo = currentAlbumVideos[currentIndex - 1];
-            router.setParams({ videoId: prevVideo.id });
+            const prevVideo = playlist[currentIndex - 1];
+            router.setParams({ videoId: prevVideo.id, albumId });
         }
-    }, [hasPrevious, currentAlbumVideos, currentIndex, router]);
+    }, [hasPrevious, playlist, currentIndex, router, albumId]);
 
     const handleSaveClip = useCallback(async () => {
         const result = generateDraftSegments();
@@ -374,7 +375,7 @@ export default function PlayerScreen() {
             }
 
             // sanitize filename and construct output path using the user-configured clip destination
-            const cleanName = activeVideo.displayName.replace(/[^a-zA-Z0-9_-]/g, "_");
+            const cleanName = activeVideo.title.replace(/[^a-zA-Z0-9_-]/g, "_");
             const timeSegments = segments.map((s) => `${Math.floor(s.start)}-${Math.floor(s.end)}`).join("_");
             const destDir = destination.replace(/\/+$/, ""); // strip trailing slash
 
@@ -402,15 +403,15 @@ export default function PlayerScreen() {
                 // 1. Force immediate indexing by creating a system asset
                 try {
                     const asset = await MediaLibrary.createAssetAsync(`file://${outPathStr}`);
-                    
+
                     // 2. Try to move it from DCIM back to the intended folder (Album)
                     const folderName = destDir.split("/").pop() || "Movies";
                     const album = await MediaLibrary.getAlbumAsync(folderName);
-                    
+
                     if (album) {
                         await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
                     }
-                    
+
                     // 3. Refresh our local view
                     fetchAlbums();
                 } catch (idxError) {

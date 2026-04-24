@@ -10,9 +10,11 @@ import { ThemedBottomSheet } from "@/components/ThemedBottomSheet";
 import { VideoItem, VideoItemSkeleton } from "@/components/VideoItem";
 import { VideoItemDetailsModal } from "@/components/VideoItemDetailsModal";
 import { useTheme } from "@/context/ThemeContext";
-import { useMedia, VideoMedia } from "@/hooks/useMedia";
+import { useMedia } from "@/hooks/useMedia";
 import { useSafeNavigation } from "@/hooks/useSafeNavigation";
-import { useFocusEffect, useLocalSearchParams } from "expo-router";
+import { VideoMedia } from "@/types/useMedia";
+import { getAlbumPrefixOptionsDb } from "@/utils/db";
+import { useLocalSearchParams } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import {
     Calendar,
@@ -29,31 +31,25 @@ import {
     SortAsc,
     Trash2,
 } from "lucide-react-native";
-import React, { useCallback, useDeferredValue, useEffect, useMemo } from "react";
+import React, { useDeferredValue, useEffect, useMemo } from "react";
 import { BackHandler, FlatList, Image, RefreshControl, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const AlbumVideosScreen = () => {
-    const { id, title } = useLocalSearchParams<{ id: string; title: string }>();
+    const { id } = useLocalSearchParams<{ id: string }>();
     const {
-        currentAlbumVideos,
+        allAlbumsVideos,
         loadingTask,
-        fetchVideosInAlbum,
-        activeVideoSort,
+        getActiveVideoSort,
         updateVideoSort,
-        refreshPlaybackProgress,
-        currentAlbum,
-        folderFilters,
-        setFolderFilter,
+        allAlbum,
+        selectedVideoPrefixFilters,
         permissionResponse,
-        albums,
         isSelectionMode,
         toggleSelection,
         clearSelection,
         renameVideo,
-        videoSortMode,
         setVideoSortSettingScope,
-        compareByVideoSort,
         syncCurrentAlbum,
         updateVideoProgress,
         updateMultipleVideoProgress,
@@ -62,7 +58,14 @@ const AlbumVideosScreen = () => {
         hideVideo,
         hideMultipleVideos,
         selectedIds,
+        updatePrefixFilter,
+        clearPrefixFilters,
+        setLoadingTask,
     } = useMedia();
+
+    const albumInfo = allAlbum[id] || { title: "Album", assetCount: 0 };
+    const activeVideoSort = getActiveVideoSort(albumInfo);
+    const videoSortMode = albumInfo?.videoSortSettingScope || "global";
     const { colors } = useTheme();
     const insets = useSafeAreaInsets();
     const { safeBack } = useSafeNavigation();
@@ -81,115 +84,59 @@ const AlbumVideosScreen = () => {
     }, [isSelectionMode, clearSelection]);
 
     // Filtering State (Persisted)
-    const selectedPrefixes = folderFilters[id] || [];
-    const setSelectedPrefixes = (arg: string[] | ((prev: string[]) => string[])) => {
-        const next = typeof arg === "function" ? arg(selectedPrefixes) : arg;
-        setFolderFilter(id, next);
-    };
+    const selectedPrefixes = selectedVideoPrefixFilters[id] || [];
+
     const [selectedVideoId, setSelectedVideoId] = React.useState<string | null>(null);
     const [showAlbumInfo, setShowAlbumInfo] = React.useState(false);
     const [renamingVideo, setRenamingVideo] = React.useState<VideoMedia | null>(null);
     const [isLoading, setIsLoading] = React.useState(true);
     const [menuVideo, setMenuVideo] = React.useState<VideoMedia | null>(null);
-    const { width } = useWindowDimensions();
-    const numColumns = Math.max(2, Math.floor(width / 180));
+    const { width: windowWidth } = useWindowDimensions();
+    const [listWidth, setListWidth] = React.useState(windowWidth);
+    const numColumns = Math.max(2, Math.floor(listWidth / 180));
+    const itemWidth = (listWidth - 16) / numColumns;
 
-    const selectedVideo = React.useMemo(
-        () => currentAlbumVideos.find((v) => v.id === selectedVideoId) || null,
-        [currentAlbumVideos, selectedVideoId],
-    );
-    // Only show skeletons on a true cold load: no cached videos exist yet for this album.
-    // If we have ANY data already in currentAlbumVideos, show it immediately (stale-while-revalidate).
-    const isInitialLoading = currentAlbum?.id !== id;
-    const showSkeletons = isInitialLoading || (isLoading && currentAlbumVideos.length === 0);
+    const [prefixOptions, setPrefixOptions] = React.useState<{ value: string; label: string; count: number }[]>([]);
 
-    // Prefix Calculation (Filtering Logic continues using global state)
+    // All videos for this album from in-memory state, with prefix filter and sorting applied
+    const videos = allAlbumsVideos[id] || [];
 
-    // 1. Prefix Calculation
-    const prefixOptions = useMemo(() => {
-        if (isLoading || currentAlbumVideos.length === 0) return [];
-        // Map of rawPrefix -> { displayNamePrefix, count }
-        const counts: Record<string, { label: string; count: number }> = {};
-        currentAlbumVideos.forEach((v) => {
-            const raw = v.rawPrefix || "";
-            if (!counts[raw]) {
-                counts[raw] = { label: v.prefix || "Unknown", count: 0 };
+    React.useEffect(() => {
+        const loadPrefixOptions = async () => {
+            const dbOptionsStr = getAlbumPrefixOptionsDb(id);
+            if (dbOptionsStr) {
+                try {
+                    const parsed = JSON.parse(dbOptionsStr);
+                    if (parsed && parsed.length > 0) {
+                        setPrefixOptions(parsed);
+                    }
+                } catch (e) {}
             }
-            counts[raw].count++;
-        });
+        };
 
-        return Object.entries(counts)
-            .filter(([_, data]) => data.count > 1)
-            .map(([value, data]) => ({ value, label: data.label, count: data.count }))
-            .sort((a, b) => a.label.localeCompare(b.label));
-    }, [currentAlbumVideos, isLoading]);
+        setTimeout(loadPrefixOptions, 0);
+    }, [id]);
 
     const skeletonData = React.useMemo(
         () => Array.from({ length: 10 }).map((_, i) => ({ id: `skel-${i}`, isPlaceholder: true })),
         [],
     );
 
-    const deferredPrefixes = useDeferredValue(selectedPrefixes);
-
-    // 3. Processed Videos (Filtered)
-    const processedVideos = useMemo(() => {
-        if (showSkeletons) return skeletonData;
-
-        let result = [...currentAlbumVideos];
-
-        if (deferredPrefixes.length > 0) {
-            result = result.filter((v) => deferredPrefixes.includes(v.rawPrefix || ""));
-        }
-
-        // Apply sorting instantly in the memo
-        result.sort((a, b) => compareByVideoSort(a, b, activeVideoSort));
-
-        return result;
-    }, [currentAlbumVideos, deferredPrefixes, showSkeletons, skeletonData, activeVideoSort, compareByVideoSort]);
-    const deferredProcessedVideos = useDeferredValue(processedVideos);
-
-    const isDisplayingSkeletons = useMemo(() => {
-        return showSkeletons || deferredProcessedVideos.some((v) => v.isPlaceholder);
-    }, [showSkeletons, deferredProcessedVideos]);
-
-    // Performance Tracking
-    const skeletonStartTimeRef = React.useRef<number | null>(null);
-    useEffect(() => {
-        if (isDisplayingSkeletons) {
-            if (!skeletonStartTimeRef.current) {
-                skeletonStartTimeRef.current = Date.now();
-                console.log("[Perf] Skeletons shown (True)...");
-            }
-        } else if (skeletonStartTimeRef.current) {
-            const duration = Date.now() - skeletonStartTimeRef.current;
-            console.log(`[Perf] Skeletons hidden after ${duration}ms (True)`);
-            skeletonStartTimeRef.current = null;
-        }
-    }, [isDisplayingSkeletons]);
-
     const currentAlbumData = useMemo(() => {
-        // Use the already-loaded albums state as the source of truth for count,
-        // so the subtitle is correct immediately on enter, before async fetch completes.
-        const albumFromList = albums.find((a) => a.id === id);
-
-        // Derive thumbnail dynamically from the current view (first sorted/filtered video)
-        const firstVid = processedVideos.find((v) => !v.isPlaceholder) as VideoMedia | undefined;
-        const dynamicThumbnail = firstVid?.thumbnail || firstVid?.baseThumbnailUri;
-
         return {
             id,
-            title:
-                title ||
-                currentAlbum?.displayName ||
-                currentAlbum?.title ||
-                albumFromList?.displayName ||
-                albumFromList?.title ||
-                "",
-            assetCount: albumFromList?.assetCount || currentAlbum?.assetCount || currentAlbumVideos.length,
-            thumbnail: dynamicThumbnail || currentAlbum?.thumbnail || albumFromList?.thumbnail,
-            lastModified: currentAlbum?.lastModified || albumFromList?.lastModified || 0,
+            title: albumInfo?.title || "",
+            assetCount: albumInfo?.assetCount || videos.length,
+            thumbnail: albumInfo?.thumbnail,
+            lastModified: albumInfo?.lastModified || 0,
         };
-    }, [id, title, currentAlbum, processedVideos, albums]);
+    }, [id, albumInfo, videos.length]);
+
+    const deferredProcessedVideos = useDeferredValue(videos);
+
+    const isDisplayingSkeletons = useMemo(() => {
+        return isLoading && videos.length === 0;
+    }, [isLoading, videos.length]);
 
     const videoSortOptions: { label: string; value: "name" | "date" | "duration" | "episode"; icon: LucideIcon }[] = [
         { label: "Episode", value: "episode", icon: Hash },
@@ -200,16 +147,21 @@ const AlbumVideosScreen = () => {
 
     const onRefresh = () => {
         if (id) {
-            fetchVideosInAlbum({ id, title: title || "" });
+            const controller = new AbortController();
+            setIsLoading(true);
+            syncCurrentAlbum(id, controller.signal).finally(() => {
+                if (!controller.signal.aborted) setIsLoading(false);
+            });
         }
     };
 
     const handleToggleFilter = (prefix: string) => {
-        setSelectedPrefixes((prev) => (prev.includes(prefix) ? prev.filter((p) => p !== prefix) : [...prev, prefix]));
+        const isSelected = !selectedPrefixes.includes(prefix);
+        updatePrefixFilter(id, prefix, isSelected);
     };
 
     const handleClearFilters = () => {
-        setSelectedPrefixes([]);
+        clearPrefixFilters(id);
     };
 
     const handleRenameVideo = (newName: string) => {
@@ -219,46 +171,59 @@ const AlbumVideosScreen = () => {
         }
     };
 
-    useFocusEffect(
-        useCallback(() => {
-            // Update UI with any database playback changes made in the player screen
-            refreshPlaybackProgress?.();
-        }, [refreshPlaybackProgress]),
-    );
-
-    // Load album data instantly (cache/DB only, no network sync)
     useEffect(() => {
-        if (!id) return;
+        if (isDisplayingSkeletons || videos !== deferredProcessedVideos) {
+            setLoadingTask({
+                id: "album-render",
+                label: "Loading Videos...",
+                detail: "Processing layout...",
+                isImportant: false,
+            });
+        } else {
+            setLoadingTask(null);
+        }
+    }, [isDisplayingSkeletons, videos, deferredProcessedVideos, setLoadingTask]);
+
+    useEffect(() => {
         const controller = new AbortController();
         setIsLoading(true);
-        fetchVideosInAlbum({ id, title: title || "" }, controller.signal);
-        return () => controller.abort();
-    }, [id, title]);
 
-    // Run the heavy sync only AFTER the videos are visible on screen
-    useEffect(() => {
-        if (isInitialLoading) return; // wait until content is shown
-        const controller = new AbortController();
         syncCurrentAlbum(id, controller.signal).finally(() => {
             if (!controller.signal.aborted) setIsLoading(false);
         });
         return () => controller.abort();
-    }, [isInitialLoading, id]);
+    }, [id]);
+
+    const selectedVideo = useMemo(() => videos.find((v) => v.id === selectedVideoId) || null, [videos, selectedVideoId]);
 
     const { isSelectionWatched, firstSelectedItem, hasSelectionPrefixes } = useMemo(() => {
         if (!selectedIds.size) return { isSelectionWatched: false, firstSelectedItem: null, hasSelectionPrefixes: false };
 
         const firstSelectedId = Array.from(selectedIds)[0];
-        const first = currentAlbumVideos.find((v) => v.id === firstSelectedId);
+        const first = videos.find((v) => v.id === firstSelectedId);
         const watched = first ? first.lastPlayedSec >= first.duration * 0.95 : false;
-
-        const hasPrefixes = Array.from(selectedIds).some((id) => {
-            const v = currentAlbumVideos.find((vid) => vid.id === id);
+        const hasPrefixes = Array.from(selectedIds).some((sid) => {
+            const v = videos.find((vid) => vid.id === sid);
             return !!v?.prefix;
         });
 
         return { isSelectionWatched: watched, firstSelectedItem: first, hasSelectionPrefixes: hasPrefixes };
-    }, [selectedIds, currentAlbumVideos]);
+    }, [selectedIds, videos]);
+
+    const renderVideoItem = ({ item }: { item: any }) => {
+        if (item.isPlaceholder) {
+            return <VideoItemSkeleton width={itemWidth} />;
+        }
+        return (
+            <VideoItem
+                width={itemWidth}
+                item={item}
+                onLongPress={(v) => toggleSelection(v.id)}
+                onInfoPress={(v) => setSelectedVideoId(v.id)}
+                onMenuPress={setMenuVideo}
+            />
+        );
+    };
 
     return (
         <ThemedView className="flex-1" style={{ paddingTop: insets.top }}>
@@ -271,13 +236,7 @@ const AlbumVideosScreen = () => {
                 </View>
 
                 <Header.Actions>
-                    <LoadingStatus
-                        task={
-                            selectedPrefixes !== deferredPrefixes
-                                ? { label: "Processing", detail: "Updating video list...", isImportant: false }
-                                : null
-                        }
-                    />
+                    <LoadingStatus />
                     <Header.SearchAction />
                     <TouchableOpacity
                         onPress={() => setShowAlbumInfo(true)}
@@ -288,6 +247,7 @@ const AlbumVideosScreen = () => {
                 </Header.Actions>
 
                 <Header.SelectionActions
+                    data={deferredProcessedVideos.filter((v: any) => !v.isPlaceholder)}
                     actions={[
                         {
                             label: isSelectionWatched ? "Mark as Unwatched" : "Mark as Watched",
@@ -305,7 +265,7 @@ const AlbumVideosScreen = () => {
                                       label: "Select same prefix",
                                       icon: Film,
                                       onPress: () => {
-                                          selectPrefixesOfSelected();
+                                          selectPrefixesOfSelected(id);
                                       },
                                   },
                               ]
@@ -338,26 +298,15 @@ const AlbumVideosScreen = () => {
             </Header>
 
             <FlatList
+                onLayout={(e) => setListWidth(e.nativeEvent.layout.width)}
                 key={numColumns}
-                data={showSkeletons ? skeletonData : deferredProcessedVideos}
+                data={isDisplayingSkeletons ? skeletonData : deferredProcessedVideos}
                 keyExtractor={(item) => item.id}
                 numColumns={numColumns}
-                // Performance Optimizations (Low Settings)
-                initialNumToRender={2}
-                windowSize={3}
-                maxToRenderPerBatch={2}
-                removeClippedSubviews={true} // Improve scroll performance by not rendering views outside the viewport
-                renderItem={({ item }: { item: any }) => {
-                    if (item.isPlaceholder) return <VideoItemSkeleton />;
-                    return (
-                        <VideoItem
-                            item={item}
-                            onLongPress={(v: any) => toggleSelection(v.id)}
-                            onInfoPress={(v: any) => setSelectedVideoId(v.id)}
-                            onMenuPress={setMenuVideo}
-                        />
-                    );
-                }}
+                initialNumToRender={10}
+                windowSize={5}
+                removeClippedSubviews={true}
+                renderItem={renderVideoItem}
                 ListHeaderComponent={
                     <View className="flex-row justify-end items-center gap-2 mb-4 pr-2">
                         <PrefixFilterMenu
@@ -369,10 +318,10 @@ const AlbumVideosScreen = () => {
                         />
                         <SortMenu
                             currentSort={activeVideoSort}
-                            onSortChange={updateVideoSort}
+                            onSortChange={(s) => updateVideoSort(id, s, videoSortMode)}
                             options={videoSortOptions}
                             mode={videoSortMode}
-                            onModeChange={setVideoSortSettingScope}
+                            onModeChange={(m) => setVideoSortSettingScope(id, m)}
                             showTabs={true}
                             isLoading={isDisplayingSkeletons}
                         />
@@ -388,7 +337,7 @@ const AlbumVideosScreen = () => {
                     />
                 }
                 ListEmptyComponent={
-                    loadingTask ? null : (
+                    isDisplayingSkeletons || loadingTask ? null : (
                         <View className="flex-1 justify-center items-center py-20">
                             <Icon icon={Film} size={64} className="text-border/50" />
                             <Text className="text-secondary mt-4 text-center">No videos in this folder</Text>
@@ -411,7 +360,7 @@ const AlbumVideosScreen = () => {
                 visible={!!renamingVideo}
                 onClose={() => setRenamingVideo(null)}
                 onRename={handleRenameVideo}
-                initialValue={renamingVideo?.displayName || ""}
+                initialValue={renamingVideo?.title || ""}
                 title="Rename Video"
             />
 
@@ -430,7 +379,7 @@ const AlbumVideosScreen = () => {
                             </View>
                             <View className="flex-1">
                                 <Text className="text-text font-bold text-lg" numberOfLines={1}>
-                                    {menuVideo.displayName}
+                                    {menuVideo.title}
                                 </Text>
                                 <Text className="text-secondary text-xs uppercase tracking-widest mt-0.5">Video Options</Text>
                             </View>
@@ -487,12 +436,12 @@ const AlbumVideosScreen = () => {
                             </Text>
                         </TouchableOpacity>
 
-                        {menuVideo.prefix && (
+                        {menuVideo.rawPrefix && (
                             <TouchableOpacity
                                 className="flex-row items-center px-4 py-4 gap-4"
                                 onPress={() => {
                                     setMenuVideo(null);
-                                    togglePrefixSelection(menuVideo.prefix!);
+                                    togglePrefixSelection(menuVideo.rawPrefix!, id);
                                 }}
                             >
                                 <Icon icon={Film} size={22} className="text-secondary" />

@@ -74,6 +74,7 @@ export const Menu = ({
     maxWidth = 400,
     visible: controlledVisible,
     onClose,
+    onOpen,
 }: {
     children: React.ReactNode;
     variant?: MenuVariant;
@@ -82,6 +83,7 @@ export const Menu = ({
     maxWidth?: DimensionValue | "fit-content";
     visible?: boolean;
     onClose?: () => void;
+    onOpen?: () => void;
 }) => {
     const [internalVisible, setInternalVisible] = useState(false);
     const [shouldRender, setShouldRender] = useState(false);
@@ -95,11 +97,13 @@ export const Menu = ({
         triggerHeight: 0,
     });
     const [raisedLayout, setRaisedLayout] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
-    const triggerRef = useRef<View>(null);
-    const raisedRef = useRef<View>(null);
     const [raisedElement, setRaisedElement] = useState<React.ReactNode | null>(null);
     const [contentHeight, setContentHeight] = useState(0);
     const [activeData, setInternalActiveData] = useState<any>(null);
+
+    const triggerRef = useRef<View>(null);
+    const raisedRef = useRef<View>(null);
+    const activeRefs = useRef({ trigger: triggerRef, raised: raisedRef });
 
     const setActiveData = (data: any) => {
         setInternalActiveData(data);
@@ -124,6 +128,7 @@ export const Menu = ({
         }
         if (nextVisible) {
             setShouldRender(true);
+            onOpen?.();
         } else {
             setActiveData(null);
         }
@@ -131,8 +136,11 @@ export const Menu = ({
 
     const updateLayout = (customTriggerRef?: React.RefObject<View>, customRaisedRef?: React.RefObject<View>) => {
         return new Promise<void>((resolve) => {
-            const activeRaisedRef = customRaisedRef || raisedRef;
-            const activeTriggerRef = customTriggerRef || triggerRef;
+            if (customTriggerRef) activeRefs.current.trigger = customTriggerRef;
+            if (customRaisedRef) activeRefs.current.raised = customRaisedRef;
+
+            const activeRaisedRef = activeRefs.current.raised;
+            const activeTriggerRef = activeRefs.current.trigger;
 
             // Measure raised element first if it exists
             if (activeRaisedRef.current) {
@@ -243,6 +251,16 @@ const Trigger = ({ children, data, ...props }: TouchableOpacityProps & { data?: 
         <TouchableOpacity
             ref={localTriggerRef as any}
             {...props}
+            onLayout={(e) => {
+                props.onLayout?.(e);
+                if (context.visible) {
+                    if (data && context.activeData === data) {
+                        context.updateLayout(localTriggerRef as any, localRaise?.raisedRef as any);
+                    } else if (!data) {
+                        context.updateLayout(localTriggerRef as any, localRaise?.raisedRef as any);
+                    }
+                }
+            }}
             onPress={(e: GestureResponderEvent) => {
                 open();
                 props.onPress?.(e);
@@ -429,7 +447,7 @@ const Content = ({
                             }}
                         >
                             <View
-                                className={cn("rounded-xl shadow-2xl border bg-menu border-border", className)}
+                                className={cn("rounded-xl shadow-2xl border bg-menu border-border flex-shrink", className)}
                                 style={{
                                     maxWidth: maxWidth === "fit-content" ? undefined : maxWidth,
                                     maxHeight: popupMaxHeight,
@@ -441,7 +459,7 @@ const Content = ({
                                         if (height > 0) setContentHeight(height);
                                         if (width > 0) setContentWidth(width);
                                     }}
-                                    className="rounded-2xl overflow-hidden"
+                                    className="rounded-2xl overflow-hidden flex-shrink"
                                 >
                                     {typeof children === "function"
                                         ? activeData

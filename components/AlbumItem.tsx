@@ -1,7 +1,8 @@
 import { Folder, MoreVertical } from "lucide-react-native";
 import React from "react";
 import { Image, Text, TouchableOpacity, View } from "react-native";
-import { Album, useMedia } from "../hooks/useMedia";
+import { useMedia } from "../hooks/useMedia";
+import { Album } from "../types/useMedia";
 import { Icon } from "./Icon";
 import { SelectionOverlay } from "./SelectionOverlay";
 import { Skeleton } from "./Skeleton";
@@ -12,10 +13,11 @@ interface AlbumItemProps {
     onLongPress: (v: Album) => void;
     onInfoPress?: (v: Album) => void;
     onMenuPress?: (v: Album) => void;
+    width?: number;
 }
 
-export const AlbumItemSkeleton = React.memo(() => (
-    <View className="flex-1 mx-2 mb-6">
+export const AlbumItemSkeleton = React.memo(({ width }: { width?: number }) => (
+    <View className="mx-2 mb-6" style={width ? { width } : { flex: 1 }}>
         <Skeleton className="aspect-square rounded-2xl mb-2 border border-border" />
         <View className="px-1 mt-1 gap-1.5">
             <Skeleton className="h-3.5 w-3/4 rounded border border-border" />
@@ -26,12 +28,12 @@ export const AlbumItemSkeleton = React.memo(() => (
 
 AlbumItemSkeleton.displayName = "AlbumItemSkeleton";
 
-export const AlbumItem = React.memo(({ item, onPress, onLongPress, onInfoPress, onMenuPress }: AlbumItemProps) => {
+export const AlbumItem = React.memo(({ item, onPress, onLongPress, onInfoPress, onMenuPress, width }: AlbumItemProps) => {
     const { isSelectionMode, selectedIds, toggleSelection } = useMedia();
     const isSelected = selectedIds.has(item.id);
 
     return (
-        <View className="flex-1 mx-2 mb-6">
+        <View className="px-2 mb-6" style={width ? { width } : { flex: 1 }}>
             <View>
                 <TouchableOpacity
                     activeOpacity={0.8}
@@ -75,7 +77,7 @@ export const AlbumItem = React.memo(({ item, onPress, onLongPress, onInfoPress, 
                     >
                         <View pointerEvents="none">
                             <Text className="text-text font-semibold text-sm" numberOfLines={1}>
-                                {item.displayName || item.title}
+                                {item.title}
                             </Text>
                             <Text className="text-secondary text-[11px] mt-0.5">{item.assetCount} videos</Text>
                         </View>

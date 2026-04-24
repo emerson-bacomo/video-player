@@ -1,6 +1,7 @@
 import { useTheme } from "@/context/ThemeContext";
-import { useMedia, VideoMedia } from "@/hooks/useMedia";
+import { useMedia } from "@/hooks/useMedia";
 import { useSafeNavigation } from "@/hooks/useSafeNavigation";
+import { VideoMedia } from "@/types/useMedia";
 import { StatusBar } from "expo-status-bar";
 import { ChevronLeft, Search, X } from "lucide-react-native";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -24,11 +25,19 @@ export default function SearchPage() {
 
     const selectedVideo = useMemo(() => results.find((v) => v.id === selectedVideoId) || null, [results, selectedVideoId]);
 
+    const displayResults = useMemo(() => {
+        const result = [...results];
+        if (result.length > 0 && result.length % 2 !== 0) {
+            result.push({ id: "spacer", isSpacer: true } as any);
+        }
+        return result;
+    }, [results]);
+
     const handlePlayVideo = (item: any) => {
         setSelectedVideoId(null);
         safePush({
             pathname: "/player",
-            params: { videoId: item.id },
+            params: { videoId: item.id, albumId: item.albumId },
         });
     };
 
@@ -83,21 +92,23 @@ export default function SearchPage() {
 
             {/* Results */}
             <FlatList
-                data={results}
+                data={displayResults}
                 key={debouncedQuery ? "results-active" : "results-empty"}
                 keyExtractor={(item) => item.id}
                 numColumns={2}
-                columnWrapperStyle={{ justifyContent: "space-between", paddingHorizontal: 16 }}
-                renderItem={({ item }) => (
-                    <VideoItem
-                        item={item}
-                        onInfoPress={(v) => setSelectedVideoId(v.id)}
-                        searchQuery={debouncedQuery}
-                        noEllipsis={true}
-                        onPress={handlePlayVideo}
-                    />
-                )}
-                contentContainerStyle={{ paddingTop: 20, paddingBottom: 60 }}
+                renderItem={({ item }: { item: any }) => {
+                    if (item.isSpacer) return <View className="flex-1 mx-2 mb-6" />;
+                    return (
+                        <VideoItem
+                            item={item}
+                            onInfoPress={(v) => setSelectedVideoId(v.id)}
+                            searchQuery={debouncedQuery}
+                            noEllipsis={true}
+                            onPress={handlePlayVideo}
+                        />
+                    );
+                }}
+                contentContainerStyle={{ paddingHorizontal: 8, paddingTop: 20, paddingBottom: 60 }}
                 ListEmptyComponent={
                     query.trim() ? (
                         <View className="items-center justify-center pt-20 px-10">

@@ -14,7 +14,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { FlatList, Text, View } from "react-native";
 
 export default function HiddenMediaScreen() {
-    const { fetchHiddenMedia, unhideVideo, unhideAlbum, isSelectionMode, clearSelection, toggleSelection } = useMedia();
+    const { fetchHiddenMedia, unhideVideo, unhideAlbum, isSelectionMode, clearSelection, toggleSelection, unhideMultipleAlbums, unhideMultipleVideos } = useMedia();
     const { safePush, safeBack } = useSafeNavigation();
 
     const [data, setData] = useState<{ albums: any[]; videos: any[] }>({ albums: [], videos: [] });
@@ -37,11 +37,15 @@ export default function HiddenMediaScreen() {
         const result: any[] = [...data.albums];
 
         // If albums count is odd, add a spacer to force videos to a new row
-        if (data.albums.length % 2 === 1) {
+        if (data.albums.length > 0 && data.albums.length % 2 === 1) {
             result.push({ id: "spacer-album", isSpacer: true, type: "album" });
         }
 
-        return [...result, ...data.videos.map((v) => ({ ...v, type: "video" }))];
+        const final = [...result, ...data.videos.map((v) => ({ ...v, type: "video" }))];
+        if (final.length > 0 && final.length % 2 === 1) {
+            final.push({ id: "spacer-final", isSpacer: true, type: "video" });
+        }
+        return final;
     }, [data]);
 
     const selectedVideo = useMemo(
@@ -65,7 +69,7 @@ export default function HiddenMediaScreen() {
 
     const renderItem = ({ item }: { item: any }) => {
         if (item.isSpacer) {
-            return <View className="w-[46%] mx-[2%] mb-6" />;
+            return <View className="flex-1 mx-2 mb-6" />;
         }
 
         const isVideo = item.type === "video" || !!item.uri;
@@ -80,7 +84,7 @@ export default function HiddenMediaScreen() {
                         if (isSelectionMode) {
                             toggleSelection(item.id);
                         } else {
-                            safePush({ pathname: "/player", params: { videoId: item.id } });
+                            safePush({ pathname: "/player", params: { videoId: item.id, albumId: item.albumId } });
                         }
                     }}
                 />
@@ -96,7 +100,7 @@ export default function HiddenMediaScreen() {
                     } else {
                         safePush({
                             pathname: "/(tabs)/(videos)/[id]",
-                            params: { id: item.id, title: item.displayName || item.title },
+                            params: { id: item.id },
                         });
                     }
                 }}
@@ -113,20 +117,20 @@ export default function HiddenMediaScreen() {
                 <Header>
                     <Header.Back onPress={safeBack} />
                     <Header.Title title="Hidden Media" subtitle="Manage your excluded content" />
-                    <Header.SelectionOverrideActions
-                        actions={[
+                    <Header.SelectionActions
+                    data={combinedData.filter(item => !item.isSpacer)}
+                    actions={[
                             {
-                                label: "Unhide Selected",
+                                label: "Unhide",
                                 icon: Eye,
-                                onPress: async (selectedIds: Set<string>) => {
-                                    const ids = Array.from(selectedIds);
-                                    // Unhide all selected videos and albums
-                                    await Promise.all([
-                                        ...ids.map((id) => {
-                                            const isVid = data.videos.some((v) => v.id === id);
-                                            return isVid ? unhideVideo(id) : unhideAlbum(id);
-                                        }),
-                                    ]);
+                                onPress: (ids) => {
+                                    const selectedItems = combinedData.filter(item => ids.has(item.id));
+                                    const albumIds = selectedItems.filter(item => item.type === 'album').map(a => a.id);
+                                    const videoIds = selectedItems.filter(item => item.type === 'video').map(v => v.id);
+                                    
+                                    if (albumIds.length > 0) unhideMultipleAlbums(albumIds);
+                                    if (videoIds.length > 0) unhideMultipleVideos(videoIds);
+                                    
                                     loadData();
                                     clearSelection();
                                 },

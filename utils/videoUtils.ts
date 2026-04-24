@@ -56,3 +56,7 @@ export const extractSeason = (filename: string): number => {
     const seasonStr = sMatch ? sMatch[1] : null;
     return seasonStr ? parseInt(seasonStr, 10) : -1;
 };
+
+import * as FileSystem from "expo-file-system/legacy";
+
+export const getThumbnailUri = (videoId: string) => `${FileSystem.cacheDirectory}thumb_${videoId}.jpg`;

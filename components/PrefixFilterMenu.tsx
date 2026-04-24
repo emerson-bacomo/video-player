@@ -1,6 +1,7 @@
+import { useMedia } from "@/hooks/useMedia";
 import { Check, ListFilter, RotateCcw } from "lucide-react-native";
 import React from "react";
-import { Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Text, TouchableOpacity, View } from "react-native";
 import { cn } from "../utils/cn";
 import { Icon } from "./Icon";
 import { Menu } from "./Menu";
@@ -21,9 +22,37 @@ export const PrefixFilterMenu = ({
     isLoading = false,
 }: PrefixFilterMenuProps) => {
     const hasFilters = selectedOptions.length > 0;
+    const { loadingTask } = useMedia();
+
+    const [internalSelectedOptions, setInternalSelectedOptions] = React.useState<string[]>(selectedOptions);
+
+    const handleOpen = () => {
+        setInternalSelectedOptions(selectedOptions);
+    };
+
+    const handleOptionToggle = (value: string) => {
+        setInternalSelectedOptions((prev) => {
+            if (prev.includes(value)) {
+                return prev.filter((v) => v !== value);
+            }
+            return [...prev, value];
+        });
+        
+        // Defer the heavy global update so the UI feedback is instant
+        setTimeout(() => {
+            onOptionToggle(value);
+        }, 0);
+    };
+
+    const handleClearAll = () => {
+        setInternalSelectedOptions([]);
+        setTimeout(() => {
+            onClearAll();
+        }, 0);
+    };
 
     return (
-        <Menu variant="POPUP" anchorHorizontal="center" horizontalScreenFill={true} maxWidth="fit-content">
+        <Menu variant="POPUP" anchorHorizontal="center" horizontalScreenFill={true} maxWidth="fit-content" onOpen={handleOpen}>
             <Menu.Trigger
                 activeOpacity={0.7}
                 className={cn(
@@ -43,11 +72,14 @@ export const PrefixFilterMenu = ({
 
             <Menu.Content>
                 <Menu.Header>
-                    <Text className="text-secondary font-bold text-[10px] uppercase tracking-widest">Filter by Prefix</Text>
+                    <View className="flex-row items-center gap-4">
+                        <Text className="text-secondary font-bold text-[10px] uppercase tracking-widest">Filter by Prefix</Text>
+                        <View>{loadingTask && <ActivityIndicator color="#3b82f6" />}</View>
+                    </View>
 
-                    {hasFilters && (
+                    {internalSelectedOptions.length > 0 && (
                         <TouchableOpacity
-                            onPress={onClearAll}
+                            onPress={handleClearAll}
                             className="flex-row items-center gap-1.5 bg-primary/10 px-2.5 py-1.5 rounded-full border border-primary/20"
                         >
                             <Icon icon={RotateCcw} size={10} className="text-primary" />
@@ -60,7 +92,7 @@ export const PrefixFilterMenu = ({
                     data={options}
                     keyExtractor={(item: any) => item.value}
                     renderItem={({ item: option }: any) => {
-                        const isSelected = selectedOptions.includes(option.value);
+                        const isSelected = internalSelectedOptions.includes(option.value);
                         return (
                             <TouchableOpacity
                                 activeOpacity={0.7}
@@ -68,7 +100,7 @@ export const PrefixFilterMenu = ({
                                     "flex-row items-center justify-between px-5 py-4",
                                     isSelected ? "bg-primary/5" : "active:bg-card",
                                 )}
-                                onPress={() => onOptionToggle(option.value)}
+                                onPress={() => handleOptionToggle(option.value)}
                             >
                                 <View className="flex-row items-center gap-4 flex-1">
                                     <View

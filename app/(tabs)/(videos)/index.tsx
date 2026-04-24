@@ -9,8 +9,9 @@ import { SortMenu } from "@/components/SortMenu";
 import { ThemedSafeAreaView } from "@/components/Themed";
 import { ThemedBottomSheet } from "@/components/ThemedBottomSheet";
 import { useTheme } from "@/context/ThemeContext";
-import { Album, useMedia } from "@/hooks/useMedia";
+import { useMedia } from "@/hooks/useMedia";
 import { useSafeNavigation } from "@/hooks/useSafeNavigation";
+import { Album } from "@/types/useMedia";
 import { useFocusEffect } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { Calendar, Clock, Edit2, EyeOff, Folder, FolderInput, Info, SortAsc, Trash2 } from "lucide-react-native";
@@ -38,11 +39,14 @@ const AlbumListScreen = () => {
     const { colors } = useTheme();
     const deferredAlbumSort = React.useDeferredValue(albumSort);
     const [selectedAlbumId, setSelectedAlbumId] = React.useState<string | null>(null);
-    const { width } = useWindowDimensions();
-    const numColumns = Math.max(2, Math.floor(width / 180));
     const selectedAlbum = React.useMemo(() => albums.find((a) => a.id === selectedAlbumId), [albums, selectedAlbumId]);
     const [renamingAlbum, setRenamingAlbum] = React.useState<Album | null>(null);
     const [menuAlbum, setMenuAlbum] = React.useState<Album | null>(null);
+
+    const { width: windowWidth } = useWindowDimensions();
+    const [listWidth, setListWidth] = React.useState(windowWidth);
+    const numColumns = Math.max(2, Math.floor(listWidth / 180));
+    const itemWidth = (listWidth - 16) / numColumns;
 
     useFocusEffect(
         React.useCallback(() => {
@@ -77,18 +81,19 @@ const AlbumListScreen = () => {
 
     const { safePush } = useSafeNavigation();
 
-    const renderAlbum = ({ item }: { item: any }) => {
-        if (item.isPlaceholder) return <AlbumItemSkeleton />;
+    const renderAlbumItem = ({ item }: { item: any }) => {
+        if (item.isPlaceholder) return <AlbumItemSkeleton width={itemWidth} />;
         return (
             <AlbumItem
                 item={item}
+                width={itemWidth}
                 onPress={(v: any) => {
                     if (isSelectionMode) {
                         toggleSelection(v.id);
                     } else {
                         safePush({
                             pathname: "/(tabs)/(videos)/[id]",
-                            params: { id: v.id, title: v.displayName || v.title },
+                            params: { id: v.id },
                         });
                     }
                 }}
@@ -156,6 +161,7 @@ const AlbumListScreen = () => {
             </Header>
 
             <FlatList
+                onLayout={(e) => setListWidth(e.nativeEvent.layout.width)}
                 key={numColumns}
                 data={dataToDisplay}
                 keyExtractor={(item) => item.id}
@@ -170,7 +176,7 @@ const AlbumListScreen = () => {
                         <SortMenu currentSort={albumSort} onSortChange={setAlbumSort} options={albumSortOptions} />
                     </View>
                 }
-                renderItem={renderAlbum}
+                renderItem={renderAlbumItem}
                 refreshControl={
                     <RefreshControl
                         refreshing={false}
@@ -190,7 +196,7 @@ const AlbumListScreen = () => {
                 visible={!!renamingAlbum}
                 onClose={() => setRenamingAlbum(null)}
                 onRename={handleRenameAlbum}
-                initialValue={renamingAlbum?.displayName || renamingAlbum?.title || ""}
+                initialValue={renamingAlbum?.title || ""}
                 title="Rename Folder"
             />
 
@@ -209,7 +215,7 @@ const AlbumListScreen = () => {
                             </View>
                             <View className="flex-1">
                                 <Text className="text-text font-bold text-lg" numberOfLines={1}>
-                                    {menuAlbum.displayName || menuAlbum.title}
+                                    {menuAlbum.title}
                                 </Text>
                                 <Text className="text-secondary text-xs uppercase tracking-widest mt-0.5">Folder Options</Text>
                             </View>

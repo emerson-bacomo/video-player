@@ -23,7 +23,7 @@ export default function TestGestureScreen() {
     const panStartTime = useRef<number>(0);
     const currentTimeRef = useRef<number>(currentTime);
     const videoRef = useRef<any>({
-        seek: (time: number) => {
+        seek: () => {
             // Mock seek for testing gestures
         },
     });

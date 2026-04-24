@@ -2,7 +2,8 @@ import React, { forwardRef, useCallback, useEffect, useRef } from "react";
 import { StyleProp, ViewStyle } from "react-native";
 import Video, { OnLoadData, OnProgressData, VideoRef } from "react-native-video";
 import { useFloatingPlayer } from "../context/FloatingPlayerContext";
-import { useMedia, VideoMedia } from "../hooks/useMedia";
+import { useMedia } from "../hooks/useMedia";
+import { VideoMedia } from "../types/useMedia";
 import { savePlaybackDataDb } from "../utils/db";
 
 export interface CorePlayerProps {
@@ -56,7 +57,7 @@ export const CorePlayer = forwardRef<VideoRef, CorePlayerProps>((props, ref) => 
             if (uri) {
                 // Save to Mini Player state ONLY if this is the main player unmounting
                 if (id && !isFloating) {
-                    saveLastPlayed({ id });
+                    saveLastPlayed({ id, albumId: video.albumId });
                 }
 
                 // Final save to DB and global state
