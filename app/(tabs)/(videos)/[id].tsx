@@ -61,6 +61,7 @@ const AlbumVideosScreen = () => {
         updatePrefixFilter,
         clearPrefixFilters,
         setLoadingTask,
+        setThumbnailPriorityAlbum,
     } = useMedia();
 
     const albumInfo = allAlbum[id] || { title: "Album", assetCount: 0 };
@@ -83,6 +84,12 @@ const AlbumVideosScreen = () => {
         return () => backHandler.remove();
     }, [isSelectionMode, clearSelection]);
 
+    // Priority thumbnail generation for the current album
+    useEffect(() => {
+        setThumbnailPriorityAlbum(id);
+        return () => setThumbnailPriorityAlbum(null);
+    }, [id, setThumbnailPriorityAlbum]);
+
     // Filtering State (Persisted)
     const selectedPrefixes = selectedVideoPrefixFilters[id] || [];
 
@@ -100,6 +107,7 @@ const AlbumVideosScreen = () => {
 
     // All videos for this album from in-memory state, with prefix filter and sorting applied
     const videos = allAlbumsVideos[id] || [];
+    const isThumbnailGenerating = loadingTask?.id === "thumbnail-gen";
 
     React.useEffect(() => {
         const loadPrefixOptions = async () => {
@@ -172,6 +180,7 @@ const AlbumVideosScreen = () => {
     };
 
     useEffect(() => {
+        if (isThumbnailGenerating) return;
         if (isDisplayingSkeletons || videos !== deferredProcessedVideos) {
             setLoadingTask({
                 id: "album-render",
@@ -300,7 +309,7 @@ const AlbumVideosScreen = () => {
             <FlatList
                 onLayout={(e) => setListWidth(e.nativeEvent.layout.width)}
                 key={numColumns}
-                data={isDisplayingSkeletons ? skeletonData : deferredProcessedVideos}
+                data={isDisplayingSkeletons ? skeletonData : isThumbnailGenerating ? videos : deferredProcessedVideos}
                 keyExtractor={(item) => item.id}
                 numColumns={numColumns}
                 initialNumToRender={10}

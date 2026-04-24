@@ -42,7 +42,14 @@ interface SettingsScreenComponentProps {
 
 export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenComponentProps) => {
     const { settings, updateSettings, loading: settingsLoading } = useSettings();
-    const { regenerateAllThumbnails, resetEverything, loadDataFromDB } = useMedia();
+    const {
+        regenerateAllThumbnails,
+        resetEverything,
+        isSyncing,
+        isResettingDatabase,
+        isRegeneratingThumbnails,
+        loadDataFromDB,
+    } = useMedia();
     const { switchPreset, activePresetId, presets } = useTheme();
     const [themeDropdownOpen, setThemeDropdownOpen] = useState(false);
     const [sensitivityInput, setSensitivityInput] = useState("");
@@ -184,13 +191,10 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
                                 title="Regenerate All Thumbnails"
                                 className="p-4 rounded-xl border bg-background border-border"
                                 textClassName="font-bold text-primary"
-                                onPress={async (setLoading) => {
-                                    try {
-                                        setLoading(true);
-                                        await regenerateAllThumbnails();
-                                    } finally {
-                                        setLoading(false);
-                                    }
+                                loading={isRegeneratingThumbnails}
+                                disabled={(isResettingDatabase || isSyncing) && !isRegeneratingThumbnails}
+                                onPress={async () => {
+                                    await regenerateAllThumbnails();
                                 }}
                             />
                             <View className="h-px bg-zinc-800 my-4" />
@@ -200,13 +204,10 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
                                 title="Reset Media Database"
                                 className="bg-red-900/20 p-4 rounded-xl border border-red-900/30"
                                 textClassName="text-red-400 font-bold"
-                                onPress={async (setLoading) => {
-                                    try {
-                                        setLoading(true);
-                                        await resetEverything();
-                                    } finally {
-                                        setLoading(false);
-                                    }
+                                loading={isResettingDatabase}
+                                disabled={(isRegeneratingThumbnails || isSyncing) && !isResettingDatabase}
+                                onPress={async () => {
+                                    await resetEverything();
                                 }}
                             />
                             <Text className="text-zinc-500 text-xs mt-3">

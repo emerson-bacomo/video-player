@@ -23,7 +23,7 @@ interface VideoItemProps {
 }
 
 export const VideoItemSkeleton = React.memo(({ width }: { width?: number }) => (
-    <View className="mx-2 mb-6" style={width ? { width } : { flex: 1 }}>
+    <View className="px-2 mb-6" style={width ? { width } : { flex: 1 }}>
         <View className="w-full aspect-[16/10] bg-card rounded-xl overflow-hidden border border-border/50 shadow-md mb-2">
             <Skeleton className="w-full h-full" />
         </View>

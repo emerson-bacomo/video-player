@@ -17,7 +17,7 @@ interface AlbumItemProps {
 }
 
 export const AlbumItemSkeleton = React.memo(({ width }: { width?: number }) => (
-    <View className="mx-2 mb-6" style={width ? { width } : { flex: 1 }}>
+    <View className="px-2 mb-6" style={width ? { width } : { flex: 1 }}>
         <Skeleton className="aspect-square rounded-2xl mb-2 border border-border" />
         <View className="px-1 mt-1 gap-1.5">
             <Skeleton className="h-3.5 w-3/4 rounded border border-border" />

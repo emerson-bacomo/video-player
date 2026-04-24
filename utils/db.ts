@@ -16,7 +16,8 @@ export const initDB = () => {
       videoSortType TEXT,
       prefixOptions TEXT,
       selectedPrefixOptions TEXT,
-      folderName TEXT
+      folderName TEXT,
+      path TEXT
     );
     CREATE TABLE IF NOT EXISTS videos (
       id TEXT PRIMARY KEY,
@@ -81,6 +82,9 @@ export const initDB = () => {
     } catch {}
     try {
         db.execSync("ALTER TABLE albums ADD COLUMN prefixOptions TEXT");
+    } catch {}
+    try {
+        db.execSync("ALTER TABLE albums ADD COLUMN path TEXT");
     } catch {}
 
     const secMigrated = getSettingDb("db_v2_sec_units");
@@ -157,9 +161,10 @@ export const getHiddenAlbumsDb = (): Album[] => {
             if (!path) path = ""; // Fallback
             // Save migrated data right away
             try {
-                db.execSync(`UPDATE albums SET folderName = '${folderName}', path = '${path}' WHERE id = '${a.id}'`);
+                const stmt = db.prepareSync("UPDATE albums SET folderName = ?, path = ? WHERE id = ?");
+                stmt.executeSync([folderName, path, a.id]);
             } catch (e) {
-                console.warn("[DB] Failed to save migration data for hidden album", a.id);
+                console.warn("[DB] Failed to save migration data for hidden album", a.id, e);
             }
         }
         return { ...a, hasNew: !!a.hasNew, isHidden: !!a.isHidden, folderName, path };
@@ -169,7 +174,7 @@ export const getHiddenAlbumsDb = (): Album[] => {
 export const saveAlbumsDb = (albums: Album[]) => {
     db.execSync("DELETE FROM albums");
     const stmt = db.prepareSync(
-        "INSERT INTO albums (id, title, assetCount, lastModified, thumbnail, hasNew, videoSortSettingScope, videoSortType, folderName) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO albums (id, title, assetCount, lastModified, thumbnail, hasNew, videoSortSettingScope, videoSortType, folderName, path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
     albums.forEach((a) => {
         stmt.executeSync([
@@ -182,8 +187,45 @@ export const saveAlbumsDb = (albums: Album[]) => {
             a.videoSortSettingScope || "global",
             a.videoSortType || null,
             a.folderName,
+            a.path,
         ]);
     });
+};
+
+// Incremental, non-destructive album persistence for long-running syncs.
+// This avoids losing scanned progress when the app is terminated before final bulk save.
+export const upsertAlbumDb = (album: Album) => {
+    const insertStmt = db.prepareSync(
+        "INSERT OR IGNORE INTO albums (id, title, assetCount, lastModified, thumbnail, hasNew, videoSortSettingScope, videoSortType, folderName, path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    );
+    insertStmt.executeSync([
+        album.id,
+        album.title,
+        album.assetCount,
+        album.lastModified || 0,
+        album.thumbnail || "",
+        album.hasNew ? 1 : 0,
+        album.videoSortSettingScope || "global",
+        album.videoSortType || null,
+        album.folderName,
+        album.path,
+    ]);
+
+    const updateStmt = db.prepareSync(
+        "UPDATE albums SET title = ?, assetCount = ?, lastModified = ?, thumbnail = ?, hasNew = ?, videoSortSettingScope = ?, videoSortType = ?, folderName = ?, path = ? WHERE id = ?",
+    );
+    updateStmt.executeSync([
+        album.title,
+        album.assetCount,
+        album.lastModified || 0,
+        album.thumbnail || "",
+        album.hasNew ? 1 : 0,
+        album.videoSortSettingScope || "global",
+        album.videoSortType || null,
+        album.folderName,
+        album.path,
+        album.id,
+    ]);
 };
 
 export const getAlbumsDb = (): Album[] => {
@@ -202,9 +244,10 @@ export const getAlbumsDb = (): Album[] => {
             // Save migrated data right away
             console.log("[DB] Migrating album", a.id, folderName, path);
             try {
-                db.execSync(`UPDATE albums SET folderName = '${folderName}', path = '${path}' WHERE id = '${a.id}'`);
+                const stmt = db.prepareSync("UPDATE albums SET folderName = ?, path = ? WHERE id = ?");
+                stmt.executeSync([folderName, path, a.id]);
             } catch (e) {
-                console.warn("[DB] Failed to save migration data for album", a.id);
+                console.warn("[DB] Failed to save migration data for album", a.id, e);
             }
         }
         return { ...a, hasNew: !!a.hasNew, isHidden: !!a.isHidden, folderName, path };
@@ -394,7 +437,10 @@ export const setActiveThemePresetDb = (id: number) => {
 
 // --- Reset Database ---
 export const resetDatabaseDb = () => {
-    db.execSync("DELETE FROM playback_data");
+    // playback_data may not exist on newer DB versions (migrated into videos table).
+    try {
+        db.execSync("DELETE FROM playback_data");
+    } catch {}
     db.execSync("DELETE FROM albums");
     db.execSync("DELETE FROM videos");
     db.execSync("DELETE FROM sync_metadata");

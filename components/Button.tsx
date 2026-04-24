@@ -8,16 +8,31 @@ export interface ButtonProps extends Omit<TouchableOpacityProps, "onPress"> {
     onPress: (setLoading: React.Dispatch<React.SetStateAction<boolean>>) => void;
     textClassName?: string;
     textStyle?: any;
+    loading?: boolean;
+    putStyleOnDisabled?: boolean;
 }
 
 /**
  * A premium button component that handles its own internal loading state.
  * When loading, it displays a darkening overlay and a centered activity indicator.
  */
-export const Button = ({ title, onPress, className, textClassName, textStyle, ...props }: ButtonProps) => {
+export const Button = ({
+    title,
+    onPress,
+    className,
+    textClassName,
+    textStyle,
+    loading,
+    putStyleOnDisabled = true,
+    disabled,
+    ...props
+}: ButtonProps) => {
     const [isLoading, setIsLoading] = useState(false);
+    const effectiveLoading = loading ?? isLoading;
+    const isDisabled = !!disabled || effectiveLoading;
 
     const handlePress = async () => {
+        if (effectiveLoading) return;
         onPress(setIsLoading);
     };
 
@@ -25,15 +40,19 @@ export const Button = ({ title, onPress, className, textClassName, textStyle, ..
         <TouchableOpacity
             activeOpacity={0.8}
             onPress={handlePress}
-            disabled={isLoading}
-            className={cn("relative overflow-hidden items-center justify-center", className)}
+            disabled={isDisabled}
+            className={cn(
+                "relative overflow-hidden items-center justify-center",
+                putStyleOnDisabled && isDisabled ? "opacity-60" : "",
+                className,
+            )}
             {...props}
         >
             <Text className={cn("text-white font-bold text-base", textClassName)} style={textStyle}>
                 {title}
             </Text>
 
-            {isLoading && (
+            {effectiveLoading && (
                 <View className="absolute inset-0 bg-black/30 justify-center items-center z-10">
                     <ActivityIndicator size="small" color="white" />
                 </View>

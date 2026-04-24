@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronLeft, Database, Film, Info } from "lucide-react-native";
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, BackHandler, Dimensions, LayoutAnimation, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Dimensions, LayoutAnimation, Text, TouchableOpacity, View } from "react-native";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { useMedia } from "../hooks/useMedia";
 
@@ -59,6 +59,7 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "botto
         if (loadingTask) {
             setTaskToDisplay((prev) => {
                 if (
+                    prev?.id === loadingTask.id &&
                     prev?.label === loadingTask.label &&
                     prev?.detail === loadingTask.detail &&
                     prev?.isImportant === loadingTask.isImportant
@@ -88,7 +89,7 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "botto
             }
             fadeAnim.value = withTiming(isLoadingPopupVisible ? 1 : 0, { duration: 120 });
         } else {
-            fadeAnim.value = withTiming(0, { duration: 150 });
+            fadeAnim.value = withTiming(0, { duration: 200 });
         }
     }, [taskToDisplay, isLoadingPopupVisible, setIsLoadingPopupVisible, fadeAnim]);
 
@@ -96,18 +97,6 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "botto
     useEffect(() => {
         fadeAnim.value = withTiming(isLoadingPopupVisible && !!taskToDisplay ? 1 : 0, { duration: 120 });
     }, [isLoadingPopupVisible, taskToDisplay, fadeAnim]);
-
-    useEffect(() => {
-        const onBackPress = () => {
-            if (isLoadingPopupVisible) {
-                setIsLoadingPopupVisible(false);
-                return true;
-            }
-            return false;
-        };
-        const subscription = BackHandler.addEventListener("hardwareBackPress", onBackPress);
-        return () => subscription.remove();
-    }, [isLoadingPopupVisible, setIsLoadingPopupVisible]);
 
     const toggleVisible = () => setIsLoadingPopupVisible((prev) => !prev);
     const toggleExpanded = () => {

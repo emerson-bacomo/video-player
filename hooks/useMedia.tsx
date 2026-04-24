@@ -55,6 +55,8 @@ const TASK_IDS = {
     LIBRARY_LOAD: "library-load",
 } as const;
 
+const REQUIRED_MEDIA_PERMISSIONS: MediaLibrary.GranularPermission[] = ["video", "audio"];
+
 export interface MediaContextType {
     albums: Album[];
     allAlbums: Album[];
@@ -77,7 +79,10 @@ export interface MediaContextType {
     syncDatabaseWithStorage: () => Promise<void>;
     resetToAlbums: () => void;
     resetEverything: () => Promise<void>;
-    requestPermissionAndFetch: () => Promise<void>;
+    isSyncing: boolean;
+    isResettingDatabase: boolean;
+    isRegeneratingThumbnails: boolean;
+    requestPermissionAndFetch: () => Promise<string | null>;
     loadDataFromDB: () => Promise<void>;
 
     allAlbum: Record<string, Album>;
@@ -116,6 +121,7 @@ export interface MediaContextType {
     setVideoSortSettingScope: (albumId: string, scope: "global" | "local") => void;
     compareByVideoSort: (a: VideoMedia, b: VideoMedia, vSort?: { by: SortBy; order: SortOrder }) => number;
     compareByAlbumSort: (a: Album, b: Album, aSort?: { by: AlbumSortBy; order: SortOrder }) => number;
+    setThumbnailPriorityAlbum: (albumId: string | null) => void;
 }
 
 const MediaContext = createContext<MediaContextType | null>(null);
@@ -259,6 +265,19 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
     const albumRankRef = React.useRef<Map<string, number>>(new Map()); // id → sort rank, O(1) lookup
     const lastSortKeyRef = React.useRef<string>(""); // Track last sort priority to avoid redundant sorts
     const isSyncingRef = React.useRef(false); // Prevent parallel smart syncs
+    const [isSyncing, setIsSyncing] = useState(false);
+    const isResettingDatabaseRef = React.useRef(false); // Immediate guard against re-entrant resets
+    const [isResettingDatabase, setIsResettingDatabase] = useState(false);
+    const isRegeneratingThumbnailsRef = React.useRef(false); // Immediate guard against re-entrant thumbnail regeneration
+    const [isRegeneratingThumbnails, setIsRegeneratingThumbnails] = useState(false);
+    // Album currently being viewed — its videos are always queued first for thumbnail generation
+    const thumbnailGenerationPriorityAlbumIdRef = React.useRef<string | null>(null);
+    const setThumbnailPriorityAlbum = React.useCallback((albumId: string | null) => {
+        thumbnailGenerationPriorityAlbumIdRef.current = albumId;
+        // Re-sort the in-flight queue immediately so the new priority takes effect right away
+        if (albumId) lastSortKeyRef.current = "";
+    }, []);
+    const hasInitializedRef = React.useRef(false);
 
     const { settings, loading: settingsLoading } = useSettings();
 
@@ -306,7 +325,6 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
     const resultQueue = React.useRef<(VideoMedia & { thumbUri: string; bustedUri: string })[]>([]);
     const isDraining = React.useRef(false);
     const drainTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-    const successTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastLoadingDetailRef = React.useRef<string | null>(null);
     const completedThumbnailCountRef = React.useRef(0);
     const thumbnailSessionRef = React.useRef(0);
@@ -318,14 +336,13 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                 clearTimeout(drainTimerRef.current);
                 drainTimerRef.current = null;
             }
-            if (successTimerRef.current) {
-                clearTimeout(successTimerRef.current);
-                successTimerRef.current = null;
-            }
         };
     }, []);
 
-    const [permissionResponse, requestPermission] = MediaLibrary.usePermissions();
+    const [permissionResponse] = MediaLibrary.usePermissions({
+        writeOnly: false,
+        granularPermissions: REQUIRED_MEDIA_PERMISSIONS,
+    });
 
     const getThumbnailCached = async (videoId: string) => {
         const thumbUri = getThumbnailUri(videoId);
@@ -335,13 +352,6 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             if (fileInfo.exists) return thumbUri;
         } catch (e) {}
         return "";
-    };
-
-    const clearSuccessTimer = () => {
-        if (successTimerRef.current) {
-            clearTimeout(successTimerRef.current);
-            successTimerRef.current = null;
-        }
     };
 
     const resolveQueueEmpty = () => {
@@ -355,7 +365,6 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
         completedThumbnailCountRef.current = 0;
         lastSortKeyRef.current = "";
         lastLoadingDetailRef.current = null;
-        clearSuccessTimer();
         return thumbnailSessionRef.current;
     };
 
@@ -365,7 +374,6 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
         completedThumbnailCountRef.current = 0;
         lastSortKeyRef.current = "";
         lastLoadingDetailRef.current = null;
-        clearSuccessTimer();
         resolveQueueEmpty();
     };
 
@@ -380,6 +388,15 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
 
     const sortByPriority = (a: VideoMedia, b: VideoMedia): number => {
         const albumRank = albumRankRef.current;
+        const priorityAlbumId = thumbnailGenerationPriorityAlbumIdRef.current;
+
+        // If the user is inside an album, always put its videos first regardless of global rank
+        if (priorityAlbumId) {
+            const aIsPriority = a.albumId === priorityAlbumId;
+            const bIsPriority = b.albumId === priorityAlbumId;
+            if (aIsPriority && !bIsPriority) return -1;
+            if (!aIsPriority && bIsPriority) return 1;
+        }
 
         if (a.albumId !== b.albumId) {
             return (albumRank.get(a.albumId) ?? 9999) - (albumRank.get(b.albumId) ?? 9999);
@@ -398,7 +415,6 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
         isDraining.current = false;
         lastSortKeyRef.current = "";
         lastLoadingDetailRef.current = null;
-        clearSuccessTimer();
         if (completedThumbnailCountRef.current > 0) {
             const completedCount = completedThumbnailCountRef.current;
             completedThumbnailCountRef.current = 0;
@@ -407,11 +423,8 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                 label: "Thumbnail Success",
                 detail: completedCount === 1 ? "Generated 1 thumbnail." : `Generated ${completedCount} thumbnails.`,
                 isImportant: true,
+                dismissAfter: THUMBNAIL_SUCCESS_MS,
             });
-            successTimerRef.current = setTimeout(() => {
-                setLoadingTask((prev) => (prev?.label === "Thumbnail Success" ? null : prev));
-                successTimerRef.current = null;
-            }, THUMBNAIL_SUCCESS_MS);
         } else {
             setLoadingTask(null);
         }
@@ -483,17 +496,49 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                         let changed = false;
                         const next = prev.map((album) => {
                             const albumUpdates = updatesByAlbum.get(album.id);
-                            if (!albumUpdates || !album.thumbnail) return album;
+                            if (!albumUpdates) return album;
 
-                            const matchingUpdate = Array.from(albumUpdates.values()).find((update) =>
-                                album.thumbnail?.startsWith(update.thumbUri),
-                            );
+                            let matchingUpdate: { thumbUri: string; bustedUri: string } | undefined;
+
+                            if (album.thumbnail) {
+                                // Album already has a cover - only update if the source video was in this batch
+                                matchingUpdate = Array.from(albumUpdates.values()).find((update) =>
+                                    album.thumbnail?.startsWith(update.thumbUri),
+                                );
+                            } else {
+                                // No cover yet (cleared by regeneration or fresh install) - use first update
+                                matchingUpdate = Array.from(albumUpdates.values())[0];
+                            }
+
                             if (!matchingUpdate) return album;
 
                             changed = true;
                             updateAlbumThumbnailDb(album.id, matchingUpdate.bustedUri);
                             return { ...album, thumbnail: matchingUpdate.bustedUri };
                         });
+                        return changed ? next : prev;
+                    });
+
+                    setAllAlbumsVideos((prev) => {
+                        let changed = false;
+                        const next = { ...prev };
+                        for (const [albumId, albumUpdates] of updatesByAlbum.entries()) {
+                            const videos = next[albumId];
+                            if (!videos) continue;
+
+                            let albumChanged = false;
+                            const nextVideos = videos.map((video) => {
+                                const update = albumUpdates.get(video.id);
+                                if (!update) return video;
+                                albumChanged = true;
+                                return { ...video, thumbnail: update.bustedUri, baseThumbnailUri: update.thumbUri };
+                            });
+
+                            if (albumChanged) {
+                                next[albumId] = nextVideos;
+                                changed = true;
+                            }
+                        }
                         return changed ? next : prev;
                     });
                 }
@@ -580,7 +625,13 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             );
             cancelThumbnailSession();
             setAlbums((prev) => prev.map((a) => ({ ...a, thumbnail: undefined })));
-            setAlbums((prev) => prev.map((a) => ({ ...a, thumbnail: undefined })));
+            setAllAlbumsVideos((prev) => {
+                const next = { ...prev };
+                for (const albumId in next) {
+                    next[albumId] = next[albumId].map((v) => ({ ...v, thumbnail: undefined }));
+                }
+                return next;
+            });
             console.log("[Media] Thumbnail cache cleared.");
         } catch (e) {
             console.error("[Media] Failed to clear cache:", e);
@@ -590,12 +641,21 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
     };
 
     const regenerateAllThumbnails = async () => {
-        await generateThumbnails(true);
+        if (isRegeneratingThumbnailsRef.current || isResettingDatabaseRef.current || isSyncingRef.current) return;
+        isRegeneratingThumbnailsRef.current = true;
+        setIsRegeneratingThumbnails(true);
+        try {
+            await generateThumbnails(true);
+        } finally {
+            isRegeneratingThumbnailsRef.current = false;
+            setIsRegeneratingThumbnails(false);
+        }
     };
 
-    const generateThumbnails = async (regenerate: boolean = false) => {
+    const generateThumbnails = async (regenerate: boolean = false): Promise<void> => {
         // Prevent double-clicking or initiating while a background generation is already actively running
         if (hasActiveThumbnailWork() || thumbnailQueue.current.length > 0) return;
+        let didQueue = false;
 
         try {
             if (regenerate) {
@@ -625,6 +685,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                 }));
 
             if (toQueue.length > 0) {
+                didQueue = true;
                 const newItems = toQueue.filter((m: any) => !thumbnailQueue.current.some((p) => p.id === m.id));
                 thumbnailQueue.current.push(...newItems);
 
@@ -633,14 +694,16 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                     onQueueEmptyRef.current = resolve;
                 });
                 processQueue();
-                return done;
+                await done;
+                return;
             }
         } catch (e) {
             console.error("[Media] Regeneration failed:", e);
         } finally {
             // Task will be cleared by the worker when queue is empty,
             // but we can set it to null here if no items were added.
-            if (thumbnailQueue.current.length === 0) {
+            if (!didQueue && thumbnailQueue.current.length === 0) {
+                console.log("nulled");
                 setLoadingTask(null);
             }
         }
@@ -724,7 +787,9 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
     };
 
     const resetEverything = async () => {
-        if (loadingTask?.label === "Resetting Library") return;
+        if (isResettingDatabaseRef.current || isRegeneratingThumbnailsRef.current || isSyncingRef.current) return;
+        isResettingDatabaseRef.current = true;
+        setIsResettingDatabase(true);
 
         try {
             setLoadingTask({
@@ -744,6 +809,12 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                 await new Promise((r) => setTimeout(r, 100));
             }
 
+            // If a smart sync is currently writing DB rows, wait until it finishes
+            // to avoid reset contention/hangs on DELETE statements.
+            while (isSyncingRef.current) {
+                await new Promise((r) => setTimeout(r, 100));
+            }
+
             setError(null);
             await clearThumbnailCache();
             resetDatabaseDb();
@@ -754,12 +825,15 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
         } catch (e) {
             setError("Failed to reset database");
         } finally {
+            isResettingDatabaseRef.current = false;
+            setIsResettingDatabase(false);
             isSyncingRef.current = false;
+            setIsSyncing(false);
             setLoadingTask(null);
         }
     };
 
-    const loadDataFromDB = async () => {
+    const loadDataFromDB = async (options?: { deferTaskClear?: boolean }) => {
         try {
             console.log("[Media] Loading initial data from DB...");
             const lastSync = getLastSyncTimestampDb();
@@ -812,18 +886,29 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
         } catch (e) {
             console.error("[Media] DB Load failed:", e);
         } finally {
-            setLoadingTask(null);
+            if (!options?.deferTaskClear) {
+                // deferTaskClear: Keep LIBRARY_LOAD visible during the startup handoff from DB read -> smart sync,...
+                // ...so EmptyAlbumState doesn't flash briefly when reopening mid-scan.
+                setLoadingTask((prev) => (prev?.id === TASK_IDS.LIBRARY_LOAD ? null : prev));
+            }
         }
     };
 
     const performSmartSync = async (signal?: AbortSignal) => {
+        console.log("[Media] Smart Sync called...");
         if (isSyncingRef.current || signal?.aborted) return;
 
         // Guard: Disable sync if no permissions granted
-        const hasPermission = await checkPermission();
-        if (!hasPermission) return;
+        const permissionState = await checkPermission();
+        if (permissionState !== "granted") {
+            if (permissionState === "blocked") {
+                setError("Media permission is blocked. Enable video/audio access in system settings.");
+            }
+            return;
+        }
 
         isSyncingRef.current = true;
+        setIsSyncing(true);
         try {
             const lastSync = getLastSyncTimestampDb();
             const syncLabel = "Syncing Media";
@@ -841,12 +926,15 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                 console.log("[Media] Library is clean (Smart Sync). Skipping delta scan.");
                 await syncDatabaseWithStorage();
                 setLoadingTask(null);
+                isSyncingRef.current = false;
+                setIsSyncing(false);
                 return;
             }
 
             console.log("[Media] Library changed. Starting delta scan...");
             // Switch to visible now that we know there are actual changes
-            setLoadingTask({ id: TASK_IDS.MEDIA_SYNC, label: syncLabel, detail: "Processing changes...", isImportant: true });
+            const detailText = lastSync === 0 ? "Scanning library..." : "Processing changes...";
+            setLoadingTask({ id: TASK_IDS.MEDIA_SYNC, label: syncLabel, detail: detailText, isImportant: true });
             await syncDatabaseWithStorage();
 
             const playbackData = getAllPlaybackDataDb();
@@ -1006,14 +1094,15 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             });
             setAllAlbumsVideos(syncedVideosMap);
 
-            generateThumbnails(false);
             setLastSyncTimestampDb(newestTimestamp);
+            await generateThumbnails(false);
             console.log(`[Media] Delta sync complete. Processed ${totalNewFound} items.`);
         } catch (e) {
             console.error("[Media] Delta sync failed:", e);
             setError("Background sync failed");
         } finally {
             isSyncingRef.current = false;
+            setIsSyncing(false);
             if (!hasActiveThumbnailWork()) setLoadingTask(null);
         }
     };
@@ -1074,20 +1163,33 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
         await performSmartSync(signal);
     };
 
-    const checkPermission = async () => {
-        if (permissionResponse?.status !== "granted") {
-            const { status } = await requestPermission();
-            return status === "granted";
-        }
-        return true;
+    const checkPermission = async (): Promise<"granted" | "denied" | "blocked"> => {
+        // Read current OS state directly to avoid stale hook snapshots after partial grants.
+        const current = await MediaLibrary.getPermissionsAsync(false, REQUIRED_MEDIA_PERMISSIONS);
+        if (current.granted || current.status === "granted") return "granted";
+        if (current.canAskAgain === false) return "blocked";
+
+        // Request only the permission this app actually needs for syncing videos.
+        const requested = await MediaLibrary.requestPermissionsAsync(false, REQUIRED_MEDIA_PERMISSIONS);
+        if (requested.granted || requested.status === "granted") return "granted";
+        return requested.canAskAgain === false ? "blocked" : "denied";
     };
 
-    const requestPermissionAndFetch = async () => {
-        const granted = await checkPermission();
-        if (granted) {
+    const requestPermissionAndFetch = async (): Promise<string | null> => {
+        const permissionState = await checkPermission();
+        if (permissionState === "granted") {
             await performSmartSync();
+            return null;
         } else {
-            setError("Permission denied. Cannot scan media.");
+            if (permissionState === "blocked") {
+                const message = "Permission blocked. Open app settings and allow media access.";
+                setError(message);
+                return message;
+            } else {
+                const message = "Permission denied. Cannot scan media.";
+                setError(message);
+                return message;
+            }
         }
     };
 
@@ -1111,8 +1213,6 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
         });
     }, []);
 
-    const hasInitializedRef = React.useRef(false);
-
     useEffect(() => {
         const controller = new AbortController();
         const { signal } = controller;
@@ -1122,7 +1222,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
 
             try {
                 // 1. Load cached data from DB immediately
-                await loadDataFromDB();
+                await loadDataFromDB({ deferTaskClear: true });
 
                 // 2. Permission Guard for MediaLibrary scans
                 if (permissionResponse.status !== "granted") {
@@ -1371,6 +1471,9 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             updateVideoProgress,
             resetToAlbums,
             resetEverything,
+            isSyncing,
+            isResettingDatabase,
+            isRegeneratingThumbnails,
             requestPermissionAndFetch,
             loadDataFromDB,
             isLoadingPopupVisible,
@@ -1407,6 +1510,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             setVideoSortSettingScope,
             compareByVideoSort,
             compareByAlbumSort,
+            setThumbnailPriorityAlbum,
         }),
         [
             albums,
@@ -1423,6 +1527,9 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             regenerateAllThumbnails,
             syncDatabaseWithStorage,
             updateVideoProgress,
+            isSyncing,
+            isResettingDatabase,
+            isRegeneratingThumbnails,
             resetEverything,
             requestPermissionAndFetch,
             loadDataFromDB,
@@ -1460,15 +1567,26 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             setVideoSortSettingScope,
             compareByVideoSort,
             compareByAlbumSort,
+            setThumbnailPriorityAlbum,
         ],
     );
 
     useEffect(() => {
         const subscription = AppState.addEventListener("change", (nextAppState: AppStateStatus) => {
+            // console.log("[Media] App state changed:", nextAppState);
             if (nextAppState === "active") {
-                // If we've already done the initial heavy lifting, just do a smart check
-                console.log("[Media] App focused, running Smart Sync...");
-                performSmartSync();
+                // Guard: never trigger sync from focus if required media permission is not granted.
+                void (async () => {
+                    const currentPermission = await MediaLibrary.getPermissionsAsync(false, REQUIRED_MEDIA_PERMISSIONS);
+                    if (!(currentPermission.granted || currentPermission.status === "granted")) {
+                        console.log("[Media] App focused, skipping Smart Sync (permission not granted).");
+                        return;
+                    }
+
+                    // If we've already done the initial heavy lifting, just do a smart check
+                    console.log("[Media] App focused, running Smart Sync...");
+                    await performSmartSync();
+                })();
             }
         });
 
