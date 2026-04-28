@@ -37,7 +37,7 @@ export const PrefixFilterMenu = ({
             }
             return [...prev, value];
         });
-        
+
         // Defer the heavy global update so the UI feedback is instant
         setTimeout(() => {
             onOptionToggle(value);
@@ -64,7 +64,7 @@ export const PrefixFilterMenu = ({
                     <Icon icon={ListFilter} size={18} className={hasFilters ? "text-primary" : "text-secondary"} />
                     {hasFilters && (
                         <View className="bg-primary rounded-full px-1.5 min-w-[18px] h-[18px] items-center justify-center">
-                            <Text className="text-white text-[10px] font-bold">{selectedOptions.length}</Text>
+                            <Text className="text-white text-xs font-bold">{selectedOptions.length}</Text>
                         </View>
                     )}
                 </View>
@@ -73,7 +73,7 @@ export const PrefixFilterMenu = ({
             <Menu.Content>
                 <Menu.Header>
                     <View className="flex-row items-center gap-4">
-                        <Text className="text-secondary font-bold text-[10px] uppercase tracking-widest">Filter by Prefix</Text>
+                        <Text className="text-secondary font-bold text-xs uppercase tracking-widest">Filter by Prefix</Text>
                         <View>{loadingTask && <ActivityIndicator color="#3b82f6" />}</View>
                     </View>
 
@@ -83,7 +83,7 @@ export const PrefixFilterMenu = ({
                             className="flex-row items-center gap-1.5 bg-primary/10 px-2.5 py-1.5 rounded-full border border-primary/20"
                         >
                             <Icon icon={RotateCcw} size={10} className="text-primary" />
-                            <Text className="text-primary text-[10px] font-bold">Clear All</Text>
+                            <Text className="text-primary text-xs font-bold">Clear All</Text>
                         </TouchableOpacity>
                     )}
                 </Menu.Header>
@@ -119,7 +119,7 @@ export const PrefixFilterMenu = ({
                                     </Text>
                                 </View>
                                 <View className="bg-card/80 px-2 py-1 rounded-lg ml-3 border border-border/50">
-                                    <Text className="text-secondary text-[11px] font-bold">{option.count}</Text>
+                                    <Text className="text-secondary text-sm font-bold">{option.count}</Text>
                                 </View>
                             </TouchableOpacity>
                         );

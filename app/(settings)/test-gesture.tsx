@@ -21,8 +21,7 @@ export default function TestGestureScreen() {
 
     // Refs
     const panStartTime = useRef<number>(0);
-    const currentTimeRef = useRef<number>(currentTime);
-    const videoRef = useRef<any>({
+    const playerRef = useRef<any>({
         seek: () => {
             // Mock seek for testing gestures
         },
@@ -55,11 +54,10 @@ export default function TestGestureScreen() {
                         setCentralIndicator={setCentralIndicator}
                         setPanSeekTime={setPanSeekTime}
                         resetControlsTimer={() => {}}
-                        videoRef={videoRef}
+                        playerRef={playerRef}
                         controlsTimeout={controlsTimeout}
                         skipTimeout={skipTimeout}
                         panStartTime={panStartTime}
-                        currentTimeRef={currentTimeRef}
                     >
                         <View className="flex-1 items-center justify-center">
                             <View className="p-8 border border-white/10 rounded-3xl bg-white/5 items-center">

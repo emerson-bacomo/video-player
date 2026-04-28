@@ -1,5 +1,6 @@
 import type { Album, VideoMedia } from "@/types/useMedia";
-import { saveSettingDb, updateAlbumVideoSortScopeDb, updateAlbumVideoSortTypeDb } from "@/utils/db";
+import { DEFAULT_SORT_SCOPE } from "@/constants/defaults";
+import { getVideosForAlbumDb, saveSettingDb, updateAlbumVideoSortScopeDb, updateAlbumVideoSortTypeDb } from "@/utils/db";
 import React, { useCallback, useRef, useState } from "react";
 
 export type SortBy = "name" | "date" | "duration" | "episode";
@@ -20,12 +21,18 @@ export const useMediaSort = (
     setAlbums: React.Dispatch<React.SetStateAction<Album[]>>,
     setAllAlbumsVideos: React.Dispatch<React.SetStateAction<Record<string, VideoMedia[]>>>,
     albumsRef: React.RefObject<Record<string, Album>>,
+    mapVideoMetadata: (v: any) => VideoMedia,
 ) => {
     const [albumSort, setAlbumSortState] = useState<AlbumSortConfig>({ by: "date", order: "desc" });
     const [globalVideoSort, setGlobalVideoSort] = useState<VideoSortConfig>({ by: "episode", order: "asc" });
 
     const albumSortRef = useRef<AlbumSortConfig>(albumSort);
     const globalVideoSortRef = useRef<VideoSortConfig>(globalVideoSort);
+
+    // Re-sort albums immediately when sort order changes
+    React.useEffect(() => {
+        saveSettingDb("albumSort", JSON.stringify(albumSort));
+    }, [albumSort]);
 
     const getActiveVideoSort = useCallback(
         (album: Album | null | undefined) => {
@@ -165,7 +172,7 @@ export const useMediaSort = (
             const current = albumsRef.current[albumId];
             if (!current) return;
 
-            const currentScope = current.videoSortSettingScope || "global";
+            const currentScope = current.videoSortSettingScope || DEFAULT_SORT_SCOPE;
             if (currentScope === scope) return;
 
             console.log(`[MediaSort] Switching scope for album ${current.id} from ${currentScope} to ${scope}`);
@@ -198,6 +205,16 @@ export const useMediaSort = (
         [setAlbums, setAllAlbumsVideos, albumsRef, compareByVideoSort],
     );
 
+    const getUnfilteredVideosForAlbum = useCallback(
+        (albumId: string) => {
+            const album = albumsRef.current[albumId];
+            const activeSort = getActiveVideoSort(album || null);
+            const videos = getVideosForAlbumDb(albumId);
+            return videos.map(mapVideoMetadata).sort((a, b) => compareByVideoSort(a, b, activeSort));
+        },
+        [getActiveVideoSort, mapVideoMetadata, compareByVideoSort, albumsRef],
+    );
+
     return {
         albumSort,
         globalVideoSort,
@@ -210,5 +227,6 @@ export const useMediaSort = (
         initializeSort,
         compareByVideoSort,
         compareByAlbumSort,
+        getUnfilteredVideosForAlbum,
     };
 };

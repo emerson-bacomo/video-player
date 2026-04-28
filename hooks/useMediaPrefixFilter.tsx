@@ -13,7 +13,7 @@ export const useMediaPrefixFilter = (
     setAlbums: React.Dispatch<React.SetStateAction<Album[]>>,
     setAllAlbumsVideos: React.Dispatch<React.SetStateAction<Record<string, VideoMedia[]>>>,
     albumsRef: React.RefObject<Record<string, Album>>,
-    getVideosForAlbum: (albumId: string) => VideoMedia[],
+    getUnfilteredVideosForAlbum: (albumId: string) => VideoMedia[],
 ) => {
     const [selectedVideoPrefixFilters, setSelectedVideoPrefixFiltersState] = useState<Record<string, string[]>>({});
     const selectedVideoPrefixFiltersRef = useRef<Record<string, string[]>>({});
@@ -37,7 +37,7 @@ export const useMediaPrefixFilter = (
     const applyFiltersToVideos = useCallback((albumId: string, allVideos: VideoMedia[]) => {
         const selectedPrefixes = selectedVideoPrefixFiltersRef.current[albumId] || [];
         if (selectedPrefixes.length === 0) return allVideos;
-        return allVideos.filter((v) => v.rawPrefix && selectedPrefixes.includes(v.rawPrefix));
+        return allVideos.filter((v) => v.prefix && selectedPrefixes.includes(v.prefix));
     }, []);
 
     const updatePrefixFilter = useCallback(
@@ -60,7 +60,7 @@ export const useMediaPrefixFilter = (
             updateAlbumSelectedPrefixOptionsDb(albumId, nextFiltersStr);
 
             // Update videos in memory
-            const unfilteredVideos = getVideosForAlbum(albumId);
+            const unfilteredVideos = getUnfilteredVideosForAlbum(albumId);
             const filteredVideos = applyFiltersToVideos(albumId, unfilteredVideos);
 
             setAllAlbumsVideos((prev) => ({
@@ -86,7 +86,7 @@ export const useMediaPrefixFilter = (
                 setAlbums((prev) => prev.map((a) => (a.id === albumId ? updatedAlbum : a)));
             }
         },
-        [albumsRef, setAlbums, applyFiltersToVideos, getVideosForAlbum, setAllAlbumsVideos],
+        [albumsRef, setAlbums, applyFiltersToVideos, getUnfilteredVideosForAlbum, setAllAlbumsVideos],
     );
 
     const clearPrefixFilters = useCallback(
@@ -100,7 +100,7 @@ export const useMediaPrefixFilter = (
             updateAlbumSelectedPrefixOptionsDb(albumId, null);
 
             // Update videos in memory
-            const unfilteredVideos = getVideosForAlbum(albumId);
+            const unfilteredVideos = getUnfilteredVideosForAlbum(albumId);
             setAllAlbumsVideos((prev) => ({
                 ...prev,
                 [albumId]: unfilteredVideos,
@@ -124,15 +124,15 @@ export const useMediaPrefixFilter = (
                 setAlbums((prev) => prev.map((a) => (a.id === albumId ? updatedAlbum : a)));
             }
         },
-        [albumsRef, setAlbums, applyFiltersToVideos, getVideosForAlbum, setAllAlbumsVideos],
+        [albumsRef, setAlbums, applyFiltersToVideos, getUnfilteredVideosForAlbum, setAllAlbumsVideos],
     );
 
     const recomputePrefixOptions = useCallback(
         (albumId: string, albumVids: VideoMedia[]) => {
             const prefixCounts: Record<string, number> = {};
             albumVids.forEach((v) => {
-                if (v.rawPrefix) {
-                    prefixCounts[v.rawPrefix] = (prefixCounts[v.rawPrefix] || 0) + 1;
+                if (v.prefix) {
+                    prefixCounts[v.prefix] = (prefixCounts[v.prefix] || 0) + 1;
                 }
             });
 
@@ -175,7 +175,7 @@ export const useMediaPrefixFilter = (
                             setSelectedVideoPrefixFiltersState(nextState);
 
                             // Re-filter memory videos
-                            const unfiltered = getVideosForAlbum(albumId);
+                            const unfiltered = getUnfilteredVideosForAlbum(albumId);
                             setAllAlbumsVideos((prev) => ({
                                 ...prev,
                                 [albumId]: applyFiltersToVideos(albumId, unfiltered),
@@ -187,7 +187,7 @@ export const useMediaPrefixFilter = (
 
             return options;
         },
-        [applyFiltersToVideos, getVideosForAlbum, setAllAlbumsVideos],
+        [applyFiltersToVideos, getUnfilteredVideosForAlbum, setAllAlbumsVideos],
     );
 
     return {

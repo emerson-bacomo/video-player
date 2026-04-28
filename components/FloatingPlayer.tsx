@@ -56,18 +56,13 @@ export const FloatingPlayer: React.FC = () => {
     const insets = useSafeAreaInsets();
     const pathname = usePathname();
     const { width: screenW, height: screenH } = Dimensions.get("window");
-    const videoRef = useRef<any>(null);
+    const playerRef = useRef<any>(null);
 
     // ── Live metadata ──────────────────────────────────────────────────────
     const liveVideo = React.useMemo(() => {
         if (!lastPlayed?.id || !lastPlayed?.albumId) return null;
         const albumVids = allAlbumsVideos[lastPlayed.albumId];
         let video = albumVids?.find((v) => v.id === lastPlayed.id) || null;
-
-        if (!video) {
-            video = getVideoById(lastPlayed.id);
-        }
-
         return video;
     }, [lastPlayed?.id, lastPlayed?.albumId, allAlbumsVideos, getVideoById]);
 
@@ -246,7 +241,7 @@ export const FloatingPlayer: React.FC = () => {
                             {/* ── Video Player (Fades in over thumbnail) ──────────── */}
                             <Animated.View style={{ flex: 1, opacity: floaterOpacity }}>
                                 <CorePlayer
-                                    ref={videoRef}
+                                    ref={playerRef}
                                     video={liveVideo!}
                                     paused={isMinPaused}
                                     resizeMode="cover"
@@ -263,7 +258,7 @@ export const FloatingPlayer: React.FC = () => {
                                 activeOpacity={1}
                                 onPress={() => {
                                     if (isMinEnded) {
-                                        videoRef.current?.seek(0);
+                                        playerRef.current?.seek(0);
                                         setIsMinEnded(false);
                                         setIsMinPaused(false);
                                     } else {
@@ -300,7 +295,7 @@ export const FloatingPlayer: React.FC = () => {
                                                 className="w-7 h-7 rounded-full bg-black/40 items-center justify-center border border-white/20"
                                                 onPress={() => {
                                                     if (isMinEnded) {
-                                                        videoRef.current?.seek(0);
+                                                        playerRef.current?.seek(0);
                                                         setIsMinEnded(false);
                                                         setIsMinPaused(false);
                                                     } else {

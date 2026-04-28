@@ -1,4 +1,4 @@
-import React, { forwardRef, useCallback, useEffect, useRef } from "react";
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from "react";
 import { StyleProp, ViewStyle } from "react-native";
 import Video, { OnLoadData, OnProgressData, VideoRef } from "react-native-video";
 import { useFloatingPlayer } from "../context/FloatingPlayerContext";
@@ -18,9 +18,17 @@ export interface CorePlayerProps {
     onReadyForDisplay?: () => void;
     saveInterval?: number; // ms, default 5000
     isFloating?: boolean;
+    initialTime?: number;
+    onSeek?: (time: number) => void;
+    isLockedRef?: React.RefObject<boolean>;
 }
 
-export const CorePlayer = forwardRef<VideoRef, CorePlayerProps>((props, ref) => {
+export interface CorePlayerRef {
+    seek: (time: number, tolerance?: number) => void;
+    currentTime: number;
+}
+
+export const CorePlayer = forwardRef<CorePlayerRef, CorePlayerProps>((props, ref) => {
     const {
         video,
         paused = true,
@@ -33,6 +41,9 @@ export const CorePlayer = forwardRef<VideoRef, CorePlayerProps>((props, ref) => 
         onReadyForDisplay,
         saveInterval = 5000,
         isFloating = false,
+        initialTime,
+        onSeek,
+        isLockedRef,
     } = props;
 
     const uri = video.uri;
@@ -40,30 +51,75 @@ export const CorePlayer = forwardRef<VideoRef, CorePlayerProps>((props, ref) => 
 
     const videoRef = useRef<VideoRef>(null);
     const { saveLastPlayed } = useFloatingPlayer();
-    const { updateVideoProgress } = useMedia();
+    const { updateVideoProgress, updateVideoLastOpenedTime } = useMedia();
 
-    // ── Single Source of Truth for Resume ──────────────────────────────────
-    // Use the passed video object's position as initial state
-    const dbResumeSec = video?.lastPlayedSec && video.lastPlayedSec > 0 ? video.lastPlayedSec : 0;
-
-    const currentTimeRef = useRef(dbResumeSec);
     const durationRef = useRef(0);
-    const lastSaveSecRef = useRef(dbResumeSec);
+    const lastSaveSecRef = useRef(0);
     const isInitialSeekDone = useRef(false);
+    const currentVideoIdRef = useRef<string | null>(null);
+    const loadTimestampRef = useRef(Date.now());
+    const lastSeekTimestampRef = useRef<number>(0);
+    const currentTimeRef = useRef<number>(initialTime || 0);
+
+    useImperativeHandle(
+        ref,
+        () => ({
+            seek: (time: number, tolerance?: number) => {
+                lastSeekTimestampRef.current = Date.now();
+                currentTimeRef.current = time;
+                videoRef.current?.seek(time, tolerance);
+
+                // Immediate save for discrete seeks (buttons, markers, etc)
+                // Scrubbing/Panning sets isLockedRef to true, so we skip DB writes there.
+                if (id && !isLockedRef?.current) {
+                    savePlaybackDataDb(id, time);
+                    updateVideoProgress(id, time);
+                    lastSaveSecRef.current = time;
+                }
+
+                onSeek?.(time);
+            },
+            get currentTime() {
+                return currentTimeRef.current;
+            },
+        }),
+        [onSeek],
+    );
+
+    useEffect(() => {
+        isInitialSeekDone.current = false;
+        const startPos = initialTime !== undefined ? Math.max(0, initialTime) : Math.max(0, video?.lastPlayedSec || 0);
+        lastSaveSecRef.current = startPos;
+        currentTimeRef.current = startPos;
+        loadTimestampRef.current = Date.now();
+
+        // Report initial position immediately if provided (ignore -1 flag)
+        if (initialTime !== undefined && initialTime !== -1) {
+            onProgress?.({
+                currentTime: initialTime,
+                playableDuration: 0,
+                seekableDuration: 0,
+            });
+        } else if (initialTime === -1) {
+            onProgress?.({
+                currentTime: 0,
+                playableDuration: 0,
+                seekableDuration: 0,
+            });
+        }
+    }, [video?.id, initialTime]); // Removed onProgress from dependencies to avoid loop
 
     // Clean up or save on unmount/video change
     useEffect(() => {
         return () => {
             if (uri) {
-                // Save to Mini Player state ONLY if this is the main player unmounting
-                if (id && !isFloating) {
-                    saveLastPlayed({ id, albumId: video.albumId });
-                }
-
                 // Final save to DB and global state
-                if (id && currentTimeRef.current > 0) {
-                    savePlaybackDataDb(id, currentTimeRef.current);
-                    updateVideoProgress(id, currentTimeRef.current);
+                if (id) {
+                    const finalPos = currentTimeRef.current;
+                    if (finalPos > 0) {
+                        savePlaybackDataDb(id, finalPos);
+                        updateVideoProgress(id, finalPos);
+                    }
                 }
             }
         };
@@ -72,39 +128,59 @@ export const CorePlayer = forwardRef<VideoRef, CorePlayerProps>((props, ref) => 
     const handleLoad = useCallback(
         (data: OnLoadData) => {
             durationRef.current = data.duration;
-            if (!isInitialSeekDone.current && dbResumeSec > 0) {
-                videoRef.current?.seek(dbResumeSec);
+            const startPos = initialTime !== undefined ? initialTime : video?.lastPlayedSec || 0;
+            if (!isInitialSeekDone.current && startPos > 0) {
+                lastSeekTimestampRef.current = Date.now(); // suppress stale t=0 progress events
+                currentTimeRef.current = startPos;
+                videoRef.current?.seek(startPos);
                 isInitialSeekDone.current = true;
+                lastSaveSecRef.current = startPos;
             }
-            onLoad?.(data);
+            if (video.id) {
+                updateVideoLastOpenedTime(video.id);
+                if (!isFloating) {
+                    saveLastPlayed({ id: video.id, albumId: video.albumId });
+                }
+            }
+            loadTimestampRef.current = Date.now();
+            currentVideoIdRef.current = video.id || null;
+            onLoad?.(data); // → setDuration(data.duration)
+            // Force currentDisplayTime to the correct position in the same render batch as
+            // setDuration. Without this, stale progress events from the previous video can
+            // set currentDisplayTime to the old time after the reset but before onLoad fires,
+            // making the slider flash the wrong position the moment it becomes visible.
+            onProgress?.({ currentTime: currentTimeRef.current, playableDuration: 0, seekableDuration: 0 });
         },
-        [dbResumeSec, onLoad],
+        [video?.id, onLoad, onProgress],
     );
 
     const handleProgress = useCallback(
         (data: OnProgressData) => {
+            // Ignore progress from previous video during transition
+            if (currentVideoIdRef.current !== video.id) return;
+
+            // Suppress stale progress events fired by the engine right after a seek
+            if (Date.now() - lastSeekTimestampRef.current < 300) return;
+
             const pos = data.currentTime;
             currentTimeRef.current = pos;
 
             // Periodic Sync to DB and global state
-            if (id && !paused && Math.abs(pos - lastSaveSecRef.current) >= saveInterval / 1000) {
-                savePlaybackDataDb(id, pos);
-                updateVideoProgress(id, pos);
-                lastSaveSecRef.current = pos;
+            if (id && !isLockedRef?.current) {
+                if (Math.abs(pos - lastSaveSecRef.current) >= saveInterval / 1000) {
+                    savePlaybackDataDb(id, pos);
+                    updateVideoProgress(id, pos);
+                    lastSaveSecRef.current = pos;
+                }
             }
-
             onProgress?.(data);
         },
-        [id, paused, saveInterval, onProgress, updateVideoProgress],
+        [id, saveInterval, onProgress, updateVideoProgress],
     );
 
     return (
         <Video
-            ref={(node) => {
-                videoRef.current = node;
-                if (typeof ref === "function") ref(node);
-                else if (ref) (ref as any).current = node;
-            }}
+            ref={videoRef}
             source={{ uri }}
             style={style}
             paused={paused}

@@ -8,6 +8,7 @@ import { useMedia } from "@/hooks/useMedia";
 import { Orientation, useSettings } from "@/hooks/useSettings";
 import { cn } from "@/lib/utils";
 import { normalizeClipDestination } from "@/utils/clipDestination";
+import { pickAndValidateVpc, setPendingImportData } from "@/utils/configManager";
 import { Directory } from "expo-file-system";
 import * as FileSystem from "expo-file-system/legacy";
 import { router } from "expo-router";
@@ -16,15 +17,19 @@ import {
     ChevronDown,
     ChevronRight,
     Cpu,
+    Download,
     EyeOff,
     Filter,
     FolderOpen,
+    History,
     Monitor,
     Palette,
     RefreshCw,
+    ScrollText,
     Smartphone,
     Sun,
     Trash2,
+    Upload,
     X,
 } from "lucide-react-native";
 import React, { useCallback, useEffect, useState } from "react";
@@ -42,14 +47,8 @@ interface SettingsScreenComponentProps {
 
 export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenComponentProps) => {
     const { settings, updateSettings, loading: settingsLoading } = useSettings();
-    const {
-        regenerateAllThumbnails,
-        resetEverything,
-        isSyncing,
-        isResettingDatabase,
-        isRegeneratingThumbnails,
-        loadDataFromDB,
-    } = useMedia();
+    const { regenerateAllThumbnails, resetEverything, isSyncing, isResettingDatabase, isRegeneratingThumbnails, loadDataFromDB } =
+        useMedia();
     const { switchPreset, activePresetId, presets } = useTheme();
     const [themeDropdownOpen, setThemeDropdownOpen] = useState(false);
     const [sensitivityInput, setSensitivityInput] = useState("");
@@ -146,6 +145,18 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
         }
     };
 
+    const handleExport = () => {
+        router.push("/export-vpc-preview");
+    };
+
+    const handleImport = async () => {
+        const config = await pickAndValidateVpc();
+        if (config) {
+            setPendingImportData(config);
+            router.push("/import-vpc-preview");
+        }
+    };
+
     const OrientationOption = ({ label, value, icon: LucideIconProp }: { label: string; value: Orientation; icon: any }) => {
         const isActive = settings.defaultOrientation === value;
         return (
@@ -211,7 +222,7 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
                                 }}
                             />
                             <Text className="text-zinc-500 text-xs mt-3">
-                                Wipes all cached folder/video data, playback history, and thumbnails.
+                                Wipes all cached album/video data, playback history, and thumbnails.
                             </Text>
                         </ThemedCard>
                     </View>
@@ -221,7 +232,7 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
                 <View className="mb-8">
                     <Text className="text-zinc-500 text-sm font-bold uppercase tracking-wider mb-4">Clipping</Text>
                     <ThemedCard className="p-4">
-                        <Text className="text-text font-semibold mb-2">Clip Destination Folder</Text>
+                        <Text className="text-text font-semibold mb-2">Clip Destination Directory</Text>
                         <View className="flex-row items-stretch gap-2">
                             <TouchableOpacity
                                 className={cn(
@@ -234,7 +245,7 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
                                     className={cn("text-text flex-1 mr-2", !settings.clipDestination && "text-secondary")}
                                     numberOfLines={1}
                                 >
-                                    {settings.clipDestination || "Select folder..."}
+                                    {settings.clipDestination || "Select directory..."}
                                 </Text>
                                 <Icon icon={FolderOpen} size={20} className="text-primary" />
                             </TouchableOpacity>
@@ -251,11 +262,11 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
 
                         {!isDestinationValid && (
                             <Text className="text-red-500 text-[10px] font-bold uppercase tracking-tighter mt-2 ml-1">
-                                ! Invalid path: Folder not found or inaccessible
+                                ! Invalid path: Directory not found or inaccessible
                             </Text>
                         )}
                         <Text className="text-secondary text-xs mt-3">
-                            Videos will be saved to this folder in your media library.
+                            Videos will be saved to this directory in your media library.
                         </Text>
                     </ThemedCard>
                 </View>
@@ -659,6 +670,68 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
                                 <Icon icon={ChevronRight} size={20} className="text-secondary" />
                             </TouchableOpacity>
                         </ThemedCard>
+
+                        <View className="mb-8">
+                            <Text className="text-zinc-500 text-sm font-bold uppercase tracking-wider mb-4">Data & Logs</Text>
+                            <ThemedCard className="p-4 gap-3">
+                                <TouchableOpacity
+                                    className="p-4 rounded-xl border border-border bg-background flex-row items-center justify-between"
+                                    onPress={handleExport}
+                                >
+                                    <View className="flex-row items-center gap-3">
+                                        <Icon icon={Download} size={20} className="text-primary" />
+                                        <View>
+                                            <Text className="text-text font-semibold">Export Data (.vpc)</Text>
+                                            <Text className="text-secondary text-xs mt-1">
+                                                Backup settings, playback & themes
+                                            </Text>
+                                        </View>
+                                    </View>
+                                    <Icon icon={ChevronRight} size={20} className="text-secondary" />
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    className="p-4 rounded-xl border border-border bg-background flex-row items-center justify-between"
+                                    onPress={handleImport}
+                                >
+                                    <View className="flex-row items-center gap-3">
+                                        <Icon icon={Upload} size={20} className="text-primary" />
+                                        <View>
+                                            <Text className="text-text font-semibold">Import Data (.vpc)</Text>
+                                            <Text className="text-secondary text-xs mt-1">Restore from a backup file</Text>
+                                        </View>
+                                    </View>
+                                    <Icon icon={ChevronRight} size={20} className="text-secondary" />
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    className="p-4 rounded-xl border border-border bg-background flex-row items-center justify-between"
+                                    onPress={() => router.push("/exports")}
+                                >
+                                    <View className="flex-row items-center gap-3">
+                                        <Icon icon={History} size={20} className="text-primary" />
+                                        <View>
+                                            <Text className="text-text font-semibold">Export History</Text>
+                                            <Text className="text-secondary text-xs mt-1">View and manage backups</Text>
+                                        </View>
+                                    </View>
+                                    <Icon icon={ChevronRight} size={20} className="text-secondary" />
+                                </TouchableOpacity>
+
+                                <View className="h-px bg-zinc-800 my-1" />
+
+                                <TouchableOpacity
+                                    className="p-4 rounded-xl border border-border bg-background flex-row items-center justify-between"
+                                    onPress={() => router.push("/logs")}
+                                >
+                                    <View className="flex-row items-center gap-3">
+                                        <Icon icon={ScrollText} size={20} className="text-primary" />
+                                        <Text className="text-text font-semibold">System Logs</Text>
+                                    </View>
+                                    <Icon icon={ChevronRight} size={20} className="text-secondary" />
+                                </TouchableOpacity>
+                            </ThemedCard>
+                        </View>
 
                         <ThemedCard className="p-6 items-center mb-10">
                             <Text className="text-zinc-500 text-xs text-center">Video Player Expo v1.1.0</Text>

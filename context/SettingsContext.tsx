@@ -1,5 +1,7 @@
+import { DEFAULT_SETTINGS, Settings } from "@/constants/defaults";
+import { addLogDb } from "@/utils/db";
 import * as FileSystem from "expo-file-system/legacy";
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 
 const SETTINGS_FILE = `${FileSystem.documentDirectory}settings.json`;
 
@@ -14,37 +16,6 @@ export interface PlayerOperation {
     label: string;
 }
 
-export interface Settings {
-    clipDestination: string;
-    defaultOrientation: Orientation;
-    brightnessSensitivity: number;
-    nameReplacements: { find: string; replace: string; active: boolean }[];
-    cornerConfigs: Record<CornerPosition, (PlayerOperation | null)[]>;
-    timeDisplayMode: "elapsed" | "remaining";
-    autoPlayOnEnd: boolean;
-    autoPlaySimilarPrefixOnly: boolean;
-    doubleTapSeekAmount: number;
-    panSeekSensitivity: number; // seconds per cm
-}
-
-const DEFAULT_SETTINGS: Settings = {
-    clipDestination: "",
-    defaultOrientation: "system",
-    brightnessSensitivity: 1.0,
-    nameReplacements: [],
-    cornerConfigs: {
-        "top-left": [null, null, null, null],
-        "top-right": [null, null, null, null],
-        "bottom-left": [null, null, null, null],
-        "bottom-right": [null, null, null, null],
-    },
-    timeDisplayMode: "elapsed",
-    autoPlayOnEnd: true,
-    autoPlaySimilarPrefixOnly: true,
-    doubleTapSeekAmount: 5,
-    panSeekSensitivity: 10.0,
-};
-
 interface SettingsContextType {
     settings: Settings;
     updateSettings: (newSettings: Partial<Settings>) => Promise<void>;
@@ -58,7 +29,7 @@ export const SettingsProvider = ({ children }: { children: React.ReactNode }) =>
     const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
     const [loading, setLoading] = useState(true);
 
-    const loadSettings = async () => {
+    const loadSettings = useCallback(async () => {
         try {
             const info = await FileSystem.getInfoAsync(SETTINGS_FILE);
             if (info.exists) {
@@ -70,27 +41,43 @@ export const SettingsProvider = ({ children }: { children: React.ReactNode }) =>
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
 
-    const updateSettings = async (newSettings: Partial<Settings>) => {
+    const updateSettings = useCallback(async (newSettings: Partial<Settings>) => {
         try {
-            const updated = { ...settings, ...newSettings };
-            setSettings(updated);
-            await FileSystem.writeAsStringAsync(SETTINGS_FILE, JSON.stringify(updated));
+            setSettings((prev) => {
+                const updated = { ...prev, ...newSettings };
+                FileSystem.writeAsStringAsync(SETTINGS_FILE, JSON.stringify(updated));
+
+                // Log changes
+                Object.keys(newSettings).forEach((key) => {
+                    const val = (newSettings as any)[key];
+                    addLogDb("INFO", "Change Setting", `Setting updated: ${key}`, val);
+                });
+
+                return updated;
+            });
         } catch (e) {
             console.error("Failed to save settings", e);
+            addLogDb("ERROR", "Change Setting", "Failed to save settings", e);
         }
-    };
+    }, []);
 
     useEffect(() => {
         loadSettings();
-    }, []);
+    }, [loadSettings]);
 
-    return (
-        <SettingsContext.Provider value={{ settings, updateSettings, loading, refreshSettings: loadSettings }}>
-            {children}
-        </SettingsContext.Provider>
+    const contextValue = React.useMemo(
+        () => ({
+            settings,
+            updateSettings,
+            loading,
+            refreshSettings: loadSettings,
+        }),
+        [settings, updateSettings, loading, loadSettings],
     );
+
+    return <SettingsContext.Provider value={contextValue}>{children}</SettingsContext.Provider>;
 };
 
 export const useSettingsContext = () => {

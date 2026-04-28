@@ -1,33 +1,31 @@
 import React, { Dispatch, RefObject, SetStateAction, useMemo, useRef } from "react";
 import { Dimensions } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import { VideoRef } from "react-native-video";
 import { useSettings } from "../hooks/useSettings";
+import { CorePlayerRef } from "./CorePlayer";
 import { PlayerCentralIndicatorProps } from "./PlayerCentralIndicator";
 
 export interface PlayerGestureDetectorProps {
     children: React.ReactNode;
 
-    // ── Playback state ──────────────────────────────────────────────────────
+    // Playback state
     showControls: boolean;
     setShowControls: Dispatch<SetStateAction<boolean>>;
-    currentTime: number;
-    currentTimeRef: RefObject<number>;
-    setCurrentTime: Dispatch<SetStateAction<number>>;
     duration: number;
     paused: boolean;
     setPaused: Dispatch<SetStateAction<boolean>>;
     setPlaybackRate: Dispatch<SetStateAction<number>>;
     setCentralIndicator: Dispatch<SetStateAction<PlayerCentralIndicatorProps["indicator"]>>;
     setPanSeekTime: Dispatch<SetStateAction<number | null>>;
-    // ── Callbacks ───────────────────────────────────────────────────────────
+    // Callbacks
     resetControlsTimer: () => void;
 
-    // ── Refs ────────────────────────────────────────────────────────────────
-    videoRef: RefObject<VideoRef | null>;
+    // Refs
+    playerRef: RefObject<CorePlayerRef>;
     controlsTimeout: RefObject<any>;
     skipTimeout: RefObject<any>;
     panStartTime: RefObject<number>;
+    setSeekingLock: (locked: boolean) => void;
 }
 
 /**
@@ -39,9 +37,6 @@ export function PlayerGestureDetector({
     children,
     showControls,
     setShowControls,
-    currentTime,
-    currentTimeRef,
-    setCurrentTime,
     duration,
     paused,
     setPaused,
@@ -49,10 +44,11 @@ export function PlayerGestureDetector({
     setCentralIndicator,
     setPanSeekTime,
     resetControlsTimer,
-    videoRef,
+    playerRef,
     controlsTimeout,
     skipTimeout,
     panStartTime,
+    setSeekingLock,
 }: PlayerGestureDetectorProps) {
     const { settings } = useSettings();
     const doubleTapSeekAmount = settings.doubleTapSeekAmount;
@@ -79,7 +75,7 @@ export function PlayerGestureDetector({
             } else {
                 accumulatedSeek.current = amount;
                 currentSeekDir.current = side;
-                seekTargetRef.current = currentTimeRef.current || 0;
+                seekTargetRef.current = playerRef.current.currentTime;
             }
 
             const nextTime =
@@ -88,8 +84,7 @@ export function PlayerGestureDetector({
                     : Math.min(duration, seekTargetRef.current + amount);
 
             seekTargetRef.current = nextTime;
-            videoRef.current?.seek(nextTime);
-            setCurrentTime(nextTime);
+            playerRef.current.seek(nextTime);
             lastTapHandledAt.current = now;
 
             setCentralIndicator({
@@ -104,10 +99,10 @@ export function PlayerGestureDetector({
                 currentSeekDir.current = null;
             }, 1000);
         },
-        [doubleTapSeekAmount, duration, setCurrentTime, setCentralIndicator, videoRef, currentTimeRef],
+        [doubleTapSeekAmount, duration, setCentralIndicator, playerRef],
     );
 
-    // ── Single tap: toggle controls or accumulate seek ──────────────────────
+    // Single tap: toggle controls or accumulate seek
     const singleTapGesture = useMemo(
         () =>
             Gesture.Tap()
@@ -143,14 +138,14 @@ export function PlayerGestureDetector({
         [showControls, resetControlsTimer, handleSnowballTap],
     );
 
-    // ── Double tap: start snowball seek or play/pause ───────────────────────
+    // Double tap: start snowball seek or play/pause
     const doubleTapGesture = useMemo(
         () =>
             Gesture.Tap()
                 .numberOfTaps(2)
+                .maxDistance(15)
                 .runOnJS(true)
                 .onEnd((event) => {
-                    if (!videoRef?.current) return;
                     const screenWidth = Dimensions.get("window").width;
                     const screenHeight = Dimensions.get("window").height;
                     const isCornerX = event.x < screenWidth * 0.2 || event.x > screenWidth * 0.8;
@@ -182,7 +177,7 @@ export function PlayerGestureDetector({
                         skipTimeout.current = setTimeout(() => setCentralIndicator(null), 800);
                     }
                 }),
-        [paused, showControls, setShowControls, handleSnowballTap],
+        [paused, showControls, setShowControls, handleSnowballTap, setPaused, setCentralIndicator, controlsTimeout, skipTimeout],
     );
 
     // Long press: 2× forward speed
@@ -193,7 +188,7 @@ export function PlayerGestureDetector({
                 .maxDistance(100000) // Virtually ignore distance once held
                 .runOnJS(true)
                 .onStart(() => {
-                    if (!videoRef?.current || isActualPan.current) return;
+                    if (isActualPan.current) return;
                     isSpeedHolding.current = true;
                     wasPlayingBeforePan.current = !paused;
                     wasControlsShownBeforePan.current = showControls;
@@ -213,7 +208,7 @@ export function PlayerGestureDetector({
                     if (holdSeekTimer.current) clearInterval(holdSeekTimer.current);
                     setCentralIndicator(null);
                 }),
-        [paused],
+        [paused, showControls, setPlaybackRate, setPaused, setCentralIndicator, resetControlsTimer, holdSeekTimer],
     );
 
     const panGesture = useMemo(
@@ -222,7 +217,10 @@ export function PlayerGestureDetector({
                 .activeOffsetX([-10, 10])
                 .runOnJS(true)
                 .onStart((event) => {
-                    if (!videoRef?.current || isSpeedHolding.current) return;
+                    if (isSpeedHolding.current) return;
+                    // Only CLEAR the timer — don't reschedule. Controls stay visible
+                    // during the entire pan. resetControlsTimer() will be called on end.
+                    if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
                     if (Math.abs(event.translationY) > Math.abs(event.translationX)) {
                         isActualPan.current = false;
                         return;
@@ -233,7 +231,7 @@ export function PlayerGestureDetector({
                     panStartTime.current = -1;
                 })
                 .onUpdate((event) => {
-                    if (!videoRef?.current || !isActualPan.current) return;
+                    if (!isActualPan.current) return;
 
                     // 1. Ratio Check & Validation
                     if (!isPanValidated.current) {
@@ -242,6 +240,7 @@ export function PlayerGestureDetector({
                             if (panStartTime.current !== -1) {
                                 setPanSeekTime(null);
                                 setCentralIndicator(null);
+                                setSeekingLock(false);
                                 if (wasPlayingBeforePan.current) setPaused(false);
                             }
                             isActualPan.current = false;
@@ -257,9 +256,10 @@ export function PlayerGestureDetector({
                     // 2. UI Activation (Happens once we've confirmed it's horizontal or moved enough)
                     // We wait for 15px total to show the indicator to avoid the +0s flicker on vertical swipes
                     if (panStartTime.current === -1 && Math.abs(event.translationX) > 15) {
-                        panStartTime.current = currentTime;
+                        panStartTime.current = playerRef.current.currentTime;
                         wasPlayingBeforePan.current = !paused;
                         setPaused(true);
+                        setSeekingLock(true);
                         setCentralIndicator({ icon: "seek" });
                     }
 
@@ -269,11 +269,7 @@ export function PlayerGestureDetector({
                         const dpPerCm = 160 / 2.54;
                         const deltaSec = (event.translationX / dpPerCm) * settings.panSeekSensitivity;
                         const newTimeSec = Math.max(0, Math.min(duration, panStartTime.current + deltaSec));
-
-                        if (Math.abs(newTimeSec - currentTime) > 0.1) {
-                            videoRef.current.seek(newTimeSec);
-                            setCurrentTime(newTimeSec);
-                        }
+                        playerRef.current.seek(newTimeSec);
                         setPanSeekTime(newTimeSec);
                     }
                 })
@@ -282,13 +278,31 @@ export function PlayerGestureDetector({
                     if (wasPlayingBeforePan.current) setPaused(false);
                     setPanSeekTime(null);
                     setCentralIndicator(null);
+                    setSeekingLock(false);
                     isActualPan.current = false;
                     isPanValidated.current = false;
+                    // Start the auto-hide countdown only after the seek is fully done.
+                    // This ensures rapid back-to-back pans never hide controls mid-sequence.
+                    resetControlsTimer();
                 }),
-        [duration, currentTime, paused],
+        [
+            duration,
+            paused,
+            showControls,
+            resetControlsTimer,
+            controlsTimeout,
+            settings.panSeekSensitivity,
+            setPanSeekTime,
+            setCentralIndicator,
+            setSeekingLock,
+            setPaused,
+            playerRef,
+            panStartTime,
+        ],
+
     );
 
-    // ── Compose ─────────────────────────────────────────────────────────────
+    // Compose
     const composedGesture = useMemo(() => {
         // Taps are exclusive to prevent double-firings
         const taps = Gesture.Exclusive(doubleTapGesture, singleTapGesture);

@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils";
 import React from "react";
 import { View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import { Marker, MarkerPair } from "../hooks/useClipping";
+import { Marker, MarkerPair } from "../hooks/usePlayerClip";
 
 interface MarkerThumbProps {
     marker: Marker;
@@ -32,7 +32,7 @@ const MarkerThumb = React.memo(
         const HORIZONTAL_PADDING = 15;
         const DRAG_DAMPING = 0.85;
 
-        const left = HORIZONTAL_PADDING + (marker.time / duration) * activeWidth;
+        const left = HORIZONTAL_PADDING + (Math.floor(marker.time) / duration) * activeWidth;
 
         if (marker.markerId === "realtime") {
             return (
@@ -158,8 +158,8 @@ export const ClippingOverlay: React.FC<ClippingOverlayProps> = ({
             {markerPairs.map((pair) => {
                 if (!pair.end) return null;
 
-                const left = HORIZONTAL_PADDING + (pair.start.time / duration) * activeWidth;
-                const clipWidth = ((pair.end.time - pair.start.time) / duration) * activeWidth;
+                const left = HORIZONTAL_PADDING + (Math.floor(pair.start.time) / duration) * activeWidth;
+                const clipWidth = ((Math.floor(pair.end.time) - Math.floor(pair.start.time)) / duration) * activeWidth;
 
                 return (
                     <View

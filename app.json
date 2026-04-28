@@ -56,8 +56,6 @@
         }
       ],
       "expo-media-library",
-      "expo-web-browser",
-      "expo-font",
       "./plugins/withAndroidNativeConfig.js",
       "expo-sqlite",
       "react-native-video"

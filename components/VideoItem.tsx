@@ -79,7 +79,11 @@ export const VideoItem = React.memo(
                         } else {
                             safePush({
                                 pathname: "/player",
-                                params: { videoId: item.id, albumId: item.albumId },
+                                params: {
+                                    videoId: item.id,
+                                    albumId: item.albumId,
+                                    initialTime: (item.lastPlayedSec || 0).toString(),
+                                },
                             });
                         }
                     }}

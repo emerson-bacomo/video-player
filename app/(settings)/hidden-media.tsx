@@ -8,16 +8,26 @@ import { VideoItem } from "@/components/VideoItem";
 import { VideoItemDetailsModal } from "@/components/VideoItemDetailsModal";
 import { useMedia } from "@/hooks/useMedia";
 import { useSafeNavigation } from "@/hooks/useSafeNavigation";
+import { Album, VideoMedia } from "@/types/useMedia";
 import { StatusBar } from "expo-status-bar";
 import { Eye, Info } from "lucide-react-native";
 import React, { useEffect, useMemo, useState } from "react";
 import { FlatList, Text, View } from "react-native";
 
 export default function HiddenMediaScreen() {
-    const { fetchHiddenMedia, unhideVideo, unhideAlbum, isSelectionMode, clearSelection, toggleSelection, unhideMultipleAlbums, unhideMultipleVideos } = useMedia();
+    const {
+        fetchHiddenMedia,
+        unhideVideo,
+        unhideAlbum,
+        isSelectionMode,
+        clearSelection,
+        toggleSelection,
+        unhideMultipleAlbums,
+        unhideMultipleVideos,
+    } = useMedia();
     const { safePush, safeBack } = useSafeNavigation();
 
-    const [data, setData] = useState<{ albums: any[]; videos: any[] }>({ albums: [], videos: [] });
+    const [data, setData] = useState<{ albums: Album[]; videos: VideoMedia[] }>({ albums: [], videos: [] });
     const [isLoading, setIsLoading] = useState(true);
     const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
     const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
@@ -84,7 +94,14 @@ export default function HiddenMediaScreen() {
                         if (isSelectionMode) {
                             toggleSelection(item.id);
                         } else {
-                            safePush({ pathname: "/player", params: { videoId: item.id, albumId: item.albumId } });
+                            safePush({
+                                pathname: "/player",
+                                params: {
+                                    videoId: item.id,
+                                    albumId: item.albumId,
+                                    initialTime: (item.lastPlayedSec || 0).toString(),
+                                },
+                            });
                         }
                     }}
                 />
@@ -118,19 +135,19 @@ export default function HiddenMediaScreen() {
                     <Header.Back onPress={safeBack} />
                     <Header.Title title="Hidden Media" subtitle="Manage your excluded content" />
                     <Header.SelectionActions
-                    data={combinedData.filter(item => !item.isSpacer)}
-                    actions={[
+                        data={combinedData.filter((item) => !item.isSpacer)}
+                        actions={[
                             {
                                 label: "Unhide",
                                 icon: Eye,
                                 onPress: (ids) => {
-                                    const selectedItems = combinedData.filter(item => ids.has(item.id));
-                                    const albumIds = selectedItems.filter(item => item.type === 'album').map(a => a.id);
-                                    const videoIds = selectedItems.filter(item => item.type === 'video').map(v => v.id);
-                                    
+                                    const selectedItems = combinedData.filter((item) => ids.has(item.id));
+                                    const albumIds = selectedItems.filter((item) => item.type === "album").map((a) => a.id);
+                                    const videoIds = selectedItems.filter((item) => item.type === "video").map((v) => v.id);
+
                                     if (albumIds.length > 0) unhideMultipleAlbums(albumIds);
                                     if (videoIds.length > 0) unhideMultipleVideos(videoIds);
-                                    
+
                                     loadData();
                                     clearSelection();
                                 },

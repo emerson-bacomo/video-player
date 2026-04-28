@@ -1,3 +1,6 @@
+import { Icon } from "@/components/Icon";
+import { VideoItem } from "@/components/VideoItem";
+import { VideoItemDetailsModal } from "@/components/VideoItemDetailsModal";
 import { useTheme } from "@/context/ThemeContext";
 import { useMedia } from "@/hooks/useMedia";
 import { useSafeNavigation } from "@/hooks/useSafeNavigation";
@@ -7,9 +10,6 @@ import { ChevronLeft, Search, X } from "lucide-react-native";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Icon } from "../components/Icon";
-import { VideoItem } from "../components/VideoItem";
-import { VideoItemDetailsModal } from "../components/VideoItemDetailsModal";
 
 export default function SearchPage() {
     const { searchMedia } = useMedia();
@@ -37,7 +37,11 @@ export default function SearchPage() {
         setSelectedVideoId(null);
         safePush({
             pathname: "/player",
-            params: { videoId: item.id, albumId: item.albumId },
+            params: {
+                videoId: item.id,
+                albumId: item.albumId,
+                initialTime: (item.lastPlayedSec || 0).toString(),
+            },
         });
     };
 
@@ -75,7 +79,7 @@ export default function SearchPage() {
                     <Icon icon={Search} size={18} className="text-secondary mr-2" />
                     <TextInput
                         ref={inputRef}
-                        placeholder="Find videos across folders..."
+                        placeholder="Find videos across albums..."
                         placeholderTextColor={colors.secondary}
                         value={query}
                         onChangeText={setQuery}
@@ -121,7 +125,7 @@ export default function SearchPage() {
                                 Search for videos, episodes, or series
                             </Text>
                             <Text className="text-zinc-500 text-sm text-center mt-2 px-6">
-                                Quickly find any content across all your media folders
+                                Quickly find any content across all your media albums
                             </Text>
                         </View>
                     )

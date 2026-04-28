@@ -44,6 +44,8 @@ export const FloatingPlayerProvider: React.FC<{ children: React.ReactNode }> = (
 
     const dismissFloater = useCallback(() => {
         setShowFloater(false);
+        setLastPlayed(null);
+        saveSettingDb("floatingPlayerVideo", "");
     }, []);
 
     return (

@@ -1,5 +1,6 @@
 import { AlbumItem, AlbumItemSkeleton } from "@/components/AlbumItem";
 import { AlbumItemDetailsModal } from "@/components/AlbumItemDetailsModal";
+import { RecentlyPlayedAlbum } from "@/components/AlbumItemRecentlyPlayed";
 import { EmptyAlbumState } from "@/components/EmptyAlbumState";
 import { Header } from "@/components/Header";
 import { Icon } from "@/components/Icon";
@@ -7,15 +8,15 @@ import { LoadingStatus } from "@/components/LoadingStatus";
 import { RenameModal } from "@/components/RenameModal";
 import { SortMenu } from "@/components/SortMenu";
 import { ThemedSafeAreaView } from "@/components/Themed";
-import { ThemedBottomSheet } from "@/components/ThemedBottomSheet";
+import { ThemedBottomSheet, ThemedBottomSheetScrollView } from "@/components/ThemedBottomSheet";
 import { useTheme } from "@/context/ThemeContext";
 import { useMedia } from "@/hooks/useMedia";
 import { useSafeNavigation } from "@/hooks/useSafeNavigation";
 import { Album } from "@/types/useMedia";
-import { useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { Calendar, Clock, Edit2, EyeOff, Folder, FolderInput, Info, SortAsc, Trash2 } from "lucide-react-native";
-import React from "react";
+import { Calendar, CheckCircle, Circle, Clock, Edit2, EyeOff, Folder, FolderInput, Info, SortAsc, Trash2 } from "lucide-react-native";
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { BackHandler, FlatList, Image, RefreshControl, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
 
 const AlbumListScreen = () => {
@@ -28,6 +29,7 @@ const AlbumListScreen = () => {
         requestPermissionAndFetch,
         permissionResponse,
         isSelectionMode,
+        selectedIds,
         toggleSelection,
         renameAlbum,
         clearSelection,
@@ -35,26 +37,38 @@ const AlbumListScreen = () => {
         hideAlbum,
         hideMultipleAlbums,
         resetToAlbums,
+        recentlyPlayedCount,
+        recentlyPlayedVideos,
+        allAlbumsVideos,
+        updateMultipleVideoProgress,
     } = useMedia();
     const { colors } = useTheme();
-    const deferredAlbumSort = React.useDeferredValue(albumSort);
-    const [selectedAlbumId, setSelectedAlbumId] = React.useState<string | null>(null);
-    const selectedAlbum = React.useMemo(() => albums.find((a) => a.id === selectedAlbumId), [albums, selectedAlbumId]);
-    const [renamingAlbum, setRenamingAlbum] = React.useState<Album | null>(null);
-    const [menuAlbum, setMenuAlbum] = React.useState<Album | null>(null);
+    const deferredAlbumSort = useDeferredValue(albumSort);
+    const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
+    const selectedAlbum = useMemo(() => albums.find((a) => a.id === selectedAlbumId), [albums, selectedAlbumId]);
+    const [renamingAlbum, setRenamingAlbum] = useState<Album | null>(null);
+    const [menuAlbum, setMenuAlbum] = useState<Album | null>(null);
 
     const { width: windowWidth } = useWindowDimensions();
-    const [listWidth, setListWidth] = React.useState(windowWidth);
+    const [listWidth, setListWidth] = useState(windowWidth);
     const numColumns = Math.max(2, Math.floor(listWidth / 180));
     const itemWidth = (listWidth - 16) / numColumns;
 
+    const isSelectionWatched = useMemo(() => {
+        if (!selectedIds.size) return false;
+        const firstAlbumId = Array.from(selectedIds)[0];
+        const firstAlbumVideos = allAlbumsVideos[firstAlbumId] || [];
+        if (firstAlbumVideos.length === 0) return false;
+        return firstAlbumVideos[0].lastPlayedSec >= 0;
+    }, [selectedIds, allAlbumsVideos]);
+
     useFocusEffect(
-        React.useCallback(() => {
+        useCallback(() => {
             resetToAlbums();
         }, [resetToAlbums]),
     );
 
-    React.useEffect(() => {
+    useEffect(() => {
         const backAction = () => {
             if (isSelectionMode) {
                 clearSelection();
@@ -75,7 +89,7 @@ const AlbumListScreen = () => {
         { label: "Asset Count", value: "count", icon: Clock },
     ];
 
-    const onRefresh = React.useCallback(async () => {
+    const onRefresh = useCallback(async () => {
         fetchAlbums();
     }, [fetchAlbums]);
 
@@ -83,6 +97,7 @@ const AlbumListScreen = () => {
 
     const renderAlbumItem = ({ item }: { item: any }) => {
         if (item.isPlaceholder) return <AlbumItemSkeleton width={itemWidth} />;
+        if (item.id === "recently-played") return <RecentlyPlayedAlbum item={item} width={itemWidth} />;
         return (
             <AlbumItem
                 item={item}
@@ -111,11 +126,21 @@ const AlbumListScreen = () => {
         }
     };
 
-    const dataToDisplay = React.useMemo(() => {
+    const dataToDisplay = useMemo(() => {
         // Show skeleton if we're scanning and have no data yet
         if (loadingTask?.id === "media-sync" && albums.length === 0) return skeletonData;
 
         const sorted = [...albums].sort((a, b) => compareByAlbumSort(a, b, deferredAlbumSort));
+        if (recentlyPlayedCount > 0) {
+            sorted.push({
+                id: "recently-played",
+                title: "Recently Played",
+                albumName: "Recently Played",
+                assetCount: recentlyPlayedCount,
+                uri: "",
+                thumbnail: recentlyPlayedVideos?.[0]?.thumbnail,
+            });
+        }
         return sorted;
     }, [loadingTask, albums, skeletonData, deferredAlbumSort, compareByAlbumSort]);
 
@@ -124,7 +149,7 @@ const AlbumListScreen = () => {
             <StatusBar style="light" />
 
             <Header>
-                <Header.Title title="Folders" subtitle="Browse your video collection" />
+                <Header.Title title="Albums" subtitle="Browse your video collection" />
 
                 <Header.Actions>
                     <LoadingStatus />
@@ -141,6 +166,20 @@ const AlbumListScreen = () => {
                             },
                         },
                         {
+                            label: isSelectionWatched ? "Mark as Unwatched" : "Mark as Watched",
+                            icon: isSelectionWatched ? Circle : CheckCircle,
+                            onPress: (ids) => {
+                                const allSelectedVideoIds: string[] = [];
+                                ids.forEach((albumId) => {
+                                    const vids = allAlbumsVideos[albumId] || [];
+                                    vids.forEach((v) => allSelectedVideoIds.push(v.id));
+                                });
+                                const newProgress = isSelectionWatched ? -1 : Infinity;
+                                updateMultipleVideoProgress(allSelectedVideoIds, newProgress);
+                                clearSelection();
+                            },
+                        },
+                        {
                             label: "Hide",
                             icon: EyeOff,
                             onPress: (ids) => {
@@ -149,11 +188,15 @@ const AlbumListScreen = () => {
                             },
                         },
                         {
+
                             label: "Delete",
                             icon: Trash2,
                             destructive: true,
                             onPress: (ids) => {
-                                console.log("Delete multiple albums", Array.from(ids));
+                                router.push({
+                                    pathname: "/delete-preview",
+                                    params: { ids: Array.from(ids).join(","), type: "album" },
+                                });
                             },
                         },
                     ]}
@@ -172,7 +215,7 @@ const AlbumListScreen = () => {
                 maxToRenderPerBatch={2}
                 removeClippedSubviews={true}
                 ListHeaderComponent={
-                    <View className="flex-row justify-end items-center mb-4 pr-2">
+                    <View className="flex-row justify-end items-center pr-2 gap-4 mb-4">
                         <SortMenu currentSort={albumSort} onSortChange={setAlbumSort} options={albumSortOptions} />
                     </View>
                 }
@@ -197,12 +240,12 @@ const AlbumListScreen = () => {
                 onClose={() => setRenamingAlbum(null)}
                 onRename={handleRenameAlbum}
                 initialValue={renamingAlbum?.title || ""}
-                title="Rename Folder"
+                title="Rename Album"
             />
 
             <ThemedBottomSheet isVisible={!!menuAlbum} onClose={() => setMenuAlbum(null)}>
                 {menuAlbum && (
-                    <View className="px-2 pb-6">
+                    <ThemedBottomSheetScrollView contentContainerStyle={{ paddingBottom: 24, paddingHorizontal: 8 }}>
                         <View className="px-4 py-4 mb-2 flex-row items-center gap-4">
                             <View className="w-14 h-14 rounded-xl bg-card overflow-hidden border border-border">
                                 {menuAlbum.thumbnail ? (
@@ -217,7 +260,7 @@ const AlbumListScreen = () => {
                                 <Text className="text-text font-bold text-lg" numberOfLines={1}>
                                     {menuAlbum.title}
                                 </Text>
-                                <Text className="text-secondary text-xs uppercase tracking-widest mt-0.5">Folder Options</Text>
+                                <Text className="text-secondary text-xs uppercase tracking-widest mt-0.5">Album Options</Text>
                             </View>
                         </View>
 
@@ -271,13 +314,16 @@ const AlbumListScreen = () => {
                             className="flex-row items-center px-4 py-4 gap-4"
                             onPress={() => {
                                 setMenuAlbum(null);
-                                console.log("Delete folder", menuAlbum.id);
+                                router.push({
+                                    pathname: "/delete-preview",
+                                    params: { ids: menuAlbum.id, type: "album" },
+                                });
                             }}
                         >
                             <Icon icon={Trash2} size={22} className="text-error" />
                             <Text className="text-error text-base font-medium">Delete</Text>
                         </TouchableOpacity>
-                    </View>
+                    </ThemedBottomSheetScrollView>
                 )}
             </ThemedBottomSheet>
         </ThemedSafeAreaView>

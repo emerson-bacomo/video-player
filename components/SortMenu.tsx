@@ -6,12 +6,14 @@ import { cn } from "../utils/cn";
 import { Icon } from "./Icon";
 import { Menu } from "./Menu";
 
+export type SortMode = "local" | "global";
+
 interface SortMenuProps<T extends string = SortBy> {
     currentSort: { by: T; order: SortOrder };
     onSortChange: (sort: { by: T; order: SortOrder }) => void;
     options: { label: string; value: T; icon: any }[];
-    mode?: "local" | "global";
-    onModeChange?: (mode: "local" | "global") => void;
+    mode?: SortMode;
+    onModeChange?: (mode: SortMode) => void;
     showTabs?: boolean;
     isLoading?: boolean;
 }

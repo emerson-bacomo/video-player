@@ -21,7 +21,7 @@ import React, { useEffect, useState } from "react";
 import { LayoutChangeEvent, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { MarkerPair } from "../hooks/useClipping";
+import { MarkerPair } from "../hooks/usePlayerClip";
 import { useSettings } from "../hooks/useSettings";
 import { ClippingOverlay } from "./ClippingOverlay";
 
@@ -31,7 +31,7 @@ interface PlayerControlsProps {
     onSeek: (value: number) => void;
     onSkipNext: () => void;
     onSkipPrevious: () => void;
-    currentTime: number;
+    currentDisplayTime: number;
     duration: number;
     orientation?: ScreenOrientation.OrientationLock;
     // Clipping Props
@@ -42,18 +42,24 @@ interface PlayerControlsProps {
     onTogglePreview: () => void;
     onAddMarker: () => void;
     onRemoveMarker: (id: string) => void;
-    onSaveClip: () => Promise<{ success: boolean; message?: string; pairs?: any[] }>;
+    onAdjustCurrentMarker: () => void;
+    onSaveClip: () => Promise<void>;
     onSelectMarker: (id: string) => void;
     onUpdateMarkerTime: (id: string, time: number) => void;
     activeMarkerId: string | null;
     onDragStart?: () => void;
     onDragEnd?: () => void;
     onDoublePressMarker?: (markerTime: number) => void;
-    isInitialLoadDone?: boolean;
     isEnded: boolean;
     onRestart: () => void;
     hasNext: boolean;
     hasPrevious: boolean;
+    onSeekToPrevMarker: () => void;
+    onSeekToNextMarker: () => void;
+    hasPrevMarker: boolean;
+    hasNextMarker: boolean;
+    isReadyForDisplay: boolean;
+    setSeekingLock: (locked: boolean) => void;
 }
 
 export const PlayerControls: React.FC<PlayerControlsProps> = ({
@@ -62,7 +68,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
     onSeek,
     onSkipNext,
     onSkipPrevious,
-    currentTime,
+    currentDisplayTime,
     duration,
     isClipMode,
     onToggleClipMode,
@@ -71,6 +77,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
     onTogglePreview,
     onAddMarker,
     onRemoveMarker,
+    onAdjustCurrentMarker,
     onSaveClip,
     onSelectMarker,
     onUpdateMarkerTime,
@@ -78,11 +85,15 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
     onDragStart,
     onDragEnd,
     onDoublePressMarker,
-    isInitialLoadDone,
     isEnded,
     onRestart,
     hasNext,
     hasPrevious,
+    onSeekToPrevMarker,
+    onSeekToNextMarker,
+    hasPrevMarker,
+    hasNextMarker,
+    setSeekingLock,
 }) => {
     const { width: screenWidth, height: screenHeight } = useWindowDimensions();
     const isLandscape = screenWidth > screenHeight;
@@ -90,22 +101,12 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
     const { settings, updateSettings } = useSettings();
     const [sliderWidth, setSliderWidth] = useState(screenWidth - 32); // Better initial estimate
     const [localIsPlaying, setLocalIsPlaying] = useState(isPlaying);
-    const [sliderReady, setSliderReady] = useState(false);
 
     const expansion = useSharedValue(isClipMode ? 1 : 0);
 
     useEffect(() => {
         expansion.value = withTiming(isClipMode ? 1 : 0, { duration: 300 });
     }, [isClipMode]);
-
-    // Wait one rAF after duration arrives so Android's native SeekBar
-    // thumb animation (0 → value) completes invisibly before we show the slider.
-    useEffect(() => {
-        if (duration > 0 && isInitialLoadDone && !sliderReady) {
-            const id = requestAnimationFrame(() => setSliderReady(true));
-            return () => cancelAnimationFrame(id);
-        }
-    }, [duration, sliderReady, isInitialLoadDone]);
 
     const animatedBarStyle = useAnimatedStyle(() => {
         return {
@@ -173,11 +174,28 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
 
                                 {/* Adjust Current Marker */}
                                 <TouchableOpacity
-                                    onPress={() => activeMarkerId && onUpdateMarkerTime(activeMarkerId, currentTime)}
+                                    onPress={() => activeMarkerId && onAdjustCurrentMarker()}
                                     disabled={!activeMarkerId}
                                     className={cn("p-2.5 rounded-full", !activeMarkerId ? "opacity-30" : "active:bg-blue-500/10")}
                                 >
                                     <SeparatorVertical size={20} color="white" />
+                                </TouchableOpacity>
+
+                                {/* Navigate Markers */}
+                                <TouchableOpacity
+                                    onPress={onSeekToPrevMarker}
+                                    disabled={!hasPrevMarker}
+                                    className={cn("p-2.5 rounded-full", !hasPrevMarker ? "opacity-30" : "active:bg-white/10")}
+                                >
+                                    <ChevronLeft size={20} color="white" />
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    onPress={onSeekToNextMarker}
+                                    disabled={!hasNextMarker}
+                                    className={cn("p-2.5 rounded-full", !hasNextMarker ? "opacity-30" : "active:bg-white/10")}
+                                >
+                                    <ChevronRight size={20} color="white" />
                                 </TouchableOpacity>
 
                                 {/* Toggle Preview */}
@@ -207,7 +225,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
 
                                 {/* Save */}
                                 <TouchableOpacity
-                                    onPress={() => onSaveClip}
+                                    onPress={onSaveClip}
                                     disabled={!markerPairs.some((p) => p.id !== "pair-realtime")}
                                     className={cn(
                                         "p-2.5 rounded-full",
@@ -262,32 +280,35 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                             previewActive={previewActive}
                         />
                     )}
-                    <View style={{ opacity: sliderReady ? 1 : 0 }}>
+                    <View style={{ opacity: duration > 0 ? 1 : 0 }}>
                         <Slider
-                            style={{ width: "100%", height: isLandscape ? 30 : 40, zIndex: 20 }}
-                            minimumValue={0}
+                            style={{ width: "100%", height: isLandscape ? 20 : 40, zIndex: 20 }}
                             maximumValue={duration}
-                            value={currentTime}
+                            value={currentDisplayTime}
                             onValueChange={onSeek}
-                            onSlidingComplete={onSeek}
+                            onSlidingStart={() => setSeekingLock(true)}
+                            onSlidingComplete={(val) => {
+                                onSeek(val);
+                                setSeekingLock(false);
+                            }}
                             minimumTrackTintColor={isClipMode ? "rgba(255,255,255,0.15)" : "white"}
                             maximumTrackTintColor="#52525b"
                             thumbTintColor="white"
                         />
                     </View>
-                    <View className="flex-row justify-between px-1">
-                        <Text className="text-white/70 font-medium min-w-[32px]">{formatTime(currentTime)}</Text>
+                    <View className="flex-row justify-between px-1 -mt-4">
+                        <Text className="text-white/70 text-sm font-medium min-w-[32px]">{formatTime(currentDisplayTime)}</Text>
                         <TouchableOpacity
                             onPress={() =>
                                 updateSettings({
-                                    timeDisplayMode: settings.timeDisplayMode === "elapsed" ? "remaining" : "elapsed",
+                                    timeDisplayMode: settings.timeDisplayMode === "duration" ? "remaining" : "duration",
                                 })
                             }
                         >
-                            <Text className="text-white/70 font-medium min-w-[32px] text-right">
-                                {settings.timeDisplayMode === "elapsed"
+                            <Text className="text-white/70 text-sm font-medium min-w-[32px] text-right">
+                                {settings.timeDisplayMode === "duration"
                                     ? formatTime(duration)
-                                    : `-${formatTime(duration - currentTime)}`}
+                                    : `-${formatTime(duration - currentDisplayTime)}`}
                             </Text>
                         </TouchableOpacity>
                     </View>

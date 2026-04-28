@@ -10,10 +10,12 @@ export interface LoadingTask {
     id?: string;
     label: string;
     detail: string;
-    isImportant: boolean;
+    importance?: "SHOW_POPUP" | "SHOW_POPUP_AND_EXPAND";
+    progress?: number; // 0 to 1
     dismissAfter?: number;
     minimizeAfter?: number;
     onDismiss?: () => void;
+    showPopup?: boolean;
 }
 
 export interface LoadingStatusProps {
@@ -23,25 +25,27 @@ export interface LoadingStatusProps {
      *                      expanding downward only. Useful when the indicator is on the right edge.
      */
     popupSide?: "bottom" | "left";
+    onBeforeSet?: (task: LoadingTask) => boolean | void;
 }
 
-export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "bottom" }) => {
-    const { loadingTask, isLoadingPopupVisible, setIsLoadingPopupVisible, isLoadingExpanded, setIsLoadingExpanded } = useMedia();
+export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "bottom", onBeforeSet }) => {
+    const { loadingTask, isLoadingPopupVisible, setLoadingPopupVisible, isLoadingExpanded, setLoadingExpanded, setOnBeforeSet } =
+        useMedia();
     const screenWidth = Dimensions.get("window").width;
     const MENU_OFFSET = 40;
     const ARROW_WIDTH = 12;
 
     // Local display state — only for deferred clear (250ms fade-out delay)
-    const [taskToDisplay, setTaskToDisplay] = useState(loadingTask);
+    const [taskToDisplay, setTaskToDisplay] = useState<LoadingTask | null>(loadingTask);
     const [canExpand, setCanExpand] = useState(false);
     const [iconX, setIconX] = useState<number>(screenWidth - 60);
     const [iconWidth, setIconWidth] = useState<number>(32);
+    const [etaSeconds, setEtaSeconds] = useState<number | null>(null);
+    const etaSnapshotRef = useRef<{ progress: number; time: number; id: string } | null>(null);
     const containerRef = useRef<View>(null);
     const fadeAnim = useSharedValue(0);
-    // Ref to prevent auto-show from firing more than once per task session
-    const hasAutoShownRef = useRef(false);
 
-    // ── Geometry ────────────────────────────────────────────────────────────────
+    // Geometry
 
     // "bottom" mode: horizontally centered tooltip below the indicator
     const tooltipWidth = Math.min(screenWidth - 32, 380);
@@ -54,54 +58,93 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "botto
     const LEFT_GAP = 8; // gap between popup right edge and indicator left edge
     const leftSideWidth = Math.min(iconX - LEFT_GAP, 320); // available space to the left
 
-    // Sync taskToDisplay with deferred clear — no setState for visibility here
-    useEffect(() => {
-        if (loadingTask) {
-            setTaskToDisplay((prev) => {
-                if (
-                    prev?.id === loadingTask.id &&
-                    prev?.label === loadingTask.label &&
-                    prev?.detail === loadingTask.detail &&
-                    prev?.isImportant === loadingTask.isImportant
-                ) {
-                    return prev;
-                }
-                hasAutoShownRef.current = false;
-                return { ...loadingTask, isImportant: loadingTask.isImportant ?? false };
-            });
-        } else {
-            const timeout = setTimeout(() => {
-                setTaskToDisplay(null);
-                hasAutoShownRef.current = false;
-                setIsLoadingPopupVisible(false);
-            }, 250);
-            return () => clearTimeout(timeout);
-        }
-    }, [loadingTask]);
+    const lastProcessedTaskIdRef = useRef<string | null>(null);
 
-    // Animation only — no setState calls, safe from loops
-    // Auto-show logic uses a ref guard so setIsLoadingPopupVisible fires at most once per task
     useEffect(() => {
-        if (taskToDisplay) {
-            if (taskToDisplay.isImportant && !hasAutoShownRef.current) {
-                hasAutoShownRef.current = true;
-                setIsLoadingPopupVisible(true);
-            }
-            fadeAnim.value = withTiming(isLoadingPopupVisible ? 1 : 0, { duration: 120 });
-        } else {
-            fadeAnim.value = withTiming(0, { duration: 200 });
+        if (onBeforeSet) {
+            setOnBeforeSet(onBeforeSet);
+            return () => setOnBeforeSet(null);
         }
-    }, [taskToDisplay, isLoadingPopupVisible, setIsLoadingPopupVisible, fadeAnim]);
+    }, [onBeforeSet, setOnBeforeSet]);
+
+    // ── effectiveTask: Sync taskToDisplay with deferred clear ──
+    useEffect(
+        function effectiveTask() {
+            if (loadingTask) {
+                setTaskToDisplay((prev) => {
+                    const isNewTask = prev?.id !== loadingTask.id;
+                    if (
+                        !isNewTask &&
+                        prev?.label === loadingTask.label &&
+                        prev?.detail === loadingTask.detail &&
+                        prev?.importance === loadingTask.importance &&
+                        prev?.progress === loadingTask.progress
+                    ) {
+                        return prev;
+                    }
+                    return loadingTask;
+                });
+            } else {
+                const timeout = setTimeout(() => {
+                    setTaskToDisplay(null);
+                    setLoadingPopupVisible(false);
+                    lastProcessedTaskIdRef.current = null;
+                }, 250);
+                return () => clearTimeout(timeout);
+            }
+        },
+        [loadingTask, setLoadingPopupVisible],
+    );
+
+    const progressRef = useRef(taskToDisplay?.progress);
+    useEffect(() => {
+        progressRef.current = taskToDisplay?.progress;
+    }, [taskToDisplay?.progress]);
+
+    // ETA tracking — 1s interval, samples progress to compute remaining time
+    useEffect(() => {
+        const taskId = taskToDisplay?.id;
+        if (taskId == null) {
+            etaSnapshotRef.current = null;
+            setEtaSeconds(null);
+            return;
+        }
+
+        const interval = setInterval(() => {
+            const p = progressRef.current;
+            if (p == null || p <= 0) return;
+
+            const now = Date.now();
+            const snap = etaSnapshotRef.current;
+
+            if (snap && snap.id === taskId) {
+                const deltaProgress = p - snap.progress;
+                const deltaSec = (now - snap.time) / 1000;
+                if (deltaProgress > 0 && deltaSec > 0) {
+                    const rate = deltaProgress / deltaSec; // progress per second
+                    const remaining = (1 - p) / rate;
+                    setEtaSeconds(Math.round(remaining));
+                }
+            }
+            etaSnapshotRef.current = { progress: p, time: now, id: taskId };
+        }, 1000);
+
+        return () => {
+            clearInterval(interval);
+            etaSnapshotRef.current = null;
+            setEtaSeconds(null);
+        };
+    }, [taskToDisplay?.id]);
 
     // Animate when user manually toggles visibility
     useEffect(() => {
         fadeAnim.value = withTiming(isLoadingPopupVisible && !!taskToDisplay ? 1 : 0, { duration: 120 });
     }, [isLoadingPopupVisible, taskToDisplay, fadeAnim]);
 
-    const toggleVisible = () => setIsLoadingPopupVisible((prev) => !prev);
+    const toggleVisible = () => setLoadingPopupVisible((prev) => !prev);
     const toggleExpanded = () => {
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-        setIsLoadingExpanded((prev) => !prev);
+        setLoadingExpanded((prev) => !prev);
     };
 
     const handleLayout = () => {
@@ -122,11 +165,9 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "botto
 
     if (!taskToDisplay) return null;
 
-    const activeTask = taskToDisplay;
-
     const getIcon = () => {
-        if (activeTask.label.toLowerCase().includes("thumbnail")) return <Film size={14} color="#3b82f6" />;
-        if (activeTask.label.toLowerCase().includes("sync") || activeTask.label.toLowerCase().includes("media"))
+        if (taskToDisplay.label.toLowerCase().includes("thumbnail")) return <Film size={14} color="#3b82f6" />;
+        if (taskToDisplay.label.toLowerCase().includes("sync") || taskToDisplay.label.toLowerCase().includes("media"))
             return <Database size={14} color="#3b82f6" />;
         return <Info size={14} color="#3b82f6" />;
     };
@@ -170,7 +211,7 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "botto
                                     <View className="flex-row items-center gap-2 mb-2">
                                         {getIcon()}
                                         <Text className="text-blue-400 text-[10px] font-bold uppercase tracking-widest flex-1">
-                                            {activeTask.label}
+                                            {taskToDisplay.label}
                                         </Text>
                                     </View>
 
@@ -185,7 +226,7 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "botto
                                                 if (isTruncated && !canExpand) setCanExpand(true);
                                             }}
                                         >
-                                            {activeTask.detail}
+                                            {taskToDisplay.detail}
                                         </Text>
                                         {canExpand && (
                                             <TouchableOpacity onPress={toggleExpanded} className="p-1 -mt-1 pt-1">
@@ -197,6 +238,26 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "botto
                                             </TouchableOpacity>
                                         )}
                                     </View>
+
+                                    {taskToDisplay.progress !== undefined && (
+                                        <View className="mt-3">
+                                            <View className="h-1 w-full bg-zinc-800/50 rounded-full overflow-hidden">
+                                                <Animated.View
+                                                    className="h-full bg-blue-500"
+                                                    style={{
+                                                        width: `${Math.min(100, Math.max(0, taskToDisplay.progress * 100))}%`,
+                                                    }}
+                                                />
+                                            </View>
+                                            {isLoadingExpanded && (
+                                                <View className="flex-row justify-end mt-1">
+                                                    <Text className="text-[10px] text-zinc-500 font-mono">
+                                                        {Math.round(taskToDisplay.progress * 100)}%
+                                                    </Text>
+                                                </View>
+                                            )}
+                                        </View>
+                                    )}
                                 </View>
                             </View>
                         </Animated.View>
@@ -237,7 +298,7 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "botto
                                     <View className="flex-row items-center gap-2 mb-2">
                                         {getIcon()}
                                         <Text className="text-blue-400 text-[10px] font-bold uppercase tracking-widest flex-1">
-                                            {activeTask.label}
+                                            {taskToDisplay.label}
                                         </Text>
                                     </View>
 
@@ -252,7 +313,7 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "botto
                                                 if (isTruncated && !canExpand) setCanExpand(true);
                                             }}
                                         >
-                                            {activeTask.detail}
+                                            {taskToDisplay.detail}
                                         </Text>
                                         {canExpand && (
                                             <TouchableOpacity onPress={toggleExpanded} className="p-1 -mt-1 pt-1">
@@ -264,6 +325,31 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "botto
                                             </TouchableOpacity>
                                         )}
                                     </View>
+
+                                    {taskToDisplay.progress !== undefined && (
+                                        <View className="mt-3">
+                                            <View className="h-1 w-full bg-zinc-800/50 rounded-full overflow-hidden">
+                                                <Animated.View
+                                                    className="h-full bg-blue-500"
+                                                    style={{
+                                                        width: `${Math.min(100, Math.max(0, taskToDisplay.progress * 100))}%`,
+                                                    }}
+                                                />
+                                            </View>
+                                            <View className="flex-row justify-end items-center gap-2 mt-1">
+                                                {etaSeconds != null && etaSeconds > 1 && (
+                                                    <Text className="text-[10px] text-zinc-600 font-mono">
+                                                        {etaSeconds >= 60
+                                                            ? `${Math.floor(etaSeconds / 60)}m ${etaSeconds % 60}s left`
+                                                            : `${etaSeconds}s left`}
+                                                    </Text>
+                                                )}
+                                                <Text className="text-[10px] text-zinc-500 font-mono">
+                                                    {Math.round(taskToDisplay.progress * 100)}%
+                                                </Text>
+                                            </View>
+                                        </View>
+                                    )}
                                 </View>
                             </View>
                         </Animated.View>

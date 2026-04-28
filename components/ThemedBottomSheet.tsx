@@ -2,8 +2,8 @@ import {
     BottomSheetBackdrop,
     BottomSheetBackdropProps,
     BottomSheetModalProps,
-    BottomSheetView,
     BottomSheetModal as GBottomSheetModal,
+    BottomSheetScrollView as GBottomSheetScrollView,
 } from "@gorhom/bottom-sheet";
 import { cssInterop } from "nativewind";
 import React, { useCallback, useEffect } from "react";
@@ -24,6 +24,13 @@ const BottomSheetModal = GBottomSheetModal as React.ForwardRefExoticComponent<
 cssInterop(BottomSheetModal, {
     backgroundClassName: "backgroundStyle",
     handleIndicatorClassName: "handleIndicatorStyle",
+});
+
+export const ThemedBottomSheetScrollView = GBottomSheetScrollView as any;
+
+cssInterop(ThemedBottomSheetScrollView, {
+    className: "style",
+    contentContainerClassName: "contentContainerStyle",
 });
 
 interface ThemedBottomSheetProps {
@@ -78,7 +85,7 @@ export const ThemedBottomSheet = ({ isVisible, children, onClose }: ThemedBottom
             backgroundClassName="bg-card"
             handleIndicatorClassName="bg-secondary w-10"
         >
-            <BottomSheetView>{children}</BottomSheetView>
+            {children}
         </BottomSheetModal>
     );
 };

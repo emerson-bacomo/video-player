@@ -28,11 +28,12 @@ export const BasePlayerHeader: React.FC<BasePlayerHeaderProps> = ({ children, ri
     };
 
     return (
-        <View className="absolute top-0 left-0 right-0 z-50 pointer-events-box-none">
+        <View className="absolute top-0 left-0 right-0 z-50">
             {/* Top Bar Gradient */}
             <LinearGradient
                 colors={["rgba(0,0,0,0.9)", "rgba(0,0,0,0.5)", "transparent"]}
                 className="absolute top-0 left-0 right-0 h-32"
+                pointerEvents="none"
             />
 
             <View
@@ -51,7 +52,7 @@ export const BasePlayerHeader: React.FC<BasePlayerHeaderProps> = ({ children, ri
                     /* Side Gradient for L-shape in Portrait */
                     <View className="-mt-12" style={{ marginRight: -Math.max(insets.right, 16) }}>
                         {/* Background Gradient with Rounding */}
-                        <View className="absolute inset-0 rounded-bl-[40px] overflow-hidden pointer-events-none">
+                        <View className="absolute inset-0 rounded-bl-[40px] overflow-hidden">
                             <LinearGradient
                                 colors={["rgba(0, 0, 0, 0.8)", "transparent"]}
                                 locations={[0, 1]}
@@ -75,9 +76,10 @@ export const BasePlayerHeader: React.FC<BasePlayerHeaderProps> = ({ children, ri
 interface PlayerHeaderProps {
     video?: VideoMedia;
     onLayout?: (event: any) => void;
+    setPaused?: (paused: boolean) => void;
 }
 
-export const PlayerHeader: React.FC<PlayerHeaderProps> = ({ video, onLayout }) => {
+export const PlayerHeader: React.FC<PlayerHeaderProps> = ({ video, onLayout, setPaused }) => {
     const [isInfoModalVisible, setIsInfoModalVisible] = React.useState(false);
     const { width, height } = useWindowDimensions();
     const isPortrait = height > width;
@@ -98,7 +100,15 @@ export const PlayerHeader: React.FC<PlayerHeaderProps> = ({ video, onLayout }) =
 
             {/* Portrait: indicator sits on the right strip → popup opens to the left.
                 Landscape: indicator is inline in the header → default bottom popup. */}
-            <LoadingStatus popupSide={isPortrait ? "left" : "bottom"} />
+            <LoadingStatus
+                popupSide={isPortrait ? "left" : "bottom"}
+                onBeforeSet={(task) => {
+                    // Only auto-show popup for clipping-related tasks
+                    if (!task.id?.startsWith("clip-")) {
+                        return false;
+                    }
+                }}
+            />
 
             <Menu>
                 <Menu.Trigger className="p-2">
@@ -118,7 +128,12 @@ export const PlayerHeader: React.FC<PlayerHeaderProps> = ({ video, onLayout }) =
             <BasePlayerHeader rightSection={rightSection} onLayout={onLayout}>
                 <TouchableOpacity
                     className="flex-row items-center gap-2"
-                    onPress={() => video && setIsInfoModalVisible(true)}
+                    onPress={() => {
+                        if (video) {
+                            setPaused?.(true);
+                            setIsInfoModalVisible(true);
+                        }
+                    }}
                     disabled={!video}
                 >
                     <VideoBadges title={displayTitle} badgeClassName="h-auto py-0.5 px-2" textClassName="text-base" />

@@ -38,8 +38,20 @@ function InnerRoot() {
                                         }}
                                     >
                                         <Stack.Screen name="(tabs)" />
-                                        <Stack.Screen name="player" />
-                                        <Stack.Screen name="search" />
+                                        <Stack.Screen
+                                            name="(videos)/player"
+                                            options={{ presentation: "fullScreenModal", animation: "fade" }}
+                                        />
+                                        <Stack.Screen name="(videos)/player-settings" options={{ presentation: "modal" }} />
+                                        <Stack.Screen name="(videos)/search" options={{ animation: "fade" }} />
+                                        <Stack.Screen name="(videos)/delete-preview" options={{ presentation: "modal" }} />
+                                        <Stack.Screen name="(settings)/export-vpc-preview" options={{ presentation: "modal" }} />
+                                        <Stack.Screen name="(settings)/import-vpc-preview" options={{ presentation: "modal" }} />
+                                        <Stack.Screen name="(settings)/exports" options={{ presentation: "modal" }} />
+                                        <Stack.Screen name="(settings)/logs" options={{ presentation: "modal" }} />
+                                        <Stack.Screen name="(settings)/hidden-media" options={{ presentation: "modal" }} />
+                                        <Stack.Screen name="(settings)/theme-editor" options={{ presentation: "modal" }} />
+                                        <Stack.Screen name="(settings)/test-gesture" options={{ presentation: "modal" }} />
                                     </Stack>
                                 </NavigationThemeProvider>
                             </SafeAreaProvider>

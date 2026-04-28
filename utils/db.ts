@@ -1,4 +1,5 @@
-import { Album } from "@/types/useMedia";
+import { DEFAULT_SORT_SCOPE, DEFAULT_SORT_TYPE } from "@/constants/defaults";
+import { Album, VideoMedia } from "@/types/useMedia";
 import * as SQLite from "expo-sqlite";
 
 export const db = SQLite.openDatabaseSync("player.db");
@@ -8,16 +9,14 @@ export const initDB = () => {
     CREATE TABLE IF NOT EXISTS albums (
       id TEXT PRIMARY KEY,
       title TEXT,
-      assetCount INTEGER,
       lastModified INTEGER,
       thumbnail TEXT,
-      hasNew INTEGER DEFAULT 0,
       videoSortSettingScope TEXT DEFAULT 'global',
       videoSortType TEXT,
       prefixOptions TEXT,
       selectedPrefixOptions TEXT,
-      folderName TEXT,
-      path TEXT
+      albumName TEXT,
+      uri TEXT
     );
     CREATE TABLE IF NOT EXISTS videos (
       id TEXT PRIMARY KEY,
@@ -25,14 +24,14 @@ export const initDB = () => {
       filename TEXT,
       title TEXT,
       uri TEXT,
-      path TEXT,
       duration REAL,
-      width INTEGER,
-      height INTEGER,
+      width INTEGER NOT NULL DEFAULT 0,
+      height INTEGER NOT NULL DEFAULT 0,
       modificationTime INTEGER,
       thumbnail TEXT,
       lastPlayedSec REAL DEFAULT -1,
-      size INTEGER
+      size INTEGER,
+      markers TEXT
     );
     CREATE TABLE IF NOT EXISTS sync_metadata (
       key TEXT PRIMARY KEY,
@@ -45,8 +44,37 @@ export const initDB = () => {
       is_active INTEGER DEFAULT 0,
       is_system INTEGER DEFAULT 0
     );
+    CREATE TABLE IF NOT EXISTS logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp INTEGER,
+      level TEXT,
+      action TEXT,
+      message TEXT,
+      details TEXT
+    );
+    CREATE TABLE IF NOT EXISTS pending_media_data (
+      uri TEXT PRIMARY KEY,
+      type TEXT,
+      data TEXT
+    );
+    CREATE TABLE IF NOT EXISTS vpc_exports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp INTEGER,
+      filepath TEXT UNIQUE,
+      filename TEXT,
+      config_json TEXT
+    );
   `);
     // Column migrations (safe for fresh & existing installs)
+    try {
+        db.execSync("ALTER TABLE albums RENAME COLUMN path TO uri");
+    } catch {}
+    try {
+        db.execSync("ALTER TABLE pending_media_data RENAME COLUMN path TO uri");
+    } catch {}
+    try {
+        db.execSync("ALTER TABLE videos DROP COLUMN path");
+    } catch {}
     try {
         db.execSync("ALTER TABLE albums ADD COLUMN title TEXT");
     } catch {}
@@ -57,13 +85,13 @@ export const initDB = () => {
         db.execSync("ALTER TABLE videos ADD COLUMN size INTEGER");
     } catch {}
     try {
-        db.execSync("ALTER TABLE videos ADD COLUMN path TEXT");
-    } catch {}
-    try {
         db.execSync("ALTER TABLE albums ADD COLUMN isHidden INTEGER DEFAULT 0");
     } catch {}
     try {
         db.execSync("ALTER TABLE videos ADD COLUMN isHidden INTEGER DEFAULT 0");
+    } catch {}
+    try {
+        db.execSync("ALTER TABLE videos ADD COLUMN markers TEXT");
     } catch {}
     try {
         db.execSync("ALTER TABLE albums ADD COLUMN videoSortSettingScope TEXT DEFAULT 'global'");
@@ -78,13 +106,16 @@ export const initDB = () => {
         db.execSync("ALTER TABLE albums ADD COLUMN selectedPrefixOptions TEXT");
     } catch {}
     try {
-        db.execSync("ALTER TABLE albums ADD COLUMN folderName TEXT");
+        db.execSync("ALTER TABLE albums ADD COLUMN albumName TEXT");
     } catch {}
     try {
-        db.execSync("ALTER TABLE albums ADD COLUMN prefixOptions TEXT");
+        db.execSync("ALTER TABLE albums ADD COLUMN uri TEXT");
     } catch {}
     try {
-        db.execSync("ALTER TABLE albums ADD COLUMN path TEXT");
+        db.execSync("ALTER TABLE videos ADD COLUMN lastOpenedTime INTEGER DEFAULT 0");
+    } catch {}
+    try {
+        db.execSync("ALTER TABLE logs ADD COLUMN action TEXT");
     } catch {}
 
     const secMigrated = getSettingDb("db_v2_sec_units");
@@ -139,6 +170,12 @@ export const getPlaybackDataDb = (videoId: string): number => {
     return result ? result.lastPlayedSec : -1;
 };
 
+export const updateVideoLastOpenedTimeDb = (videoId: string, time: number = Date.now()) => {
+    const stmt = db.prepareSync("UPDATE videos SET lastOpenedTime = ? WHERE id = ?");
+    stmt.executeSync([time, videoId]);
+};
+
+
 export const getAllPlaybackDataDb = () => {
     return db.getAllSync<{ video_id: string; last_played_sec: number }>(
         "SELECT id as video_id, lastPlayedSec as last_played_sec FROM videos WHERE lastPlayedSec >= 0",
@@ -147,47 +184,49 @@ export const getAllPlaybackDataDb = () => {
 
 // --- Album Functions ---
 export const getHiddenAlbumsDb = (): Album[] => {
-    const results = db.getAllSync<any>("SELECT * FROM albums WHERE isHidden = 1");
+    const results = db.getAllSync<Album>(`
+        SELECT *, (SELECT COUNT(*) FROM videos WHERE albumId = albums.id AND isHidden = 1) as assetCount 
+        FROM albums 
+        WHERE isHidden = 1
+    `);
     return results.map((a) => {
-        let folderName = a.folderName;
-        let path = a.path;
-        if (!folderName || !path) {
-            const firstVideo = db.getFirstSync<{ path: string }>("SELECT path FROM videos WHERE albumId = ? LIMIT 1", [a.id]);
-            if (firstVideo && firstVideo.path) {
-                if (!path) path = firstVideo.path.substring(0, firstVideo.path.lastIndexOf("/"));
-                if (!folderName) folderName = path ? path.split("/").pop() : a.title;
+        let albumName = a.albumName;
+        let uri = a.uri;
+        if (!albumName || !uri) {
+            const firstVideo = db.getFirstSync<{ uri: string }>("SELECT uri FROM videos WHERE albumId = ? LIMIT 1", [a.id]);
+            if (firstVideo && firstVideo.uri) {
+                if (!uri) uri = firstVideo.uri.substring(0, firstVideo.uri.lastIndexOf("/"));
+                if (!albumName) albumName = uri.split("/").pop() ?? a.title;
             }
-            if (!folderName) folderName = a.title || "Unknown";
-            if (!path) path = ""; // Fallback
+            if (!albumName) albumName = a.title || "Unknown";
+            if (!uri) uri = ""; // Fallback
             // Save migrated data right away
             try {
-                const stmt = db.prepareSync("UPDATE albums SET folderName = ?, path = ? WHERE id = ?");
-                stmt.executeSync([folderName, path, a.id]);
+                const stmt = db.prepareSync("UPDATE albums SET albumName = ?, uri = ? WHERE id = ?");
+                stmt.executeSync([albumName, uri, a.id]);
             } catch (e) {
                 console.warn("[DB] Failed to save migration data for hidden album", a.id, e);
             }
         }
-        return { ...a, hasNew: !!a.hasNew, isHidden: !!a.isHidden, folderName, path };
+        return { ...a, albumName, uri };
     });
 };
 
 export const saveAlbumsDb = (albums: Album[]) => {
     db.execSync("DELETE FROM albums");
     const stmt = db.prepareSync(
-        "INSERT INTO albums (id, title, assetCount, lastModified, thumbnail, hasNew, videoSortSettingScope, videoSortType, folderName, path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO albums (id, title, lastModified, thumbnail, videoSortSettingScope, videoSortType, albumName, uri) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     );
     albums.forEach((a) => {
         stmt.executeSync([
             a.id,
             a.title,
-            a.assetCount,
             a.lastModified || 0,
             a.thumbnail || "",
-            a.hasNew ? 1 : 0,
-            a.videoSortSettingScope || "global",
-            a.videoSortType || null,
-            a.folderName,
-            a.path,
+            a.videoSortSettingScope || DEFAULT_SORT_SCOPE,
+            a.videoSortType || DEFAULT_SORT_TYPE,
+            a.albumName,
+            a.uri,
         ]);
     });
 };
@@ -196,61 +235,61 @@ export const saveAlbumsDb = (albums: Album[]) => {
 // This avoids losing scanned progress when the app is terminated before final bulk save.
 export const upsertAlbumDb = (album: Album) => {
     const insertStmt = db.prepareSync(
-        "INSERT OR IGNORE INTO albums (id, title, assetCount, lastModified, thumbnail, hasNew, videoSortSettingScope, videoSortType, folderName, path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT OR IGNORE INTO albums (id, title, lastModified, thumbnail, videoSortSettingScope, videoSortType, albumName, uri) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     );
     insertStmt.executeSync([
         album.id,
         album.title,
-        album.assetCount,
         album.lastModified || 0,
         album.thumbnail || "",
-        album.hasNew ? 1 : 0,
-        album.videoSortSettingScope || "global",
-        album.videoSortType || null,
-        album.folderName,
-        album.path,
+        album.videoSortSettingScope || DEFAULT_SORT_SCOPE,
+        album.videoSortType || DEFAULT_SORT_TYPE,
+        album.albumName,
+        album.uri,
     ]);
 
     const updateStmt = db.prepareSync(
-        "UPDATE albums SET title = ?, assetCount = ?, lastModified = ?, thumbnail = ?, hasNew = ?, videoSortSettingScope = ?, videoSortType = ?, folderName = ?, path = ? WHERE id = ?",
+        "UPDATE albums SET title = ?, lastModified = ?, thumbnail = ?, videoSortSettingScope = ?, videoSortType = ?, albumName = ?, uri = ? WHERE id = ?",
     );
     updateStmt.executeSync([
         album.title,
-        album.assetCount,
         album.lastModified || 0,
         album.thumbnail || "",
-        album.hasNew ? 1 : 0,
-        album.videoSortSettingScope || "global",
-        album.videoSortType || null,
-        album.folderName,
-        album.path,
+        album.videoSortSettingScope || DEFAULT_SORT_SCOPE,
+        album.videoSortType || DEFAULT_SORT_TYPE,
+        album.albumName,
+        album.uri,
         album.id,
     ]);
 };
 
 export const getAlbumsDb = (): Album[] => {
-    const results = db.getAllSync<any>("SELECT * FROM albums WHERE isHidden = 0");
+    const results = db.getAllSync<Album>(`
+        SELECT *, (SELECT COUNT(*) FROM videos WHERE albumId = albums.id AND isHidden = 0) as assetCount 
+        FROM albums 
+        WHERE isHidden = 0
+    `);
     return results.map((a) => {
-        let folderName = a.folderName;
-        let path = a.path;
-        if (!folderName || !path) {
-            const firstVideo = db.getFirstSync<{ path: string }>("SELECT path FROM videos WHERE albumId = ? LIMIT 1", [a.id]);
-            if (firstVideo && firstVideo.path) {
-                if (!path) path = firstVideo.path.substring(0, firstVideo.path.lastIndexOf("/"));
-                if (!folderName) folderName = path ? path.split("/").pop() : a.title;
+        let albumName = a.albumName;
+        let uri = a.uri;
+        if (!albumName || !uri) {
+            const firstVideo = db.getFirstSync<{ uri: string }>("SELECT uri FROM videos WHERE albumId = ? LIMIT 1", [a.id]);
+            if (firstVideo && firstVideo.uri) {
+                if (!uri) uri = firstVideo.uri.substring(0, firstVideo.uri.lastIndexOf("/"));
+                if (!albumName) albumName = uri.split("/").pop() ?? a.title;
             }
-            if (!folderName) folderName = a.title || "Unknown";
-            if (!path) path = ""; // Fallback
+            if (!albumName) albumName = a.title || "Unknown";
+            if (!uri) uri = ""; // Fallback
             // Save migrated data right away
-            console.log("[DB] Migrating album", a.id, folderName, path);
+            console.log("[DB] Migrating album", a.id, albumName, uri);
             try {
-                const stmt = db.prepareSync("UPDATE albums SET folderName = ?, path = ? WHERE id = ?");
-                stmt.executeSync([folderName, path, a.id]);
+                const stmt = db.prepareSync("UPDATE albums SET albumName = ?, uri = ? WHERE id = ?");
+                stmt.executeSync([albumName, uri, a.id]);
             } catch (e) {
                 console.warn("[DB] Failed to save migration data for album", a.id, e);
             }
         }
-        return { ...a, hasNew: !!a.hasNew, isHidden: !!a.isHidden, folderName, path };
+        return { ...a, albumName, uri };
     });
 };
 
@@ -305,14 +344,54 @@ export const renameAlbumDb = (albumId: string, title: string) => {
 };
 
 // --- Video Functions ---
-export const saveVideosDb = (albumId: string | null, videos: any[]) => {
+export const addVideosDb = (videos: VideoMedia[]) => {
+    if (!videos || videos.length === 0) return;
+
+    const stmt = db.prepareSync(`
+        INSERT INTO videos (id, albumId, filename, title, uri, duration, width, height, modificationTime, thumbnail, lastPlayedSec, size, markers)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            albumId=excluded.albumId,
+            filename=excluded.filename,
+            title=excluded.title,
+            uri=excluded.uri,
+            duration=excluded.duration,
+            width=excluded.width,
+            height=excluded.height,
+            modificationTime=excluded.modificationTime,
+            thumbnail=excluded.thumbnail,
+            lastPlayedSec=excluded.lastPlayedSec,
+            size=excluded.size,
+            markers=excluded.markers
+    `);
+
+    videos.forEach((v) => {
+        stmt.executeSync([
+            v.id,
+            v.albumId || "",
+            v.filename,
+            v.title,
+            v.uri,
+            v.duration,
+            v.width,
+            v.height,
+            v.modificationTime,
+            v.thumbnail || "",
+            v.lastPlayedSec ?? -1,
+            v.size || 0,
+            v.markers ? JSON.stringify(v.markers) : null,
+        ]);
+    });
+};
+
+export const saveVideosDb = (albumId: string | null, videos: VideoMedia[]) => {
     if (albumId) {
         db.execSync(`DELETE FROM videos WHERE albumId = '${albumId}'`);
     } else {
         db.execSync("DELETE FROM videos");
     }
     const stmt = db.prepareSync(`
-    INSERT INTO videos (id, albumId, filename, title, uri, path, duration, width, height, modificationTime, thumbnail, lastPlayedSec, size)
+    INSERT INTO videos (id, albumId, filename, title, uri, duration, width, height, modificationTime, thumbnail, lastPlayedSec, size, markers)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
     videos.forEach((v) => {
@@ -322,14 +401,14 @@ export const saveVideosDb = (albumId: string | null, videos: any[]) => {
             v.filename,
             v.title,
             v.uri,
-            v.path || v.uri,
             v.duration,
             v.width,
             v.height,
             v.modificationTime,
             v.thumbnail || "",
-            v.lastPlayedSec ?? v.lastPlayedMs ?? -1, // fallback covers old field name
+            v.lastPlayedSec ?? -1, // fallback covers old field name
             v.size || 0,
+            v.markers ? JSON.stringify(v.markers) : null,
         ]);
     });
 };
@@ -339,11 +418,34 @@ export const getAllVideosDb = () => {
 };
 
 export const getVideoByIdDb = (id: string) => {
-    return db.getFirstSync<any>("SELECT * FROM videos WHERE id = ?", [id]);
+    return db.getFirstSync<any>("SELECT * FROM videos WHERE id = ? AND isHidden = 0", [id]);
 };
 
 export const getVideosForAlbumDb = (albumId: string) => {
     return db.getAllSync<any>("SELECT * FROM videos WHERE albumId = ? AND isHidden = 0", [albumId]);
+};
+
+export const getRecentlyPlayedVideosDb = (limit: number = 200) => {
+    return db.getAllSync<VideoMedia>(
+        "SELECT * FROM videos WHERE lastOpenedTime > 0 AND isHidden = 0 ORDER BY lastOpenedTime DESC LIMIT ?",
+        [limit],
+    );
+};
+
+export const deleteMultipleVideosDb = (videoIds: string[]) => {
+    if (!videoIds || videoIds.length === 0) return;
+    const placeholders = videoIds.map(() => "?").join(",");
+    const stmt = db.prepareSync(`DELETE FROM videos WHERE id IN (${placeholders})`);
+    stmt.executeSync(videoIds);
+};
+
+export const deleteMultipleAlbumsDb = (albumIds: string[]) => {
+    if (!albumIds || albumIds.length === 0) return;
+    const placeholders = albumIds.map(() => "?").join(",");
+    const albumDeleteStmt = db.prepareSync(`DELETE FROM albums WHERE id IN (${placeholders})`);
+    albumDeleteStmt.executeSync(albumIds);
+    const videoDeleteStmt = db.prepareSync(`DELETE FROM videos WHERE albumId IN (${placeholders})`);
+    videoDeleteStmt.executeSync(albumIds);
 };
 
 export const setVideoHiddenDb = (videoId: string, isHidden: boolean) => {
@@ -363,6 +465,11 @@ export const updateVideoThumbnailDb = (videoId: string, thumbUri: string) => {
 export const renameVideoDb = (videoId: string, title: string) => {
     const stmt = db.prepareSync("UPDATE videos SET title = ? WHERE id = ?");
     stmt.executeSync([title, videoId]);
+};
+
+export const updateVideoMarkersDb = (videoId: string, markers: any[] | null) => {
+    const stmt = db.prepareSync("UPDATE videos SET markers = ? WHERE id = ?");
+    stmt.executeSync([markers ? JSON.stringify(markers) : null, videoId]);
 };
 
 export const getHiddenVideosDb = () => {
@@ -445,4 +552,71 @@ export const resetDatabaseDb = () => {
     db.execSync("DELETE FROM videos");
     db.execSync("DELETE FROM sync_metadata");
     db.execSync("DELETE FROM theme_presets");
+    db.execSync("DELETE FROM logs");
+    db.execSync("DELETE FROM pending_media_data");
+};
+
+// --- Logs Functions ---
+export const addLogDb = (level: "INFO" | "ERROR" | "WARNING", action: string, message: string, details?: any) => {
+    const stmt = db.prepareSync("INSERT INTO logs (timestamp, level, action, message, details) VALUES (?, ?, ?, ?, ?)");
+    stmt.executeSync([Date.now(), level, action, message, details ? JSON.stringify(details) : null]);
+};
+
+export const getLogsDb = (limit: number = 200) => {
+    return db.getAllSync<any>("SELECT * FROM logs ORDER BY timestamp DESC LIMIT ?", [limit]);
+};
+
+export const clearLogsDb = () => {
+    db.execSync("DELETE FROM logs");
+};
+
+// --- Pending Media Data ---
+export const savePendingMediaDataDb = (uri: string, type: "video" | "album", data: any) => {
+    const stmt = db.prepareSync("INSERT OR REPLACE INTO pending_media_data (uri, type, data) VALUES (?, ?, ?)");
+    stmt.executeSync([uri, type, JSON.stringify(data)]);
+};
+
+export const getPendingMediaDataDb = (uri: string) => {
+    const result = db.getFirstSync<{ type: string; data: string }>("SELECT type, data FROM pending_media_data WHERE uri = ?", [
+        uri,
+    ]);
+    if (result) {
+        return { type: result.type, data: JSON.parse(result.data) };
+    }
+    return null;
+};
+
+export const deletePendingMediaDataDb = (uri: string) => {
+    const stmt = db.prepareSync("DELETE FROM pending_media_data WHERE uri = ?");
+    stmt.executeSync([uri]);
+};
+
+// --- VPC Export Functions ---
+export interface VpcExport {
+    id: number;
+    timestamp: number;
+    filepath: string;
+    filename: string;
+    config_json: string;
+}
+
+export const addVpcExportDb = (filepath: string, filename: string, configJson: string) => {
+    const stmt = db.prepareSync(
+        "INSERT OR REPLACE INTO vpc_exports (timestamp, filepath, filename, config_json) VALUES (?, ?, ?, ?)",
+    );
+    stmt.executeSync([Date.now(), filepath, filename, configJson]);
+};
+
+export const getVpcExportsDb = (): VpcExport[] => {
+    return db.getAllSync<VpcExport>("SELECT * FROM vpc_exports ORDER BY timestamp DESC");
+};
+
+export const deleteVpcExportDb = (id: number) => {
+    const stmt = db.prepareSync("DELETE FROM vpc_exports WHERE id = ?");
+    stmt.executeSync([id]);
+};
+
+export const deleteVpcExportByPathDb = (filepath: string) => {
+    const stmt = db.prepareSync("DELETE FROM vpc_exports WHERE filepath = ?");
+    stmt.executeSync([filepath]);
 };

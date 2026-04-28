@@ -25,6 +25,8 @@ set_target_properties(swscale PROPERTIES IMPORTED_LOCATION ${FFMPEG_LIBS_DIR}/li
 # Add our module source
 add_library(expo-ffmpeg SHARED
     ../common/cpp/ExpoFFmpegModule.cpp
+    ../common/cpp/ThumbnailGenerator.cpp
+    ../common/cpp/VideoClipper.cpp
 )
 
 # Link libraries

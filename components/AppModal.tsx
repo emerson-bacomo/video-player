@@ -1,6 +1,7 @@
-import { cn } from "@/lib/utils";
+import { cn } from "@/utils/cn";
 import React from "react";
-import { Modal, TouchableWithoutFeedback, View } from "react-native";
+import { TouchableWithoutFeedback, View } from "react-native";
+import Modal from "react-native-modal";
 
 interface AppModalProps {
     visible: boolean;
@@ -17,7 +18,19 @@ interface AppModalProps {
  */
 export const AppModal: React.FC<AppModalProps> = ({ visible, onClose, children, className, dimmed = true }) => {
     return (
-        <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+        <Modal
+            isVisible={visible}
+            hasBackdrop={false}
+            onBackButtonPress={onClose}
+            onModalHide={onClose}
+            animationIn="fadeIn"
+            animationOut="fadeOut"
+            animationInTiming={50}
+            animationOutTiming={100}
+            useNativeDriver={true}
+            style={{ margin: 0 }}
+        >
+            {/* Manual Backdrop */}
             <TouchableWithoutFeedback onPress={onClose}>
                 <View className={cn("flex-1 items-center justify-center px-6", dimmed ? "bg-black/80" : "bg-black/50")}>
                     <TouchableWithoutFeedback>

@@ -3,7 +3,6 @@ export interface VideoMedia {
     filename: string;
     title: string;
     uri: string;
-    path: string;
     duration: number;
     width: number;
     height: number;
@@ -17,17 +16,19 @@ export interface VideoMedia {
     size?: number;
     isPlaceholder?: boolean;
     albumId: string;
+    markers?: { time: number; markerId: string }[];
+    lastOpenedTime?: number;
 }
 
 export interface Album {
     id: string;
     title: string;
-    folderName: string;
+    albumName: string;
     assetCount: number;
-    path: string;
+    uri: string;
     thumbnail?: string;
     lastModified?: number;
-    hasNew?: boolean;
     videoSortSettingScope?: "global" | "local";
     videoSortType?: string;
 }
+
