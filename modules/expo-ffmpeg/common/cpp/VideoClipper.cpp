@@ -1,4 +1,14 @@
 #include "ExpoFFmpegCommon.h"
+#include <algorithm>
+#include <vector>
+#include <string>
+#include <cmath>
+#include <android/log.h>
+
+extern "C" {
+#include <libavutil/audio_fifo.h>
+#include <libavutil/opt.h>
+}
 
 extern "C"
 JNIEXPORT jboolean JNICALL
@@ -6,319 +16,644 @@ Java_expo_modules_ffmpeg_ExpoFFmpegModule_nativeClipVideo(
     JNIEnv *env, jobject thiz,
     jstring video_path, jstring out_path,
     jdoubleArray segments,
-    jstring quality, jstring resolution, jstring format,
-    jboolean remove_audio, jint crf) {
+    jstring resolution, jstring format,
+    jboolean remove_audio, jint crf_val,
+    jdouble transition_duration, jstring transition_style,
+    jstring preset_name) {
+
+    g_clip_progress = 0.0;
+    g_last_clip_error = "";
 
     const char *in_filename = env->GetStringUTFChars(video_path, nullptr);
     const char *out_filename = env->GetStringUTFChars(out_path, nullptr);
-    const char *q_str = env->GetStringUTFChars(quality, nullptr);
-    const char *r_str = env->GetStringUTFChars(resolution, nullptr);
-    const char *f_str = env->GetStringUTFChars(format, nullptr);
+
+    const char *style_ptr = transition_style ? env->GetStringUTFChars(transition_style, nullptr) : nullptr;
+    std::string style(style_ptr ? style_ptr : "crossfade");
+    if (style_ptr) env->ReleaseStringUTFChars(transition_style, style_ptr);
+
+    const char *preset_ptr = preset_name ? env->GetStringUTFChars(preset_name, nullptr) : nullptr;
+    std::string preset(preset_ptr && strlen(preset_ptr) > 0 ? preset_ptr : "slower");
+    if (preset_ptr) env->ReleaseStringUTFChars(preset_name, preset_ptr);
+
+    LOGI("Starting Clip: %s -> %s (Preset: %s)", in_filename, out_filename, preset.c_str());
+
     jdouble *seg = env->GetDoubleArrayElements(segments, nullptr);
     jsize seg_len = env->GetArrayLength(segments);
 
-    AVFormatContext *ifmt_ctx = nullptr, *ofmt_ctx = nullptr;
-    AVCodecContext *v_dec_ctx = nullptr, *v_enc_ctx = nullptr;
-    AVStream *in_v_stream = nullptr, *out_v_stream = nullptr;
-    AVStream *in_a_stream = nullptr, *out_a_stream = nullptr;
+    double total_job_duration = 0;
+    for (int i = 0; i < seg_len; i += 2) {
+        total_job_duration += (seg[i+1] - seg[i]);
+    }
+    if (transition_duration > 0 && seg_len > 2) {
+        total_job_duration += (seg_len / 2 - 1) * transition_duration;
+    }
+
+    AVFormatContext *ifmt = nullptr, *ofmt = nullptr;
+    AVCodecContext *vdec = nullptr, *venc = nullptr;
+    AVCodecContext *adec = nullptr, *aenc = nullptr;
+
+    AVStream *vin = nullptr, *vout = nullptr;
+    AVStream *ain = nullptr, *aout = nullptr;
+
+    SwsContext *sws = nullptr;
+    SwrContext *swr = nullptr;
+    AVAudioFifo *fifo = nullptr;
 
     AVPacket *pkt = av_packet_alloc();
-    AVFrame *frame = av_frame_alloc();
-    AVPacket *enc_pkt = av_packet_alloc();
+    AVPacket *epkt = av_packet_alloc();
+    AVFrame  *frm = av_frame_alloc();
+    AVFrame  *yuv = av_frame_alloc();
+    AVFrame  *pcm = av_frame_alloc();
+    AVFrame  *enc_af = av_frame_alloc();
+    AVFrame  *last_seg_frame = av_frame_alloc();
+    AVFrame  *first_seg_frame = av_frame_alloc();
+    AVFrame  *blend_yuv = av_frame_alloc();
 
-    SwsContext *sws_ctx = nullptr;
-    AVFrame *yuv_frame = nullptr;
+    int v_idx = -1, a_idx = -1;
 
-    int video_stream_idx = -1;
-    int audio_stream_idx = -1;
+    int64_t global_v_pts = 0;
+    int64_t global_a_pts = 0;
+    double accumulated_sec = 0.0;
+    int64_t last_v_pts = -1;
+    bool last_seg_valid = false;
 
-    // Trackers to stitch multiple segments seamlessly
-    int64_t video_offset = 0;
-    int64_t audio_offset = 0;
-    int64_t max_video_pts = 0;
-    int64_t max_audio_pts = 0;
-
-    g_clip_progress = 0.0;
-
-    double total_clip_duration = 0;
-    for (int i = 0; i < seg_len; i += 2) {
-        total_clip_duration += (seg[i + 1] - seg[i]);
-    }
-
-    double accumulated_duration = 0;
-    bool success = false;
-
-    // ================= INPUT & STREAM SETUP =================
-    if (avformat_open_input(&ifmt_ctx, in_filename, nullptr, nullptr) < 0) goto cleanup;
-    if (avformat_find_stream_info(ifmt_ctx, nullptr) < 0) goto cleanup;
-
-    avformat_alloc_output_context2(&ofmt_ctx, nullptr, nullptr, out_filename);
-    if (!ofmt_ctx) goto cleanup;
-
-    for (int i = 0; i < ifmt_ctx->nb_streams; i++) {
-        AVStream *in_stream = ifmt_ctx->streams[i];
-        AVCodecParameters *in_codecpar = in_stream->codecpar;
-
-        if (in_codecpar->codec_type == AVMEDIA_TYPE_VIDEO && video_stream_idx < 0) {
-            video_stream_idx = i;
-            in_v_stream = in_stream;
-
-            const AVCodec *v_dec = avcodec_find_decoder(in_codecpar->codec_id);
-            v_dec_ctx = avcodec_alloc_context3(v_dec);
-            avcodec_parameters_to_context(v_dec_ctx, in_codecpar);
-            avcodec_open2(v_dec_ctx, v_dec, nullptr);
-
-            AVCodecID codec_id = AV_CODEC_ID_H264;
-            if (ofmt_ctx->oformat->video_codec == AV_CODEC_ID_GIF) {
-                codec_id = AV_CODEC_ID_GIF;
-            }
-
-            const AVCodec *v_enc = avcodec_find_encoder(codec_id);
-            if (!v_enc && codec_id == AV_CODEC_ID_H264) v_enc = avcodec_find_encoder_by_name("libx264");
-            
-            out_v_stream = avformat_new_stream(ofmt_ctx, nullptr);
-            v_enc_ctx = avcodec_alloc_context3(v_enc);
-
-            // Resolution Handling
-            int target_h = v_dec_ctx->height;
-            if (strcmp(r_str, "1080") == 0) target_h = 1080;
-            else if (strcmp(r_str, "720") == 0) target_h = 720;
-            else if (strcmp(r_str, "480") == 0) target_h = 480;
-
-            if (target_h > v_dec_ctx->height) target_h = v_dec_ctx->height; // No upscaling
-
-            int target_w = (v_dec_ctx->width * target_h) / v_dec_ctx->height;
-            target_w &= ~1; // Ensure even
-            target_h &= ~1;
-
-            v_enc_ctx->width = target_w;
-            v_enc_ctx->height = target_h;
-            
-            // Pixel format selection
-            if (v_enc->pix_fmts) {
-                v_enc_ctx->pix_fmt = v_enc->pix_fmts[0];
-                for (int i = 0; v_enc->pix_fmts[i] != AV_PIX_FMT_NONE; i++) {
-                    if (v_enc->pix_fmts[i] == AV_PIX_FMT_YUV420P) {
-                        v_enc_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
-                        break;
-                    }
-                }
-            } else {
-                v_enc_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
-            }
-
-            v_enc_ctx->time_base = {1, 30};
-            v_enc_ctx->framerate = {30, 1};
-            v_enc_ctx->gop_size = 12;
-
-            // Quality / CRF Handling
-            AVDictionary *enc_opts = nullptr;
-            if (strcmp(q_str, "high") == 0) {
-                av_dict_set(&enc_opts, "crf", "20", 0);
-            } else if (strcmp(q_str, "balanced") == 0) {
-                av_dict_set(&enc_opts, "crf", "23", 0);
-            } else if (strcmp(q_str, "low") == 0) {
-                av_dict_set(&enc_opts, "crf", "28", 0);
-            } else if (strcmp(q_str, "custom") == 0 && crf > 0) {
-                char crf_str[10];
-                snprintf(crf_str, sizeof(crf_str), "%d", crf);
-                av_dict_set(&enc_opts, "crf", crf_str, 0);
-            } else {
-                // Default fallback (Balanced)
-                av_dict_set(&enc_opts, "crf", "23", 0);
-            }
-            av_dict_set(&enc_opts, "preset", "veryfast", 0);
-
-            if (ofmt_ctx->oformat->flags & AVFMT_GLOBALHEADER)
-                v_enc_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
-
-            avcodec_open2(v_enc_ctx, v_enc, &enc_opts);
-            avcodec_parameters_from_context(out_v_stream->codecpar, v_enc_ctx);
-            out_v_stream->time_base = v_enc_ctx->time_base;
-            av_dict_free(&enc_opts);
+    auto flush_encoder = [&](AVCodecContext *enc, AVStream *st, bool is_audio) {
+        avcodec_send_frame(enc, nullptr);
+        while (avcodec_receive_packet(enc, epkt) >= 0) {
+            av_packet_rescale_ts(epkt, enc->time_base, st->time_base);
+            epkt->stream_index = st->index;
+            av_interleaved_write_frame(ofmt, epkt);
+            av_packet_unref(epkt);
         }
-        else if (in_codecpar->codec_type == AVMEDIA_TYPE_AUDIO && audio_stream_idx < 0 && !remove_audio) {
-            audio_stream_idx = i;
-            in_a_stream = in_stream;
+    };
 
-            out_a_stream = avformat_new_stream(ofmt_ctx, nullptr);
-            avcodec_parameters_copy(out_a_stream->codecpar, in_codecpar);
-            out_a_stream->codecpar->codec_tag = 0;
+    if (avformat_open_input(&ifmt, in_filename, nullptr, nullptr) < 0) goto end;
+    if (avformat_find_stream_info(ifmt, nullptr) < 0) goto end;
+
+    avformat_alloc_output_context2(&ofmt, nullptr, nullptr, out_filename);
+
+    // ===================== STREAM SETUP =====================
+    for (int i = 0; i < ifmt->nb_streams; i++) {
+        AVStream *in = ifmt->streams[i];
+        AVCodecParameters *cp = in->codecpar;
+
+        if (cp->codec_type == AVMEDIA_TYPE_VIDEO && v_idx < 0) {
+            v_idx = i;
+            vin = in;
+
+            const AVCodec *dec = avcodec_find_decoder(cp->codec_id);
+            vdec = avcodec_alloc_context3(dec);
+            avcodec_parameters_to_context(vdec, cp);
+            avcodec_open2(vdec, dec, nullptr);
+
+            const AVCodec *enc = avcodec_find_encoder_by_name("libx264");
+            if (!enc) {
+                LOGE("libx264 not found! Falling back to generic H264 encoder.");
+                enc = avcodec_find_encoder(AV_CODEC_ID_H264);
+            }
+            vout = avformat_new_stream(ofmt, nullptr);
+            venc = avcodec_alloc_context3(enc);
+
+            venc->width = vdec->width & ~1;
+            venc->height = vdec->height & ~1;
+            venc->pix_fmt = AV_PIX_FMT_YUV420P;
+
+            AVRational fps = av_guess_frame_rate(ifmt, vin, nullptr);
+            if (fps.num <= 0 || fps.den <= 0) fps = {30, 1};
+
+            venc->time_base = av_inv_q(fps);
+            vout->time_base = venc->time_base;
+            venc->framerate = fps;
+            LOGI("Detected Stream FPS: %d/%d", fps.num, fps.den);
+            
+            venc->gop_size = std::max(1, (fps.num / fps.den) * 2);
+            venc->has_b_frames = 0;
+
+            if (ofmt->oformat->flags & AVFMT_GLOBALHEADER)
+                venc->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+
+            LOGI("Selected Encoder: %s", enc->name);
+
+            int final_crf = crf_val;
+            if (final_crf <= 0) final_crf = 25; // Bump default CRF up to 24-26 for smaller sizes
+            if (final_crf > 51) final_crf = 51; 
+            
+            AVDictionary *opts = nullptr;
+            av_dict_set(&opts, "crf", std::to_string(final_crf).c_str(), 0);
+            av_dict_set(&opts, "preset", preset.c_str(), 0);
+            av_dict_set(&opts, "x264-params", "aq-mode=2:aq-strength=1.0:deblock=0,0:psy-rd=0.4,0.0", 0);
+            av_dict_set(&opts, "profile", "high", 0);
+            av_dict_set(&opts, "level", "4.1", 0);
+
+            LOGI("Attempting to open libx264 with: Res=%dx%d, PixFmt=%d, TB=%d/%d, FPS=%d/%d", 
+                 venc->width, venc->height, venc->pix_fmt, 
+                 venc->time_base.num, venc->time_base.den,
+                 venc->framerate.num, venc->framerate.den);
+
+            if (venc->width <= 0 || venc->height <= 0) {
+                LOGE("Critical Error: Dimensions are zero or negative!");
+            }
+
+            int ret = avcodec_open2(venc, enc, &opts);
+            if (ret < 0) {
+                char errbuf[256];
+                av_strerror(ret, errbuf, sizeof(errbuf));
+                LOGE("Failed to open video encoder: %s. Error: %s (%d)", enc->name, errbuf, ret);
+                av_dict_free(&opts);
+                goto end;
+            }
+            av_dict_free(&opts);
+            avcodec_parameters_from_context(vout->codecpar, venc);
+            vout->time_base = venc->time_base;
+            
+            // Copy side data (rotation, etc) - Industry standard
+            av_dict_copy(&vout->metadata, vin->metadata, 0);
+
+        } else if (cp->codec_type == AVMEDIA_TYPE_AUDIO && !remove_audio && a_idx < 0) {
+            a_idx = i;
+            ain = in;
+
+            const AVCodec *dec = avcodec_find_decoder(cp->codec_id);
+            adec = avcodec_alloc_context3(dec);
+            avcodec_parameters_to_context(adec, cp);
+            avcodec_open2(adec, dec, nullptr);
+
+            const AVCodec *enc = avcodec_find_encoder(AV_CODEC_ID_AAC);
+            aenc = avcodec_alloc_context3(enc);
+
+            aenc->sample_rate = adec->sample_rate;
+            aenc->bit_rate = 128000;
+            aenc->sample_fmt = enc->sample_fmts ? enc->sample_fmts[0] : AV_SAMPLE_FMT_FLTP;
+            aenc->time_base = {1, aenc->sample_rate};
+            av_channel_layout_copy(&aenc->ch_layout, &adec->ch_layout);
+
+            if (ofmt->oformat->flags & AVFMT_GLOBALHEADER)
+                aenc->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+
+            if (avcodec_open2(aenc, enc, nullptr) < 0) {
+                LOGE("Failed to open audio encoder");
+                goto end;
+            }
+
+            aout = avformat_new_stream(ofmt, nullptr);
+            avcodec_parameters_from_context(aout->codecpar, aenc);
+            aout->time_base = aenc->time_base;
+
+            swr = swr_alloc();
+            av_opt_set_chlayout(swr, "in_chlayout", &adec->ch_layout, 0);
+            av_opt_set_int(swr, "in_sample_rate", adec->sample_rate, 0);
+            av_opt_set_sample_fmt(swr, "in_sample_fmt", adec->sample_fmt, 0);
+            av_opt_set_chlayout(swr, "out_chlayout", &aenc->ch_layout, 0);
+            av_opt_set_int(swr, "out_sample_rate", aenc->sample_rate, 0);
+            av_opt_set_sample_fmt(swr, "out_sample_fmt", aenc->sample_fmt, 0);
+            swr_init(swr);
+
+            fifo = av_audio_fifo_alloc(aenc->sample_fmt, aenc->ch_layout.nb_channels, 1);
+
+            enc_af->format = aenc->sample_fmt;
+            enc_af->sample_rate = aenc->sample_rate;
+            av_channel_layout_copy(&enc_af->ch_layout, &aenc->ch_layout);
+            enc_af->nb_samples = aenc->frame_size ? aenc->frame_size : 1024;
+            av_frame_get_buffer(enc_af, 0);
         }
     }
 
-    // ================= SWS =================
-    if (v_dec_ctx) {
-        sws_ctx = sws_getContext(
-            v_dec_ctx->width, v_dec_ctx->height, v_dec_ctx->pix_fmt,
-            v_enc_ctx->width, v_enc_ctx->height, v_enc_ctx->pix_fmt,
-            SWS_BILINEAR, nullptr, nullptr, nullptr
-        );
+    if (vdec) {
+        sws = sws_getContext(vdec->width, vdec->height, vdec->pix_fmt,
+                             venc->width, venc->height, venc->pix_fmt,
+                             SWS_SPLINE, nullptr, nullptr, nullptr);
 
-        yuv_frame = av_frame_alloc();
-        yuv_frame->format = v_enc_ctx->pix_fmt;
-        yuv_frame->width = v_enc_ctx->width;
-        yuv_frame->height = v_enc_ctx->height;
-        av_frame_get_buffer(yuv_frame, 32);
+        yuv->format = venc->pix_fmt;
+        yuv->width = venc->width;
+        yuv->height = venc->height;
+        if (av_frame_get_buffer(yuv, 32) < 0) goto end;
+
+        last_seg_frame->format = venc->pix_fmt;
+        last_seg_frame->width = venc->width;
+        last_seg_frame->height = venc->height;
+        if (av_frame_get_buffer(last_seg_frame, 32) < 0) goto end;
+
+        first_seg_frame->format = venc->pix_fmt;
+        first_seg_frame->width = venc->width;
+        first_seg_frame->height = venc->height;
+        if (av_frame_get_buffer(first_seg_frame, 32) < 0) goto end;
+
+        blend_yuv->format = venc->pix_fmt;
+        blend_yuv->width = venc->width;
+        blend_yuv->height = venc->height;
+        if (av_frame_get_buffer(blend_yuv, 32) < 0) goto end;
     }
 
-    // ================= OUTPUT =================
-    if (!(ofmt_ctx->oformat->flags & AVFMT_NOFILE)) {
-        if (avio_open(&ofmt_ctx->pb, out_filename, AVIO_FLAG_WRITE) < 0) goto cleanup;
+    if (!(ofmt->oformat->flags & AVFMT_NOFILE)) {
+        if (avio_open(&ofmt->pb, out_filename, AVIO_FLAG_WRITE) < 0) goto end;
     }
 
-    if (avformat_write_header(ofmt_ctx, nullptr) < 0) goto cleanup;
+    if (avformat_write_header(ofmt, nullptr) < 0) goto end;
 
-    // ================= SEGMENTS LOOP =================
+    // ===================== TRUE-SYNC SEGMENT PIPELINE =====================
     for (int s = 0; s < seg_len; s += 2) {
+        double start = seg[s];
+        double end   = seg[s + 1];
+        bool segment_has_video = false;
 
-        double start_sec = seg[s];
-        double end_sec = seg[s + 1];
-        bool segment_done = false;
+        av_seek_frame(ifmt, -1, start * AV_TIME_BASE, AVSEEK_FLAG_BACKWARD);
+        if (vdec) avcodec_flush_buffers(vdec);
+        if (adec) avcodec_flush_buffers(adec);
 
-        int64_t first_vid_pts = AV_NOPTS_VALUE;
-        int64_t first_aud_pts = AV_NOPTS_VALUE;
+        while (av_read_frame(ifmt, pkt) >= 0) {
+            AVStream *st = ifmt->streams[pkt->stream_index];
+            double ts = 0;
+            if (pkt->pts != AV_NOPTS_VALUE) ts = pkt->pts * av_q2d(st->time_base);
+            else if (pkt->dts != AV_NOPTS_VALUE) ts = pkt->dts * av_q2d(st->time_base);
 
-        av_seek_frame(ifmt_ctx, -1, start_sec * AV_TIME_BASE, AVSEEK_FLAG_BACKWARD);
-        if (v_dec_ctx) avcodec_flush_buffers(v_dec_ctx);
-
-        while (!segment_done && av_read_frame(ifmt_ctx, pkt) >= 0) {
-
-            AVStream *st = ifmt_ctx->streams[pkt->stream_index];
-            double pkt_sec = pkt->pts * av_q2d(st->time_base);
-
-            // Progress tracking
-            if (pkt_sec >= start_sec && pkt_sec <= end_sec && total_clip_duration > 0) {
-                double prog = (accumulated_duration + (pkt_sec - start_sec)) / total_clip_duration;
-                // Cap at 0.99 for actual processing, 1.0 is set after trailer
-                g_clip_progress = std::min(0.99, std::max(0.0, prog));
+            if (ts > end + 0.5) { // Faster termination than 1.0s
+                av_packet_unref(pkt);
+                break;
             }
 
-            // ================= VIDEO =================
-            if (pkt->stream_index == video_stream_idx) {
-                avcodec_send_packet(v_dec_ctx, pkt);
+            if (pkt->stream_index == v_idx && vdec) {
+                avcodec_send_packet(vdec, pkt);
+                while (avcodec_receive_frame(vdec, frm) >= 0) {
+                    int64_t pts = frm->best_effort_timestamp != AV_NOPTS_VALUE ? frm->best_effort_timestamp : frm->pts;
+                    double fts = pts * av_q2d(vin->time_base);
+                    
+                    if (fts < start || fts > end) {
+                        av_frame_unref(frm);
+                        continue;
+                    }
 
-                while (avcodec_receive_frame(v_dec_ctx, frame) >= 0) {
-                    double pts_sec = frame->pts * av_q2d(in_v_stream->time_base);
+                    sws_scale(sws, frm->data, frm->linesize, 0, vdec->height, yuv->data, yuv->linesize);
 
-                    if (pts_sec < start_sec) continue;
+                    // --- CINEMATIC FREEZE TRANSITION BURST ---
+                    if (!segment_has_video) {
+                        segment_has_video = true;
+                        if (s > 0 && transition_duration > 0 && last_seg_valid) {
+                            // Capture current frame as first_seg_frame
+                            sws_scale(sws, frm->data, frm->linesize, 0, vdec->height, first_seg_frame->data, first_seg_frame->linesize);
 
-                    if (frame->best_effort_timestamp != AV_NOPTS_VALUE) {
-                        double t = frame->best_effort_timestamp * av_q2d(in_v_stream->time_base);
-                        if (t >= end_sec) {
-                            segment_done = true;
-                            break;
+                            bool is_known_style = (style == "crossfade" || style == "smear-left" || style == "smear-right" || style == "slide-left" || style == "slide-right");
+                            if (is_known_style) {
+                                int num_trans_frames = (int)llround(transition_duration * av_q2d(venc->framerate));
+                                for (int f = 0; f < num_trans_frames; f++) {
+                                    float alpha = (float)f / (float)num_trans_frames;
+                                    // Smoothstep for organic feel
+                                    alpha = alpha * alpha * (3 - 2 * alpha);
+
+                                    if (style == "crossfade") {
+                                        int int_alpha = (int)(alpha * 256.0f);
+                                        for (int p = 0; p < 3; p++) {
+                                            int w = (p == 0) ? venc->width : venc->width / 2;
+                                            int h = (p == 0) ? venc->height : venc->height / 2;
+                                            for (int y = 0; y < h; y++) {
+                                                uint8_t *dst = blend_yuv->data[p] + y * blend_yuv->linesize[p];
+                                                uint8_t *src1 = last_seg_frame->data[p] + y * last_seg_frame->linesize[p];
+                                                uint8_t *src2 = first_seg_frame->data[p] + y * first_seg_frame->linesize[p];
+                                                for (int x = 0; x < w; x++) {
+                                                    dst[x] = (uint8_t)((src1[x] * (256 - int_alpha) + src2[x] * int_alpha) >> 8);
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        // Horizontal Transitions: Slide & Smear
+                                        bool is_left = (style == "smear-left" || style == "slide-left");
+                                        bool is_smear = (style == "smear-left" || style == "smear-right");
+                                        
+                                        // Smear has high intensity blur + horizontal stretch
+                                        float blur_intensity = is_smear ? 240.0f : 16.0f; 
+                                        // Asymmetric curve: rises fast, falls slow
+                                        float asymmetric_alpha = std::pow(alpha, 0.4f) * (1.0f - alpha) * 3.5f;
+                                        int radius = (int)(asymmetric_alpha * (blur_intensity / 4.0f));
+                                        
+                                        for (int p = 0; p < 3; p++) {
+                                            int w = (p == 0) ? venc->width : venc->width / 2;
+                                            int h = (p == 0) ? venc->height : venc->height / 2;
+                                             int shift;
+                                             float current_slide_alpha = alpha;
+                                             if (is_smear) {
+                                                 current_slide_alpha = std::min(1.0f, alpha * 2.0f);
+                                                 shift = (int)(current_slide_alpha * w);
+                                             } else {
+                                                 shift = (int)(current_slide_alpha * w);
+                                             }
+                                            int r = (p == 0) ? radius : radius / 2;
+                                            
+                                            // Fade out blend width as slide completes to prevent edge bleeding
+                                            int max_blend_w = (p == 0) ? 80 : 40;
+                                            float blend_factor = 1.0f;
+                                            if (current_slide_alpha > 0.8f) {
+                                                blend_factor = (1.0f - current_slide_alpha) / 0.2f;
+                                            }
+                                            int blend_w = (int)(max_blend_w * blend_factor);
+
+                                            for (int y = 0; y < h; y++) {
+                                                uint8_t *dst = blend_yuv->data[p] + y * blend_yuv->linesize[p];
+                                                uint8_t *src1 = last_seg_frame->data[p] + y * last_seg_frame->linesize[p];
+                                                uint8_t *src2 = first_seg_frame->data[p] + y * first_seg_frame->linesize[p];
+
+                                                for (int x = 0; x < w; x++) {
+                                                    auto get_pixel = [&](int cur_x) -> uint8_t {
+                                                        int sx;
+                                                        uint8_t *s_ptr;
+
+                                                        if (is_left) {
+                                                            int seam = w - shift;
+                                                            if (cur_x < seam - blend_w) { sx = cur_x + shift; s_ptr = src1; }
+                                                            else if (cur_x > seam + blend_w) { sx = cur_x - (w - shift); s_ptr = src2; }
+                                                            else {
+                                                                // Blend zone
+                                                                float b_alpha = (float)(cur_x - (seam - blend_w)) / (float)(blend_w * 2);
+                                                                int sx1 = cur_x + shift;
+                                                                int sx2 = cur_x - (w - shift);
+                                                                return (uint8_t)(src1[sx1] * (1.0f - b_alpha) + src2[sx2] * b_alpha);
+                                                            }
+                                                        } else {
+                                                            int seam = shift;
+                                                            if (cur_x > seam + blend_w) { sx = cur_x - shift; s_ptr = src1; }
+                                                            else if (cur_x < seam - blend_w) { sx = (w - shift) + cur_x; s_ptr = src2; }
+                                                            else {
+                                                                // Blend zone
+                                                                float b_alpha = (float)(cur_x - (seam - blend_w)) / (float)(blend_w * 2);
+                                                                int sx2 = (w - shift) + cur_x;
+                                                                int sx1 = cur_x - shift;
+                                                                return (uint8_t)(src2[sx2] * (1.0f - b_alpha) + src1[sx1] * b_alpha);
+                                                            }
+                                                        }
+                                                        return s_ptr[sx];
+                                                    };
+
+                                                    if (r <= 1) {
+                                                        dst[x] = get_pixel(x);
+                                                    } else {
+                                                        int sum = 0, count = 0;
+                                                        int step = std::max(1, r / 6);
+                                                        int smear_dir = is_left ? 1 : -1;
+
+                                                        for(int o = 0; o <= r; o += step) {
+                                                            int nx = x + o * smear_dir;
+                                                            if (nx >= 0 && nx < w) {
+                                                                sum += get_pixel(nx);
+                                                                count++;
+                                                            }
+                                                        }
+                                                        dst[x] = (uint8_t)(sum / count);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    blend_yuv->pts = ++last_v_pts;
+                                    avcodec_send_frame(venc, blend_yuv);
+                                    while (avcodec_receive_packet(venc, epkt) >= 0) {
+                                        av_packet_rescale_ts(epkt, venc->time_base, vout->time_base);
+                                        epkt->stream_index = vout->index;
+                                        av_interleaved_write_frame(ofmt, epkt);
+                                        av_packet_unref(epkt);
+                                    }
+                                }
+
+                                // Add audio silence/padding for the transition duration to maintain sync
+                                if (aenc && fifo) {
+                                    int samples = (int)llround(transition_duration * aenc->sample_rate);
+                                    AVFrame *silence = av_frame_alloc();
+                                    silence->format = aenc->sample_fmt;
+                                    av_channel_layout_copy(&silence->ch_layout, &aenc->ch_layout);
+                                    silence->sample_rate = aenc->sample_rate;
+                                    silence->nb_samples = samples;
+                                    av_frame_get_buffer(silence, 0);
+                                    av_samples_set_silence(silence->extended_data, 0, samples, silence->ch_layout.nb_channels, (AVSampleFormat)silence->format);
+                                    (void)av_audio_fifo_realloc(fifo, av_audio_fifo_size(fifo) + samples);
+                                    av_audio_fifo_write(fifo, (void **)silence->data, samples);
+                                    av_frame_free(&silence);
+                                    
+                                    while (av_audio_fifo_size(fifo) >= aenc->frame_size) {
+                                        av_frame_make_writable(enc_af);
+                                        av_audio_fifo_read(fifo, (void **)enc_af->data, aenc->frame_size);
+                                        enc_af->nb_samples = aenc->frame_size;
+                                        enc_af->pts = global_a_pts;
+                                        global_a_pts += aenc->frame_size;
+                                        avcodec_send_frame(aenc, enc_af);
+                                        while (avcodec_receive_packet(aenc, epkt) >= 0) {
+                                            av_packet_rescale_ts(epkt, aenc->time_base, aout->time_base);
+                                            epkt->stream_index = aout->index;
+                                            av_interleaved_write_frame(ofmt, epkt);
+                                            av_packet_unref(epkt);
+                                        }
+                                    }
+                                }
+                                accumulated_sec += transition_duration;
+                            }
                         }
                     }
 
-                    if (first_vid_pts == AV_NOPTS_VALUE)
-                        first_vid_pts = frame->pts;
+                    double out_sec = fts - start + accumulated_sec;
+                    
+                    // Update Progress Reporting - Industry standard UI feedback
+                    if (total_job_duration > 0) {
+                        g_clip_progress = std::min(0.99, out_sec / total_job_duration);
+                    }
 
-                    sws_scale(
-                        sws_ctx, frame->data, frame->linesize,
-                        0, v_dec_ctx->height,
-                        yuv_frame->data, yuv_frame->linesize
-                    );
+                    int64_t target_v_pts = (int64_t)llround(out_sec / av_q2d(venc->time_base));
+                    if (target_v_pts <= last_v_pts) target_v_pts = last_v_pts + 1;
+                    last_v_pts = target_v_pts;
 
-                    // 1. Zero-base the PTS, 2. Rescale, 3. Add segment offset
-                    yuv_frame->pts = av_rescale_q(frame->pts - first_vid_pts, in_v_stream->time_base, v_enc_ctx->time_base) + video_offset;
+                    AVFrame *final_yuv = yuv;
 
-                    avcodec_send_frame(v_enc_ctx, yuv_frame);
+                    final_yuv->pts = target_v_pts;
+                    avcodec_send_frame(venc, final_yuv);
 
-                    while (avcodec_receive_packet(v_enc_ctx, enc_pkt) >= 0) {
-                        av_packet_rescale_ts(enc_pkt, v_enc_ctx->time_base, out_v_stream->time_base);
-                        enc_pkt->stream_index = out_v_stream->index;
+                    while (avcodec_receive_packet(venc, epkt) >= 0) {
+                        av_packet_rescale_ts(epkt, venc->time_base, vout->time_base);
+                        epkt->stream_index = vout->index;
+                        av_interleaved_write_frame(ofmt, epkt);
+                        av_packet_unref(epkt);
+                    }
 
-                        // Track the highest PTS written so far
-                        if (enc_pkt->pts + enc_pkt->duration > max_video_pts) {
-                            max_video_pts = enc_pkt->pts + enc_pkt->duration;
+                    // Save last frame of segment for the next transition (Manual copy is safer than av_frame_copy)
+                    if (transition_duration > 0 && yuv->data[0]) {
+                        for (int p = 0; p < 3; p++) {
+                            int h = (p == 0) ? venc->height : venc->height / 2;
+                            int bpl = (p == 0) ? venc->width : venc->width / 2;
+                            for (int y = 0; y < h; y++) {
+                                memcpy(last_seg_frame->data[p] + y * last_seg_frame->linesize[p],
+                                       yuv->data[p] + y * yuv->linesize[p],
+                                       bpl);
+                            }
+                        }
+                        last_seg_valid = true;
+                    } else {
+                        last_seg_valid = false;
+                    }
+
+                    av_frame_unref(frm);
+                }
+            } else if (pkt->stream_index == a_idx && adec && !remove_audio) {
+                avcodec_send_packet(adec, pkt);
+                while (avcodec_receive_frame(adec, pcm) >= 0) {
+                    int64_t pts = pcm->best_effort_timestamp != AV_NOPTS_VALUE ? pcm->best_effort_timestamp : pcm->pts;
+                    double ats = pts * av_q2d(ain->time_base);
+                    if (ats < start || ats > end) {
+                        av_frame_unref(pcm);
+                        continue;
+                    }
+
+                    int64_t total_us = (int64_t)((accumulated_sec + (end - start)) * AV_TIME_BASE);
+                    int64_t target_end_a_pts = av_rescale_q(total_us, {1, AV_TIME_BASE}, aenc->time_base);
+                    
+                    if (global_a_pts >= target_end_a_pts) {
+                        av_frame_unref(pcm);
+                        continue;
+                    }
+
+                    int out_samples = av_rescale_rnd(swr_get_delay(swr, adec->sample_rate) + pcm->nb_samples,
+                                                     aenc->sample_rate, adec->sample_rate, AV_ROUND_UP);
+
+                    AVFrame *tmp_af = av_frame_alloc();
+                    tmp_af->format = aenc->sample_fmt;
+                    av_channel_layout_copy(&tmp_af->ch_layout, &aenc->ch_layout);
+                    tmp_af->sample_rate = aenc->sample_rate;
+                    tmp_af->nb_samples = out_samples;
+                    av_frame_get_buffer(tmp_af, 0);
+
+                    int converted = swr_convert(swr, tmp_af->data, out_samples,
+                                                (const uint8_t **)pcm->data, pcm->nb_samples);
+
+                    if (converted > 0) {
+                        // --- AUDIO TRANSITION: Linear Fade-In ---
+                        if (transition_duration > 0) {
+                            double seg_time = ats - start;
+                            if (seg_time < transition_duration) {
+                                float alpha = (float)(seg_time / transition_duration);
+                                if (alpha < 0.0f) alpha = 0.0f;
+                                if (alpha > 1.0f) alpha = 1.0f;
+
+                                if (aenc->sample_fmt == AV_SAMPLE_FMT_FLTP) {
+                                    for (int c = 0; c < aenc->ch_layout.nb_channels; c++) {
+                                        if (tmp_af->data[c]) {
+                                            float *samples = (float *)tmp_af->data[c];
+                                            for (int i = 0; i < converted; i++) samples[i] *= alpha;
+                                        }
+                                    }
+                                }
+                            }
                         }
 
-                        av_interleaved_write_frame(ofmt_ctx, enc_pkt);
-                        av_packet_unref(enc_pkt);
+                        (void)av_audio_fifo_realloc(fifo, av_audio_fifo_size(fifo) + converted);
+                        av_audio_fifo_write(fifo, (void **)tmp_af->data, converted);
                     }
+                    av_frame_free(&tmp_af);
+
+                    while (av_audio_fifo_size(fifo) >= aenc->frame_size) {
+                        av_frame_make_writable(enc_af);
+                        av_audio_fifo_read(fifo, (void **)enc_af->data, aenc->frame_size);
+                        enc_af->nb_samples = aenc->frame_size;
+                        enc_af->pts = global_a_pts;
+                        global_a_pts += aenc->frame_size;
+
+                        avcodec_send_frame(aenc, enc_af);
+                        while (avcodec_receive_packet(aenc, epkt) >= 0) {
+                            av_packet_rescale_ts(epkt, aenc->time_base, aout->time_base);
+                            epkt->stream_index = aout->index;
+                            av_interleaved_write_frame(ofmt, epkt);
+                            av_packet_unref(epkt);
+                        }
+                    }
+                    av_frame_unref(pcm);
                 }
             }
-
-            // ================= AUDIO =================
-            else if (pkt->stream_index == audio_stream_idx) {
-                if (pkt_sec < start_sec || pkt_sec > end_sec) {
-                    av_packet_unref(pkt);
-                    continue;
-                }
-
-                if (first_aud_pts == AV_NOPTS_VALUE)
-                    first_aud_pts = pkt->pts;
-
-                // 1. Zero-base in input timebase
-                pkt->pts -= first_aud_pts;
-                pkt->dts -= first_aud_pts;
-
-                // 2. Rescale to output timebase
-                av_packet_rescale_ts(pkt, in_a_stream->time_base, out_a_stream->time_base);
-
-                // 3. Add segment offset
-                pkt->pts += audio_offset;
-                pkt->dts += audio_offset;
-                pkt->stream_index = out_a_stream->index;
-
-                // Track the highest PTS written so far
-                if (pkt->pts + pkt->duration > max_audio_pts) {
-                    max_audio_pts = pkt->pts + pkt->duration;
-                }
-
-                av_interleaved_write_frame(ofmt_ctx, pkt);
-            }
-
             av_packet_unref(pkt);
         }
 
-        accumulated_duration += (end_sec - start_sec);
+        // ================= END OF SEGMENT AUDIO PADDING =================
+        if (!remove_audio && aenc && fifo) {
+            int64_t total_us = (int64_t)((accumulated_sec + (end - start)) * AV_TIME_BASE);
+            int64_t target_a_pts = av_rescale_q(total_us, {1, AV_TIME_BASE}, aenc->time_base);
+            
+            int missing = target_a_pts - global_a_pts;
+            if (missing > 0) {
+                AVFrame *silence = av_frame_alloc();
+                silence->format = aenc->sample_fmt;
+                av_channel_layout_copy(&silence->ch_layout, &aenc->ch_layout);
+                silence->sample_rate = aenc->sample_rate;
+                silence->nb_samples = missing;
+                av_frame_get_buffer(silence, 0);
+                av_samples_set_silence(silence->extended_data, 0, missing, silence->ch_layout.nb_channels, (AVSampleFormat)silence->format);
+                (void)av_audio_fifo_realloc(fifo, av_audio_fifo_size(fifo) + missing);
+                av_audio_fifo_write(fifo, (void **)silence->data, missing);
+                av_frame_free(&silence);
+            } else if (missing < 0) {
+                av_audio_fifo_drain(fifo, std::min((int)av_audio_fifo_size(fifo), -missing));
+            }
 
-        // Update the offsets for the next segment!
-        video_offset = max_video_pts;
-        audio_offset = max_audio_pts;
-    }
+            while (av_audio_fifo_size(fifo) >= aenc->frame_size) {
+                av_frame_make_writable(enc_af);
+                av_audio_fifo_read(fifo, (void **)enc_af->data, aenc->frame_size);
+                enc_af->nb_samples = aenc->frame_size;
+                enc_af->pts = global_a_pts;
+                global_a_pts += aenc->frame_size;
 
-    // ================= FINAL FLUSH (Moved outside the segment loop!) =================
-    if (v_enc_ctx) {
-        avcodec_send_frame(v_enc_ctx, nullptr);
-        while (avcodec_receive_packet(v_enc_ctx, enc_pkt) >= 0) {
-            av_packet_rescale_ts(enc_pkt, v_enc_ctx->time_base, out_v_stream->time_base);
-            enc_pkt->stream_index = out_v_stream->index;
-            av_interleaved_write_frame(ofmt_ctx, enc_pkt);
-            av_packet_unref(enc_pkt);
+                avcodec_send_frame(aenc, enc_af);
+                while (avcodec_receive_packet(aenc, epkt) >= 0) {
+                    av_packet_rescale_ts(epkt, aenc->time_base, aout->time_base);
+                    epkt->stream_index = aout->index;
+                    av_interleaved_write_frame(ofmt, epkt);
+                    av_packet_unref(epkt);
+                }
+            }
         }
+        accumulated_sec += (end - start);
     }
 
-    av_write_trailer(ofmt_ctx);
+    if (venc) flush_encoder(venc, vout, false);
+    if (aenc) {
+        if (fifo && av_audio_fifo_size(fifo) > 0) {
+            int remaining = av_audio_fifo_size(fifo);
+            av_frame_make_writable(enc_af);
+            av_audio_fifo_read(fifo, (void **)enc_af->data, remaining);
+            av_samples_set_silence(enc_af->extended_data, remaining, aenc->frame_size - remaining, aenc->ch_layout.nb_channels, (AVSampleFormat)aenc->sample_fmt);
+            enc_af->nb_samples = aenc->frame_size;
+            enc_af->pts = global_a_pts;
+            global_a_pts += aenc->frame_size;
+            avcodec_send_frame(aenc, enc_af);
+            while (avcodec_receive_packet(aenc, epkt) >= 0) {
+                av_packet_rescale_ts(epkt, aenc->time_base, aout->time_base);
+                epkt->stream_index = aout->index;
+                av_interleaved_write_frame(ofmt, epkt);
+                av_packet_unref(epkt);
+            }
+        }
+        flush_encoder(aenc, aout, true);
+    }
+
+    av_write_trailer(ofmt);
     g_clip_progress = 1.0;
-    success = true;
 
-cleanup:
+end:
     if (pkt) av_packet_free(&pkt);
-    if (frame) av_frame_free(&frame);
-    if (enc_pkt) av_packet_free(&enc_pkt);
-
-    if (v_dec_ctx) avcodec_free_context(&v_dec_ctx);
-    if (v_enc_ctx) avcodec_free_context(&v_enc_ctx);
-
-    if (sws_ctx) sws_freeContext(sws_ctx);
-    if (yuv_frame) av_frame_free(&yuv_frame);
-
-    if (ifmt_ctx) avformat_close_input(&ifmt_ctx);
-
-    if (ofmt_ctx && !(ofmt_ctx->oformat->flags & AVFMT_NOFILE))
-        avio_closep(&ofmt_ctx->pb);
-
-    if (ofmt_ctx) avformat_free_context(ofmt_ctx);
+    if (epkt) av_packet_free(&epkt);
+    if (frm) av_frame_free(&frm);
+    if (yuv) av_frame_free(&yuv);
+    if (pcm) av_frame_free(&pcm);
+    if (enc_af) av_frame_free(&enc_af);
+    if (last_seg_frame) av_frame_free(&last_seg_frame);
+    if (first_seg_frame) av_frame_free(&first_seg_frame);
+    if (blend_yuv) av_frame_free(&blend_yuv);
+    if (sws) sws_freeContext(sws);
+    if (swr) swr_free(&swr);
+    if (fifo) av_audio_fifo_free(fifo);
+    if (vdec) avcodec_free_context(&vdec);
+    if (venc) avcodec_free_context(&venc);
+    if (adec) avcodec_free_context(&adec);
+    if (aenc) avcodec_free_context(&aenc);
+    if (ifmt) avformat_close_input(&ifmt);
+    if (ofmt) {
+        if (!(ofmt->oformat->flags & AVFMT_NOFILE)) avio_closep(&ofmt->pb);
+        avformat_free_context(ofmt);
+    }
 
     env->ReleaseStringUTFChars(video_path, in_filename);
     env->ReleaseStringUTFChars(out_path, out_filename);
-    env->ReleaseStringUTFChars(quality, q_str);
-    env->ReleaseStringUTFChars(resolution, r_str);
-    env->ReleaseStringUTFChars(format, f_str);
     env->ReleaseDoubleArrayElements(segments, seg, 0);
 
-    return success;
+    return true;
 }

@@ -1,7 +1,10 @@
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import { DarkTheme, ThemeProvider as NavigationThemeProvider } from "@react-navigation/native";
 import { Stack } from "expo-router";
-import { View } from "react-native";
+import { Platform, View } from "react-native";
+import React, { useEffect } from "react";
+import { useRouter } from "expo-router";
+import notifee, { EventType } from "@notifee/react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Toaster } from "sonner-native";
@@ -13,9 +16,56 @@ import { ThemeProvider, useTheme } from "../context/ThemeContext";
 import "../global.css";
 import { MediaProvider } from "../hooks/useMedia";
 import { initDB } from "../utils/db";
+import { ensureNotifeeChannels } from "../utils/clipNotification";
+
+// Register the Notifee foreground service handler.
+// This MUST be called before any component renders so Android can keep
+// the JS thread alive while the app is backgrounded during an export.
+if (Platform.OS === "android") {
+    // Dynamic import avoids loading notifee on non-Android platforms
+    const notifee = require("@notifee/react-native").default;
+    notifee.registerForegroundService((_notification: any) => {
+        // Return a promise that never resolves — the service runs until
+        // we call notifee.stopForegroundService() in clipNotification.ts
+        return new Promise<void>(() => {});
+    });
+
+    notifee.onBackgroundEvent(async () => {
+        // Check if the user pressed the "Dismiss" action or similar if we add any.
+        // For now, we just acknowledge the event to satisfy Notifee's requirements.
+    });
+}
 
 function InnerRoot() {
     const { themeVars, colors } = useTheme();
+    const router = useRouter();
+
+    useEffect(() => {
+        // Handle notification clicks while the app is in foreground/background
+        const unsubscribe = notifee.onForegroundEvent(({ type, detail }) => {
+            if (type === EventType.PRESS && detail.notification?.data?.videoId) {
+                const { videoId, albumId } = detail.notification.data as { videoId: string; albumId: string };
+                router.push({
+                    pathname: "/(videos)/player",
+                    params: { videoId, albumId },
+                });
+            }
+        });
+
+        // Handle app opened from notification while app was completely closed
+        notifee.getInitialNotification().then((notification) => {
+            if (notification?.notification?.data?.videoId) {
+                const { videoId, albumId } = notification.notification.data as { videoId: string; albumId: string };
+                router.push({
+                    pathname: "/(videos)/player",
+                    params: { videoId, albumId },
+                });
+            }
+        });
+
+        return () => unsubscribe();
+    }, [router]);
+
     return (
         <View className="bg-background flex-1" style={[themeVars]}>
             <SettingsProvider>
@@ -68,6 +118,8 @@ function InnerRoot() {
 
 export default function RootLayout() {
     initDB();
+    // Pre-create notification channels (no-op after first call)
+    ensureNotifeeChannels();
 
     return (
         <GestureHandlerRootView style={{ flex: 1 }}>

@@ -21,8 +21,8 @@ import React, { useEffect, useState } from "react";
 import { LayoutChangeEvent, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { MarkerPair } from "../hooks/usePlayerClip";
-import { useSettings } from "../hooks/useSettings";
+import { Marker, MarkerPair } from "@/types/useMedia";
+import { useSettings } from "@/hooks/useSettings";
 import { ClippingOverlay } from "./ClippingOverlay";
 
 interface PlayerControlsProps {
@@ -37,6 +37,7 @@ interface PlayerControlsProps {
     // Clipping Props
     isClipMode: boolean;
     onToggleClipMode: () => void;
+    markers: Marker[];
     markerPairs: MarkerPair[];
     previewActive: boolean;
     onTogglePreview: () => void;
@@ -72,6 +73,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
     duration,
     isClipMode,
     onToggleClipMode,
+    markers,
     markerPairs,
     previewActive,
     onTogglePreview,
@@ -268,6 +270,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                 <View className={cn("relative", isLandscape ? "mb-1" : "mb-4")} onLayout={onSliderLayout}>
                     {isClipMode && (
                         <ClippingOverlay
+                            markers={markers}
                             markerPairs={markerPairs}
                             duration={duration}
                             width={sliderWidth}
@@ -278,13 +281,14 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                             onDragStart={onDragStart}
                             onDragEnd={onDragEnd}
                             previewActive={previewActive}
+                            isLandscape={isLandscape}
                         />
                     )}
-                    <View style={{ opacity: duration > 0 ? 1 : 0 }}>
+                    <View style={{ opacity: duration > 0 ? 1 : 0, width: sliderWidth + 30, marginLeft: -15 }}>
                         <Slider
                             style={{ width: "100%", height: isLandscape ? 20 : 40, zIndex: 20 }}
                             maximumValue={duration}
-                            value={currentDisplayTime}
+                            value={currentDisplayTime < 0 ? 0 : currentDisplayTime}
                             onValueChange={onSeek}
                             onSlidingStart={() => setSeekingLock(true)}
                             onSlidingComplete={(val) => {
@@ -296,22 +300,26 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                             thumbTintColor="white"
                         />
                     </View>
-                    <View className="flex-row justify-between px-1 -mt-4">
-                        <Text className="text-white/70 text-sm font-medium min-w-[32px]">{formatTime(currentDisplayTime)}</Text>
-                        <TouchableOpacity
-                            onPress={() =>
-                                updateSettings({
-                                    timeDisplayMode: settings.timeDisplayMode === "duration" ? "remaining" : "duration",
-                                })
-                            }
-                        >
-                            <Text className="text-white/70 text-sm font-medium min-w-[32px] text-right">
-                                {settings.timeDisplayMode === "duration"
-                                    ? formatTime(duration)
-                                    : `-${formatTime(duration - currentDisplayTime)}`}
+                    {duration > 0 && currentDisplayTime >= 0 && (
+                        <View className={cn("flex-row justify-between", !isLandscape && "-mt-4")}>
+                            <Text className="text-white/70 text-sm font-medium min-w-[32px]">
+                                {formatTime(currentDisplayTime)}
                             </Text>
-                        </TouchableOpacity>
-                    </View>
+                            <TouchableOpacity
+                                onPress={() =>
+                                    updateSettings({
+                                        timeDisplayMode: settings.timeDisplayMode === "duration" ? "remaining" : "duration",
+                                    })
+                                }
+                            >
+                                <Text className="text-white/70 text-sm font-medium min-w-[32px] text-right">
+                                    {settings.timeDisplayMode === "duration"
+                                        ? formatTime(duration)
+                                        : `-${formatTime(duration - currentDisplayTime)}`}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    )}
                 </View>
 
                 {/* Playback Controls (Play/Pause, Skip) */}

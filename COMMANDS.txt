@@ -1,2 +1,9 @@
-- Build standalone apk
-    cd android; .\gradlew assembleRelease; cd ..;
+- Build and Copy to Phone (Internal Storage)
+    cd android; .\gradlew assembleRelease; cd ..; adb shell mkdir -p "/storage/emulated/0/Download/Test APKs"; adb push android\app\build\outputs\apk\release\app-release.apk "/storage/emulated/0/Download/Test APKs/video-player-$(Get-Date -Format 'yyyyMMdd-HHmm').apk"
+
+- Install latest build to phone
+    adb install -r android\app\build\outputs\apk\release\app-release.apk
+
+- Logging
+    adb logcat -s "keywords like ExpoFFmpeg"
+    adb logcat -s "ExpoFFmpeg"

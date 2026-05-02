@@ -39,7 +39,7 @@ interface MenuContextType {
     variant: MenuVariant;
     anchorHorizontal?: "left" | "right" | "center";
     horizontalScreenFill: boolean;
-    maxWidth: DimensionValue | "fit-content";
+    width: DimensionValue | "fit-content";
     updateLayout: (customTriggerRef?: React.RefObject<View>, customRaisedRef?: React.RefObject<View>) => Promise<void>;
     triggerElement: React.ReactElement<TouchableOpacityProps> | null;
     raisedElement: React.ReactNode | null;
@@ -71,7 +71,7 @@ export const Menu = ({
     variant = "POPUP",
     anchorHorizontal = "center",
     horizontalScreenFill = false,
-    maxWidth = 400,
+    width = "fit-content",
     visible: controlledVisible,
     onClose,
     onOpen,
@@ -80,7 +80,7 @@ export const Menu = ({
     variant?: MenuVariant;
     anchorHorizontal?: "left" | "right" | "center";
     horizontalScreenFill?: boolean;
-    maxWidth?: DimensionValue | "fit-content";
+    width?: DimensionValue | "fit-content";
     visible?: boolean;
     onClose?: () => void;
     onOpen?: () => void;
@@ -203,7 +203,7 @@ export const Menu = ({
                 variant,
                 anchorHorizontal,
                 horizontalScreenFill,
-                maxWidth,
+                width,
                 updateLayout,
                 triggerElement: triggerElement || null,
                 raisedElement,
@@ -308,7 +308,7 @@ const Content = ({
         variant,
         anchorHorizontal,
         horizontalScreenFill,
-        maxWidth,
+        width,
         triggerElement,
         raisedElement,
         onClose,
@@ -447,25 +447,45 @@ const Content = ({
                             }}
                         >
                             <View
+                                onLayout={(e) => setContentWidth(e.nativeEvent.layout.width)}
                                 className={cn("rounded-xl shadow-2xl border bg-menu border-border flex-shrink", className)}
-                                style={{
-                                    maxWidth: maxWidth === "fit-content" ? undefined : maxWidth,
-                                    maxHeight: popupMaxHeight,
-                                }}
+                                style={[
+                                    {
+                                        width: width === "fit-content" ? undefined : width,
+                                        maxWidth: screenWidth - 32,
+                                        maxHeight: popupMaxHeight,
+                                    },
+                                ]}
                             >
                                 <View
                                     onLayout={(e) => {
-                                        const { width, height } = e.nativeEvent.layout;
-                                        if (height > 0) setContentHeight(height);
-                                        if (width > 0) setContentWidth(width);
+                                        const { width: layoutWidth, height: layoutHeight } = e.nativeEvent.layout;
+                                        if (layoutHeight > 0) setContentHeight(layoutHeight);
+                                        if (layoutWidth > 0) setContentWidth(layoutWidth);
                                     }}
                                     className="rounded-2xl overflow-hidden flex-shrink"
                                 >
-                                    {typeof children === "function"
-                                        ? activeData
-                                            ? (children as any)(activeData)
-                                            : null
-                                        : children}
+                                    {(() => {
+                                        const resolvedChildren =
+                                            typeof children === "function"
+                                                ? activeData
+                                                    ? (children as any)(activeData)
+                                                    : null
+                                                : children;
+
+                                        const childrenArray = React.Children.toArray(resolvedChildren);
+                                        const items = childrenArray.filter(
+                                            (child) => !React.isValidElement(child) || child.type !== EmptyContent,
+                                        );
+                                        const empty = childrenArray.find(
+                                            (child) => React.isValidElement(child) && child.type === EmptyContent,
+                                        );
+
+                                        if (items.length > 0) {
+                                            return items;
+                                        }
+                                        return empty || null;
+                                    })()}
                                 </View>
                             </View>
                         </View>
@@ -495,6 +515,10 @@ const List = <T,>({ className, ...props }: FlatListProps<T>) => {
     );
 };
 
+const EmptyContent = ({ children }: { children: React.ReactNode }) => {
+    return <>{children}</>;
+};
+
 const Raise = ({ children }: { children: React.ReactNode }) => {
     const raisedRef = useRef<View>(null);
 
@@ -511,5 +535,6 @@ Menu.Trigger = Trigger;
 Menu.Raise = Raise;
 Menu.Item = Item;
 Menu.Content = Content;
+Menu.EmptyContent = EmptyContent;
 Menu.Header = Header;
 Menu.List = List;

@@ -1,6 +1,12 @@
 import type { Album, VideoMedia } from "@/types/useMedia";
 import { DEFAULT_SORT_SCOPE } from "@/constants/defaults";
-import { getVideosForAlbumDb, saveSettingDb, updateAlbumVideoSortScopeDb, updateAlbumVideoSortTypeDb } from "@/utils/db";
+import {
+    getVideosForAlbumDb,
+    saveSettingDb,
+    updateAlbumVideoSortScopeDb,
+    updateAlbumVideoSortTypeDb,
+    updateAlbumThumbnailDb,
+} from "@/utils/db";
 import React, { useCallback, useRef, useState } from "react";
 
 export type SortBy = "name" | "date" | "duration" | "episode";
@@ -29,13 +35,17 @@ export const useMediaSort = (
     const albumSortRef = useRef<AlbumSortConfig>(albumSort);
     const globalVideoSortRef = useRef<VideoSortConfig>(globalVideoSort);
 
+    const getAlbumThumbnail = useCallback((videos: VideoMedia[]) => {
+        return videos[0]?.thumbnail;
+    }, []);
+
     // Re-sort albums immediately when sort order changes
     React.useEffect(() => {
         saveSettingDb("albumSort", JSON.stringify(albumSort));
     }, [albumSort]);
 
     const getActiveVideoSort = useCallback(
-        (album: Album | null | undefined) => {
+        (album: Album | null) => {
             if (album?.videoSortSettingScope === "local" && album.videoSortType) {
                 try {
                     return JSON.parse(album.videoSortType) as VideoSortConfig;
@@ -108,14 +118,40 @@ export const useMediaSort = (
                 // Re-sort all albums that use global sort
                 setAllAlbumsVideos((prevVideos) => {
                     const updated: Record<string, VideoMedia[]> = {};
+                    const albumThumbUpdates: Record<string, string> = {};
+
                     Object.entries(prevVideos).forEach(([albumId, videos]) => {
                         const album = albumsRef.current[albumId];
                         if (album?.videoSortSettingScope === "local" && album.videoSortType) {
                             updated[albumId] = videos; // local sort unchanged
                         } else {
-                            updated[albumId] = [...videos].sort((x, y) => compareByVideoSort(x, y, next));
+                            const nextVideos = [...videos].sort((x, y) => compareByVideoSort(x, y, next));
+                            updated[albumId] = nextVideos;
+
+                            const newThumb = getAlbumThumbnail(nextVideos);
+                            if (album && album.thumbnail !== newThumb) {
+                                albumThumbUpdates[albumId] = newThumb || "";
+                            }
                         }
                     });
+
+                    if (Object.keys(albumThumbUpdates).length > 0) {
+                        setAlbums((prevAlbums) =>
+                            prevAlbums.map((a) => {
+                                if (albumThumbUpdates[a.id] !== undefined) {
+                                    const newThumb = albumThumbUpdates[a.id];
+                                    if (newThumb !== a.thumbnail) {
+                                        updateAlbumThumbnailDb(a.id, newThumb);
+                                        const updatedAlbum = { ...a, thumbnail: newThumb };
+                                        albumsRef.current[a.id] = updatedAlbum;
+                                        return updatedAlbum;
+                                    }
+                                }
+                                return a;
+                            }),
+                        );
+                    }
+
                     return updated;
                 });
             } else {
@@ -143,9 +179,21 @@ export const useMediaSort = (
                 // Re-sort only this album's videos
                 setAllAlbumsVideos((prev) => {
                     if (!prev[targetAlbumId]) return prev;
+                    const nextVideos = [...prev[targetAlbumId]].sort((x, y) => compareByVideoSort(x, y, nextSort));
+
+                    const newThumb = getAlbumThumbnail(nextVideos);
+                    if (updatedAlbum.thumbnail !== newThumb) {
+                        updatedAlbum.thumbnail = newThumb;
+                        updateAlbumThumbnailDb(targetAlbumId, newThumb || "");
+                        // updatedAlbum is already in albumsRef.current[targetAlbumId] and setAlbums was called above with the old thumbnail,
+                        // so we call setAlbums again or we could have done it once.
+                        // To be clean, let's ensure setAlbums uses the final updatedAlbum.
+                        setAlbums((prevAlbums) => prevAlbums.map((a) => (a.id === targetAlbumId ? updatedAlbum : a)));
+                    }
+
                     return {
                         ...prev,
-                        [targetAlbumId]: [...prev[targetAlbumId]].sort((x, y) => compareByVideoSort(x, y, nextSort)),
+                        [targetAlbumId]: nextVideos,
                     };
                 });
             }
@@ -196,9 +244,18 @@ export const useMediaSort = (
             const activeSort = scope === "local" && nextSortType ? JSON.parse(nextSortType) : globalVideoSortRef.current;
             setAllAlbumsVideos((prev) => {
                 if (!prev[albumId]) return prev;
+                const nextVideos = [...prev[albumId]].sort((x, y) => compareByVideoSort(x, y, activeSort));
+
+                const newThumb = getAlbumThumbnail(nextVideos);
+                if (updatedAlbum.thumbnail !== newThumb) {
+                    updatedAlbum.thumbnail = newThumb;
+                    updateAlbumThumbnailDb(albumId, newThumb || "");
+                    setAlbums((prevAlbums) => prevAlbums.map((a) => (a.id === albumId ? updatedAlbum : a)));
+                }
+
                 return {
                     ...prev,
-                    [albumId]: [...prev[albumId]].sort((x, y) => compareByVideoSort(x, y, activeSort)),
+                    [albumId]: nextVideos,
                 };
             });
         },

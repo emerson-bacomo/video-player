@@ -1,8 +1,8 @@
 import { cn } from "@/lib/utils";
+import { Marker, MarkerPair } from "@/types/useMedia";
 import React from "react";
 import { View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import { Marker, MarkerPair } from "../hooks/usePlayerClip";
 
 interface MarkerThumbProps {
     marker: Marker;
@@ -14,6 +14,7 @@ interface MarkerThumbProps {
     onDoublePress?: (markerTime: number) => void;
     onDragStart?: () => void;
     onDragEnd?: () => void;
+    isLandscape?: boolean;
 }
 
 const MarkerThumb = React.memo(
@@ -27,9 +28,10 @@ const MarkerThumb = React.memo(
         onDoublePress,
         onDragStart,
         onDragEnd,
+        isLandscape,
     }: MarkerThumbProps) => {
         const dragStartTime = React.useRef<number | null>(null);
-        const HORIZONTAL_PADDING = 15;
+        const HORIZONTAL_PADDING = 0;
         const DRAG_DAMPING = 0.85;
 
         const left = HORIZONTAL_PADDING + (Math.floor(marker.time) / duration) * activeWidth;
@@ -92,7 +94,7 @@ const MarkerThumb = React.memo(
                     className="absolute items-center justify-center"
                     style={{
                         left: left - 15,
-                        top: -10,
+                        top: isLandscape ? -16 : -10,
                         width: 30,
                         height: 24,
                         zIndex: isActiveMarker ? 50 : 30,
@@ -123,6 +125,7 @@ const MarkerThumb = React.memo(
 );
 
 interface ClippingOverlayProps {
+    markers: Marker[];
     markerPairs: MarkerPair[];
     duration: number;
     width: number;
@@ -133,9 +136,11 @@ interface ClippingOverlayProps {
     onDragStart?: () => void;
     onDragEnd?: () => void;
     previewActive?: boolean;
+    isLandscape?: boolean;
 }
 
 export const ClippingOverlay: React.FC<ClippingOverlayProps> = ({
+    markers,
     markerPairs,
     duration,
     width,
@@ -146,14 +151,15 @@ export const ClippingOverlay: React.FC<ClippingOverlayProps> = ({
     onDragStart,
     onDragEnd,
     previewActive = false,
+    isLandscape = false,
 }) => {
     if (duration <= 0 || width <= 0) return null;
 
-    const HORIZONTAL_PADDING = 15;
+    const HORIZONTAL_PADDING = 0;
     const activeWidth = width - HORIZONTAL_PADDING * 2;
 
     return (
-        <View className="absolute inset-0 h-10 z-10" style={{ width }}>
+        <View className={cn("absolute inset-0 z-10")} style={{ width }}>
             {/* Clip Segments */}
             {markerPairs.map((pair) => {
                 if (!pair.end) return null;
@@ -164,7 +170,7 @@ export const ClippingOverlay: React.FC<ClippingOverlayProps> = ({
                 return (
                     <View
                         key={`pair-${pair.id}`}
-                        className="absolute h-4 top-[12px] justify-center"
+                        className={cn("absolute h-4 justify-center", isLandscape ? "top-[2.4px]" : "top-[12px]")}
                         style={{
                             left,
                             width: clipWidth,
@@ -182,23 +188,21 @@ export const ClippingOverlay: React.FC<ClippingOverlayProps> = ({
             })}
 
             {/* Clip Markers */}
-            {markerPairs
-                .flatMap((pair) => (pair.end ? [pair.start, pair.end] : [pair.start]))
-                .filter((m) => m.markerId !== "realtime")
-                .map((marker) => (
-                    <MarkerThumb
-                        key={`marker-${marker.markerId}`}
-                        marker={marker}
-                        duration={duration}
-                        activeWidth={activeWidth}
-                        isActiveMarker={activeMarkerId === marker.markerId}
-                        onUpdateMarkerTime={onUpdateMarkerTime}
-                        onSelectMarker={onSelectMarker}
-                        onDoublePress={onDoublePressMarker}
-                        onDragStart={onDragStart}
-                        onDragEnd={onDragEnd}
-                    />
-                ))}
+            {markers.map((marker) => (
+                <MarkerThumb
+                    key={`marker-${marker.markerId}`}
+                    marker={marker}
+                    duration={duration}
+                    activeWidth={activeWidth}
+                    isActiveMarker={activeMarkerId === marker.markerId}
+                    onUpdateMarkerTime={onUpdateMarkerTime}
+                    onSelectMarker={onSelectMarker}
+                    onDoublePress={onDoublePressMarker}
+                    onDragStart={onDragStart}
+                    onDragEnd={onDragEnd}
+                    isLandscape={isLandscape}
+                />
+            ))}
         </View>
     );
 };

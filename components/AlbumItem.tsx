@@ -35,7 +35,7 @@ export const AlbumItem = React.memo(({ item, onPress, onLongPress, onInfoPress, 
     const hasNew = React.useMemo(() => {
         const videos = allAlbumsVideos[item.id] || [];
         for (let i = 0; i < videos.length; i++) {
-            if (videos[i].lastPlayedSec === -1) return true;
+            if (videos[i].isNewOverride || videos[i].lastPlayedSec === -1) return true;
         }
         return false;
     }, [allAlbumsVideos, item.id]);
@@ -47,6 +47,7 @@ export const AlbumItem = React.memo(({ item, onPress, onLongPress, onInfoPress, 
                     activeOpacity={0.8}
                     onPress={() => (isSelectionMode ? toggleSelection(item.id) : onPress(item))}
                     onLongPress={() => toggleSelection(item.id)}
+                    delayLongPress={250}
                 >
                     <View
                         className={`w-full aspect-square rounded-2xl overflow-hidden border bg-card shadow-md mb-2 ${isSelected ? "border-primary border-2 p-1" : "border-border"}`}

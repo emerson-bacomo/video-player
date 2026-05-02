@@ -31,7 +31,8 @@ export const initDB = () => {
       thumbnail TEXT,
       lastPlayedSec REAL DEFAULT -1,
       size INTEGER,
-      markers TEXT
+      markers TEXT,
+      clipSourceUri TEXT
     );
     CREATE TABLE IF NOT EXISTS sync_metadata (
       key TEXT PRIMARY KEY,
@@ -63,6 +64,11 @@ export const initDB = () => {
       filepath TEXT UNIQUE,
       filename TEXT,
       config_json TEXT
+    );
+    CREATE TABLE IF NOT EXISTS pending_clip_assignments (
+      outputUri TEXT PRIMARY KEY,
+      sourceUri TEXT,
+      timestamp INTEGER
     );
   `);
     // Column migrations (safe for fresh & existing installs)
@@ -116,6 +122,12 @@ export const initDB = () => {
     } catch {}
     try {
         db.execSync("ALTER TABLE logs ADD COLUMN action TEXT");
+    } catch {}
+    try {
+        db.execSync("ALTER TABLE videos ADD COLUMN clipSourceUri TEXT");
+    } catch {}
+    try {
+        db.execSync("ALTER TABLE videos ADD COLUMN isNewOverride INTEGER DEFAULT 0");
     } catch {}
 
     const secMigrated = getSettingDb("db_v2_sec_units");
@@ -215,7 +227,7 @@ export const getHiddenAlbumsDb = (): Album[] => {
 export const saveAlbumsDb = (albums: Album[]) => {
     db.execSync("DELETE FROM albums");
     const stmt = db.prepareSync(
-        "INSERT INTO albums (id, title, lastModified, thumbnail, videoSortSettingScope, videoSortType, albumName, uri) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO albums (id, title, lastModified, thumbnail, videoSortSettingScope, videoSortType, albumName, uri, isHidden, prefixOptions, selectedPrefixOptions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
     albums.forEach((a) => {
         stmt.executeSync([
@@ -227,6 +239,9 @@ export const saveAlbumsDb = (albums: Album[]) => {
             a.videoSortType || DEFAULT_SORT_TYPE,
             a.albumName,
             a.uri,
+            a.isHidden || 0,
+            a.prefixOptions || null,
+            a.selectedPrefixOptions || null,
         ]);
     });
 };
@@ -235,7 +250,7 @@ export const saveAlbumsDb = (albums: Album[]) => {
 // This avoids losing scanned progress when the app is terminated before final bulk save.
 export const upsertAlbumDb = (album: Album) => {
     const insertStmt = db.prepareSync(
-        "INSERT OR IGNORE INTO albums (id, title, lastModified, thumbnail, videoSortSettingScope, videoSortType, albumName, uri) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT OR IGNORE INTO albums (id, title, lastModified, thumbnail, videoSortSettingScope, videoSortType, albumName, uri, isHidden, prefixOptions, selectedPrefixOptions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
     insertStmt.executeSync([
         album.id,
@@ -246,10 +261,13 @@ export const upsertAlbumDb = (album: Album) => {
         album.videoSortType || DEFAULT_SORT_TYPE,
         album.albumName,
         album.uri,
+        album.isHidden || 0,
+        album.prefixOptions || null,
+        album.selectedPrefixOptions || null,
     ]);
 
     const updateStmt = db.prepareSync(
-        "UPDATE albums SET title = ?, lastModified = ?, thumbnail = ?, videoSortSettingScope = ?, videoSortType = ?, albumName = ?, uri = ? WHERE id = ?",
+        "UPDATE albums SET title = ?, lastModified = ?, thumbnail = ?, videoSortSettingScope = ?, videoSortType = ?, albumName = ?, uri = ?, isHidden = ?, prefixOptions = ?, selectedPrefixOptions = ? WHERE id = ?",
     );
     updateStmt.executeSync([
         album.title,
@@ -259,6 +277,9 @@ export const upsertAlbumDb = (album: Album) => {
         album.videoSortType || DEFAULT_SORT_TYPE,
         album.albumName,
         album.uri,
+        album.isHidden || 0,
+        album.prefixOptions || null,
+        album.selectedPrefixOptions || null,
         album.id,
     ]);
 };
@@ -348,8 +369,8 @@ export const addVideosDb = (videos: VideoMedia[]) => {
     if (!videos || videos.length === 0) return;
 
     const stmt = db.prepareSync(`
-        INSERT INTO videos (id, albumId, filename, title, uri, duration, width, height, modificationTime, thumbnail, lastPlayedSec, size, markers)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO videos (id, albumId, filename, title, uri, duration, width, height, modificationTime, thumbnail, lastPlayedSec, size, markers, clipSourceUri, isNewOverride)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             albumId=excluded.albumId,
             filename=excluded.filename,
@@ -362,7 +383,9 @@ export const addVideosDb = (videos: VideoMedia[]) => {
             thumbnail=excluded.thumbnail,
             lastPlayedSec=excluded.lastPlayedSec,
             size=excluded.size,
-            markers=excluded.markers
+            markers=excluded.markers,
+            clipSourceUri=excluded.clipSourceUri,
+            isNewOverride=excluded.isNewOverride
     `);
 
     videos.forEach((v) => {
@@ -380,6 +403,8 @@ export const addVideosDb = (videos: VideoMedia[]) => {
             v.lastPlayedSec ?? -1,
             v.size || 0,
             v.markers ? JSON.stringify(v.markers) : null,
+            v.clipSourceUri || null,
+            v.isNewOverride ? 1 : 0,
         ]);
     });
 };
@@ -391,8 +416,8 @@ export const saveVideosDb = (albumId: string | null, videos: VideoMedia[]) => {
         db.execSync("DELETE FROM videos");
     }
     const stmt = db.prepareSync(`
-    INSERT INTO videos (id, albumId, filename, title, uri, duration, width, height, modificationTime, thumbnail, lastPlayedSec, size, markers)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO videos (id, albumId, filename, title, uri, duration, width, height, modificationTime, thumbnail, lastPlayedSec, size, markers, clipSourceUri, isNewOverride)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
     videos.forEach((v) => {
         stmt.executeSync([
@@ -409,6 +434,8 @@ export const saveVideosDb = (albumId: string | null, videos: VideoMedia[]) => {
             v.lastPlayedSec ?? -1, // fallback covers old field name
             v.size || 0,
             v.markers ? JSON.stringify(v.markers) : null,
+            v.clipSourceUri || null,
+            v.isNewOverride ? 1 : 0,
         ]);
     });
 };
@@ -470,6 +497,16 @@ export const renameVideoDb = (videoId: string, title: string) => {
 export const updateVideoMarkersDb = (videoId: string, markers: any[] | null) => {
     const stmt = db.prepareSync("UPDATE videos SET markers = ? WHERE id = ?");
     stmt.executeSync([markers ? JSON.stringify(markers) : null, videoId]);
+};
+
+export const clearVideoClipSourceUriDb = (videoId: string) => {
+    const stmt = db.prepareSync("UPDATE videos SET clipSourceUri = NULL WHERE id = ?");
+    stmt.executeSync([videoId]);
+};
+
+export const clearVideoNewOverrideDb = (videoId: string) => {
+    const stmt = db.prepareSync("UPDATE videos SET isNewOverride = 0 WHERE id = ?");
+    stmt.executeSync([videoId]);
 };
 
 export const getHiddenVideosDb = () => {
@@ -619,4 +656,27 @@ export const deleteVpcExportDb = (id: number) => {
 export const deleteVpcExportByPathDb = (filepath: string) => {
     const stmt = db.prepareSync("DELETE FROM vpc_exports WHERE filepath = ?");
     stmt.executeSync([filepath]);
+};
+
+// --- Pending Clip Assignment Functions ---
+export const addPendingClipAssignmentDb = (outputUri: string, sourceUri: string) => {
+    const stmt = db.prepareSync(
+        "INSERT OR REPLACE INTO pending_clip_assignments (outputUri, sourceUri, timestamp) VALUES (?, ?, ?)",
+    );
+    stmt.executeSync([outputUri, sourceUri, Date.now()]);
+};
+
+export const getAllPendingClipAssignmentsDb = () => {
+    return db.getAllSync<{ outputUri: string; sourceUri: string }>("SELECT * FROM pending_clip_assignments");
+};
+
+export const deletePendingClipAssignmentDb = (outputUri: string) => {
+    const stmt = db.prepareSync("DELETE FROM pending_clip_assignments WHERE outputUri = ?");
+    stmt.executeSync([outputUri]);
+};
+
+export const clearOldPendingClipAssignmentsDb = (maxAgeMs: number = 1000 * 60 * 60 * 24) => {
+    // Clear assignments older than 24h
+    const stmt = db.prepareSync("DELETE FROM pending_clip_assignments WHERE timestamp < ?");
+    stmt.executeSync([Date.now() - maxAgeMs]);
 };

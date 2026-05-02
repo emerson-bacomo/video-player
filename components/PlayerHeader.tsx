@@ -2,15 +2,21 @@ import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { ChevronLeft, MoreVertical, Settings as SettingsIcon } from "lucide-react-native";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
+import * as FileSystem from "expo-file-system/legacy";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { VideoMedia } from "../types/useMedia";
+import { VideoMedia, ExportOptions, SessionClip } from "../types/useMedia";
 import { LoadingStatus } from "./LoadingStatus";
 import { Menu } from "./Menu";
 import { PlayerOrientationButton } from "./PlayerOrientationButton";
 import { VideoBadges } from "./VideoBadges";
 import { VideoItemDetailsModal } from "./VideoItemDetailsModal";
+import { SessionClipsBottomSheet } from "./SessionClipsBottomSheet";
+import { useMedia } from "@/hooks/useMedia";
+import { ExternalLink, Scissors } from "lucide-react-native";
+import { ClipExportModal } from "./ClipExportModal";
+import { useSafeNavigation } from "@/hooks/useSafeNavigation";
 
 interface BasePlayerHeaderProps {
     children?: React.ReactNode;
@@ -77,9 +83,10 @@ interface PlayerHeaderProps {
     video?: VideoMedia;
     onLayout?: (event: any) => void;
     setPaused?: (paused: boolean) => void;
+    onReexport?: (clip: SessionClip, opts: ExportOptions) => Promise<void> | void;
 }
 
-export const PlayerHeader: React.FC<PlayerHeaderProps> = ({ video, onLayout, setPaused }) => {
+export const PlayerHeader: React.FC<PlayerHeaderProps> = ({ video, onLayout, setPaused, onReexport }) => {
     const [isInfoModalVisible, setIsInfoModalVisible] = React.useState(false);
     const { width, height } = useWindowDimensions();
     const isPortrait = height > width;
@@ -90,13 +97,73 @@ export const PlayerHeader: React.FC<PlayerHeaderProps> = ({ video, onLayout, set
         router.push("/player-settings");
     };
 
+    const { sessionClips, allAlbumsVideos, clearVideoClipSourceUri, hasNewClips, markClipsAsViewed } = useMedia();
+    const { safePush } = useSafeNavigation();
+    const [isBottomSheetVisible, setIsBottomSheetVisible] = React.useState(false);
+    const [bottomSheetView, setBottomSheetView] = React.useState<"clips" | "export">("clips");
+    const [clipToReexport, setClipToReexport] = React.useState<SessionClip | null>(null);
+    const [isSourceValid, setIsSourceValid] = useState(false);
+
+    useEffect(() => {
+        if (video?.clipSourceUri) {
+            FileSystem.getInfoAsync(video.clipSourceUri).then((info) => {
+                if (info.exists) {
+                    setIsSourceValid(true);
+                } else {
+                    setIsSourceValid(false);
+                    clearVideoClipSourceUri(video.id);
+                }
+            });
+        } else {
+            setIsSourceValid(false);
+        }
+    }, [video?.id, video?.clipSourceUri, clearVideoClipSourceUri]);
+
+    const handleClipPress = async (clip: VideoMedia) => {
+        setIsBottomSheetVisible(false);
+        safePush({
+            pathname: "/player",
+            params: {
+                videoId: clip.id,
+                albumId: clip.albumId,
+                initialTime: (clip.lastPlayedSec || 0).toString(),
+            },
+        });
+    };
+
+    const handlePlayOriginal = (uri: string) => {
+        const allVids = Object.values(allAlbumsVideos).flat();
+        const original = allVids.find((v) => v.uri === uri);
+        if (original) {
+            setIsBottomSheetVisible(false);
+            safePush({
+                pathname: "/player",
+                params: {
+                    videoId: original.id,
+                    albumId: original.albumId,
+                    initialTime: (original.lastPlayedSec || 0).toString(),
+                },
+            });
+        }
+    };
+
     const rightSection = (
         <>
-            <PlayerOrientationButton />
-
-            <TouchableOpacity onPress={handleSettings} className="p-2">
-                <SettingsIcon size={22} color="white" />
-            </TouchableOpacity>
+            {Object.keys(sessionClips).length > 0 && (
+                <TouchableOpacity
+                    onPress={() => {
+                        setBottomSheetView("clips");
+                        setIsBottomSheetVisible(true);
+                        markClipsAsViewed();
+                    }}
+                    className="p-2 relative"
+                >
+                    <Scissors size={22} color="white" />
+                    {hasNewClips && (
+                        <View className="absolute top-1 right-1 w-2.5 h-2.5 bg-blue-500 rounded-full border border-white/50" />
+                    )}
+                </TouchableOpacity>
+            )}
 
             {/* Portrait: indicator sits on the right strip → popup opens to the left.
                 Landscape: indicator is inline in the header → default bottom popup. */}
@@ -110,14 +177,31 @@ export const PlayerHeader: React.FC<PlayerHeaderProps> = ({ video, onLayout, set
                 }}
             />
 
+            <PlayerOrientationButton />
+
+            <TouchableOpacity onPress={handleSettings} className="p-2">
+                <SettingsIcon size={22} color="white" />
+            </TouchableOpacity>
+
             <Menu>
                 <Menu.Trigger className="p-2">
                     <MoreVertical size={24} color="white" />
                 </Menu.Trigger>
                 <Menu.Content className="w-56">
-                    <Menu.Item className="p-4">
-                        <Text className="text-zinc-500 italic">No actions available</Text>
-                    </Menu.Item>
+                    {isSourceValid && video?.clipSourceUri && (
+                        <Menu.Item
+                            onPress={() => handlePlayOriginal(video.clipSourceUri!)}
+                            className="flex-row items-center gap-3 p-4"
+                        >
+                            <ExternalLink size={20} color="white" />
+                            <Text className="text-white text-sm font-medium">Go to Source</Text>
+                        </Menu.Item>
+                    )}
+                    <Menu.EmptyContent>
+                        <View className="p-4">
+                            <Text className="text-zinc-500 italic text-sm">No other actions available</Text>
+                        </View>
+                    </Menu.EmptyContent>
                 </Menu.Content>
             </Menu>
         </>
@@ -149,6 +233,38 @@ export const PlayerHeader: React.FC<PlayerHeaderProps> = ({ video, onLayout, set
                 video={video || null}
                 hidePlayAction={true}
             />
+
+            <SessionClipsBottomSheet
+                isVisible={isBottomSheetVisible && bottomSheetView === "clips"}
+                onClose={() => setIsBottomSheetVisible(false)}
+                sessionClips={sessionClips}
+                onClipPress={handleClipPress}
+                onReexportPress={(clip) => {
+                    setClipToReexport(clip);
+                    setBottomSheetView("export");
+                }}
+                onPlayOriginal={handlePlayOriginal}
+                currentVideoId={video?.id}
+            />
+
+            {clipToReexport && bottomSheetView === "export" && (
+                <ClipExportModal
+                    visible={isBottomSheetVisible}
+                    onClose={() => {
+                        setBottomSheetView("clips");
+                        setClipToReexport(null);
+                    }}
+                    video={clipToReexport}
+                    segments={clipToReexport.segments}
+                    defaultName={clipToReexport.exportOptions.name}
+                    onExport={(options) => {
+                        setIsBottomSheetVisible(false);
+                        onReexport?.(clipToReexport, options);
+                    }}
+                    isReexport
+                    initialOptions={clipToReexport.exportOptions}
+                />
+            )}
         </>
     );
 };

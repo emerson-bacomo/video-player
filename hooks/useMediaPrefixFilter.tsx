@@ -6,7 +6,6 @@ import {
     updateAlbumSelectedPrefixOptionsDb,
     updateAlbumThumbnailDb,
 } from "@/utils/db";
-import { getThumbnailUri } from "@/utils/videoUtils";
 import React, { useCallback, useRef, useState } from "react";
 
 export const useMediaPrefixFilter = (
@@ -25,11 +24,18 @@ export const useMediaPrefixFilter = (
             if (selected) {
                 try {
                     initial[albumId] = JSON.parse(selected);
-                } catch (e) {
-                    console.error("[MediaPrefixFilter] Failed to parse selectedPrefixOptions for album", albumId, e);
-                }
+                } catch (e) {}
             }
         });
+
+        // Also check for virtual albums like recently-played
+        const recentlyPlayedSelected = getAlbumSelectedPrefixOptionsDb("recently-played");
+        if (recentlyPlayedSelected) {
+            try {
+                initial["recently-played"] = JSON.parse(recentlyPlayedSelected);
+            } catch (e) {}
+        }
+
         setSelectedVideoPrefixFiltersState(initial);
         selectedVideoPrefixFiltersRef.current = initial;
     }, [albumsRef]);
@@ -69,9 +75,7 @@ export const useMediaPrefixFilter = (
             }));
 
             // Update album thumbnail based on the first filtered video
-            const firstVid = filteredVideos[0];
-            const dynamicThumbnail =
-                firstVid?.thumbnail || firstVid?.baseThumbnailUri || (firstVid ? getThumbnailUri(firstVid.id) : undefined);
+            const dynamicThumbnail = filteredVideos[0]?.thumbnail;
 
             const album = albumsRef.current[albumId];
             if (album && dynamicThumbnail !== album.thumbnail) {
@@ -107,9 +111,7 @@ export const useMediaPrefixFilter = (
             }));
 
             // Update album thumbnail based on the first video
-            const firstVid = unfilteredVideos[0];
-            const dynamicThumbnail =
-                firstVid?.thumbnail || firstVid?.baseThumbnailUri || (firstVid ? getThumbnailUri(firstVid.id) : undefined);
+            const dynamicThumbnail = unfilteredVideos[0]?.thumbnail;
 
             const album = albumsRef.current[albumId];
             if (album && dynamicThumbnail !== album.thumbnail) {

@@ -1,24 +1,9 @@
-import { Directory } from "expo-file-system";
-import * as FileSystem from "expo-file-system/legacy";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { ExportOptions } from "@/components/ClipExportModal";
+import { useMedia } from "@/hooks/useMedia";
 import { CorePlayerRef } from "@/components/CorePlayer";
-import ExpoFFmpeg from "@/modules/expo-ffmpeg/src/index";
-import { VideoMedia } from "@/types/useMedia";
-import { normalizeClipDestination } from "@/utils/clipDestination";
+import { ExportOptions, VideoMedia, Marker, MarkerPair } from "@/types/useMedia";
 import { secondsToFileStamp } from "@/utils/secondsToHhmmss";
-
-export interface Marker {
-    time: number;
-    markerId: string;
-}
-
-export interface MarkerPair {
-    id: string;
-    start: Marker;
-    end: Marker;
-}
 
 interface UsePlayerClipProps {
     activeVideo: VideoMedia | null;
@@ -26,12 +11,8 @@ interface UsePlayerClipProps {
     duration: number;
     playerRef: React.RefObject<CorePlayerRef>;
     setPaused: (paused: boolean) => void;
-    settings: any;
-    updateSettings: (settings: any) => Promise<void>;
-    fetchAlbums: () => Promise<void>;
-    setLoadingTask: (task: any) => void;
     showControls: boolean;
-    updateVideoMarkers: (id: string, markers: Marker[]) => void;
+    currentDisplayTime: number;
 }
 
 export const usePlayerClip = ({
@@ -40,12 +21,14 @@ export const usePlayerClip = ({
     duration,
     playerRef,
     setPaused,
-    settings,
-    updateSettings,
-    fetchAlbums,
-    setLoadingTask,
-    updateVideoMarkers,
+    currentDisplayTime,
 }: UsePlayerClipProps) => {
+    const { 
+        updateVideoMarkers, 
+        performExport,
+        setLoadingTask,
+    } = useMedia();
+
     const isSavingRef = useRef(false);
     const [isClipMode, setIsClipMode] = useState((activeVideo?.markers?.length ?? 0) > 0);
     const [showClipExportModal, setShowClipExportModal] = useState(false);
@@ -68,7 +51,7 @@ export const usePlayerClip = ({
     const markerPairs = useMemo(() => {
         const allMarkers = [...markers];
         if (allMarkers.length % 2 !== 0) {
-            allMarkers.push({ time: playerRef.current.currentTime, markerId: "realtime" });
+            allMarkers.push({ time: currentDisplayTime, markerId: "realtime" });
         }
 
         const sorted = allMarkers.sort((a, b) => a.time - b.time);
@@ -79,14 +62,14 @@ export const usePlayerClip = ({
 
             if (start && end) {
                 pairs.push({
-                    id: start.markerId === "realtime" || end.markerId === "realtime" ? "pair-realtime" : `pair-${i}`,
+                    id: start.markerId === "realtime" || end.markerId === "realtime" ? "pair-realtime" : `pair-${start.markerId}`,
                     start,
                     end,
                 });
             }
         }
         return pairs;
-    }, [markers]);
+    }, [markers, currentDisplayTime]);
 
     const onMarkersChange = useCallback(
         (m: Marker[]) => videoId && updateVideoMarkers(videoId, m),
@@ -185,7 +168,10 @@ export const usePlayerClip = ({
     const isInSegment = useCallback(
         (currentPositionSec: number) => {
             return markerPairs.some(
-                (p) => p.id !== "pair-realtime" && currentPositionSec >= p.start.time && currentPositionSec < p.end.time,
+                (p) =>
+                    p.id !== "pair-realtime" &&
+                    currentPositionSec >= p.start.time - 0.5 &&
+                    currentPositionSec < p.end.time,
             );
         },
         [markerPairs],
@@ -199,8 +185,17 @@ export const usePlayerClip = ({
 
     const defaultExportName = useMemo(() => {
         if (!activeVideo || exportSegments.length === 0) return "";
-        const baseName = activeVideo.filename.split(".").slice(0, -1).join(".") || activeVideo.filename;
-        const cleanName = baseName.replace(/[\\/:*?"<>|]/g, "_");
+
+        // Remove common video extensions (case-insensitive)
+        const baseName = activeVideo.title.replace(/\.(mp4|mkv|mov|avi|flv|wmv|webm|m4v)$/i, "");
+
+        const cleanName = baseName
+            .replace(/[\\/:*?"<>|]/g, "_") // Standard illegal characters
+            .replace(/[\x00-\x1F\x7F]/g, "") // Control characters
+            .replace(/^\.+|\.+$/g, "") // Leading/trailing dots
+            .replace(/\s+/g, "_") // Spaces to underscores
+            .replace(/_+/g, "_") // Collapse multiple underscores
+            .trim();
 
         const timeSegments = exportSegments
             .map((s) => `${secondsToFileStamp(s.start)}_${s.end ? secondsToFileStamp(s.end) : "end"}`)
@@ -246,151 +241,28 @@ export const usePlayerClip = ({
             if (!activeVideo || !exportSegments.length) return;
             setShowClipExportModal(false);
 
-            setLoadingTask({
-                id: "clip-export",
-                label: "Exporting Clip",
-                detail: `Saving to ${options.name} (CRF ${options.crf})...`,
-                importance: "SHOW_POPUP_AND_EXPAND",
-                progress: 0,
-            });
+            const maxEndTime = Math.max(...exportSegments.map((s) => s.end));
+            playerRef.current.seek(maxEndTime);
 
-            try {
-                const maxEndTime = Math.max(...exportSegments.map((s) => s.end));
-                playerRef.current.seek(maxEndTime);
-
-                let destination = normalizeClipDestination(settings.clipDestination || "");
-                if (!destination) {
-                    try {
-                        const directory = await Directory.pickDirectoryAsync();
-                        if (!directory?.uri) {
-                            setLoadingTask({
-                                label: "Config Error",
-                                detail: "Clip destination is not valid, change in settings.",
-                                importance: "SHOW_POPUP",
-                                dismissAfter: 4000,
-                            });
-                            return;
-                        }
-                        destination = normalizeClipDestination(directory.uri);
-                        if (!destination) {
-                            setLoadingTask({
-                                label: "Config Error",
-                                detail: "Clip destination is not valid, change in settings.",
-                                importance: "SHOW_POPUP",
-                                dismissAfter: 4000,
-                            });
-                            return;
-                        }
-                        await updateSettings({ clipDestination: destination });
-                    } catch (pickerError) {
-                        console.warn("[usePlayerClip] Failed to pick clip destination", pickerError);
-                        setLoadingTask({
-                            label: "Config Error",
-                            detail: "Clip destination is not valid, change in settings.",
-                            importance: "SHOW_POPUP",
-                            dismissAfter: 4000,
-                        });
-                        return;
-                    }
-                }
-
-                const destDir = destination.replace(/\/+$/, "");
-                const ext = options.format;
-                const outPathStr = `${destDir}/${options.name}.${ext}`;
-
-                const destInfo = await FileSystem.getInfoAsync(`file://${destDir}`);
-                if (!destInfo.exists || !destInfo.isDirectory) {
-                    setLoadingTask({
-                        label: "File Error",
-                        detail: "Clip destination is not valid, change in settings.",
-                        importance: "SHOW_POPUP",
-                        dismissAfter: 4000,
-                    });
-                    return;
-                }
-
-                const { EventEmitter, requireNativeModule } = require("expo-modules-core");
-                const eventEmitter = new EventEmitter(requireNativeModule("ExpoFFmpeg"));
-
-                const progressSub = eventEmitter.addListener("onClipProgress", ({ progress }: { progress: number }) => {
-                    setLoadingTask((prev: any) => {
-                        if (prev?.id === "clip-export") {
-                            const currentProgress = prev.progress || 0;
-                            if (Math.abs(currentProgress - progress) < 0.01 && progress < 1.0) {
-                                return prev;
-                            }
-                            return { ...prev, progress };
-                        }
-                        return prev;
-                    });
-                });
-
-                let success = false;
-                try {
-                    const finalOptions = {
-                        ...options,
-                        crf: options.crf ?? 0, // Ensure no undefined values for Kotlin
-                    };
-                    success = await ExpoFFmpeg.clipVideo(activeVideo.uri, outPathStr, exportSegments, finalOptions);
-                } finally {
-                    progressSub.remove();
-                }
-
-                if (success) {
-                    setLoadingTask({
-                        id: "clip-export-finalizing",
-                        label: "Saving & Indexing",
-                        detail: "Registering file with Media Store...",
-                        importance: "SHOW_POPUP",
-                    });
-                    try {
-                        await ExpoFFmpeg.scanFile(outPathStr);
-                        await fetchAlbums();
-                    } catch (idxError) {
-                        console.warn("[usePlayerClip] Failed to scan asset:", idxError);
-                        await fetchAlbums();
-                    }
-
-                    setLoadingTask({
-                        label: "Export Success",
-                        detail: `Saved to ${outPathStr}`,
-                        importance: "SHOW_POPUP",
-                        dismissAfter: 5000,
-                    });
-
+            await performExport(
+                activeVideo.uri,
+                exportSegments,
+                options,
+                { title: "Exporting Clip", successTitle: "Export Success", failTitle: "Export Failed" },
+                () => {
                     if (options.removeMarkers) {
                         clearMarkers();
                     }
-                } else {
-                    const nativeError = await ExpoFFmpeg.getLastClipError();
-                    setLoadingTask({
-                        label: "Export Failed",
-                        detail: nativeError ? `FFmpeg error: ${nativeError}` : "Clipping failed.",
-                        importance: "SHOW_POPUP",
-                        dismissAfter: 6000,
-                    });
-                }
-            } catch (e: any) {
-                console.error("[usePlayerClip] Export error:", e);
-                setLoadingTask({
-                    label: "Critical Error",
-                    detail: "An unexpected error occurred during export.",
-                    importance: "SHOW_POPUP",
-                    dismissAfter: 5000,
-                });
-            } finally {
-                isSavingRef.current = false;
-            }
+                },
+            );
+            isSavingRef.current = false;
         },
         [
             activeVideo,
             exportSegments,
-            setLoadingTask,
             playerRef,
-            settings.clipDestination,
-            updateSettings,
-            fetchAlbums,
             clearMarkers,
+            performExport,
         ],
     );
 
@@ -398,18 +270,6 @@ export const usePlayerClip = ({
         setShowClipExportModal(false);
         isSavingRef.current = false;
     }, []);
-
-    // Initial jump for preview
-    useEffect(() => {
-        if (previewActive && duration > 0) {
-            const firstSegment = markerPairs
-                .filter((p) => p.id !== "pair-realtime")
-                .sort((a, b) => a.start.time - b.start.time)[0];
-            if (firstSegment) {
-                playerRef.current.seek(firstSegment.start.time);
-            }
-        }
-    }, [previewActive, duration, markerPairs]);
 
     return {
         isClipMode,
@@ -435,5 +295,6 @@ export const usePlayerClip = ({
         getNextMarkerTime,
         isInSegment,
         maxSegmentEndTime,
+        markers,
     };
 };

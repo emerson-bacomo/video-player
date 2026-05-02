@@ -144,6 +144,52 @@ const AlbumListScreen = () => {
         return sorted;
     }, [loadingTask, albums, skeletonData, deferredAlbumSort, compareByAlbumSort]);
 
+    const selectionActions = useMemo(
+        () => [
+            {
+                label: "Move",
+                icon: FolderInput,
+                onPress: (ids: Set<string>) => {
+                    console.log("Move multiple albums", Array.from(ids));
+                },
+            },
+            {
+                label: isSelectionWatched ? "Mark as Unwatched" : "Mark as Watched",
+                icon: isSelectionWatched ? Circle : CheckCircle,
+                onPress: (ids: Set<string>) => {
+                    const allSelectedVideoIds: string[] = [];
+                    ids.forEach((albumId) => {
+                        const vids = allAlbumsVideos[albumId] || [];
+                        vids.forEach((v) => allSelectedVideoIds.push(v.id));
+                    });
+                    const newProgress = isSelectionWatched ? -1 : Infinity;
+                    updateMultipleVideoProgress(allSelectedVideoIds, newProgress);
+                    clearSelection();
+                },
+            },
+            {
+                label: "Hide",
+                icon: EyeOff,
+                onPress: (ids: Set<string>) => {
+                    hideMultipleAlbums(Array.from(ids));
+                    clearSelection();
+                },
+            },
+            {
+                label: "Delete",
+                icon: Trash2,
+                destructive: true,
+                onPress: (ids: Set<string>) => {
+                    router.push({
+                        pathname: "/delete-preview",
+                        params: { ids: Array.from(ids).join(","), type: "album" },
+                    });
+                },
+            },
+        ],
+        [isSelectionWatched, allAlbumsVideos, hideMultipleAlbums, clearSelection, updateMultipleVideoProgress],
+    );
+
     return (
         <ThemedSafeAreaView className="flex-1">
             <StatusBar style="light" />
@@ -156,51 +202,7 @@ const AlbumListScreen = () => {
                     <Header.SearchAction />
                 </Header.Actions>
 
-                <Header.SelectionActions
-                    actions={[
-                        {
-                            label: "Move",
-                            icon: FolderInput,
-                            onPress: (ids) => {
-                                console.log("Move multiple albums", Array.from(ids));
-                            },
-                        },
-                        {
-                            label: isSelectionWatched ? "Mark as Unwatched" : "Mark as Watched",
-                            icon: isSelectionWatched ? Circle : CheckCircle,
-                            onPress: (ids) => {
-                                const allSelectedVideoIds: string[] = [];
-                                ids.forEach((albumId) => {
-                                    const vids = allAlbumsVideos[albumId] || [];
-                                    vids.forEach((v) => allSelectedVideoIds.push(v.id));
-                                });
-                                const newProgress = isSelectionWatched ? -1 : Infinity;
-                                updateMultipleVideoProgress(allSelectedVideoIds, newProgress);
-                                clearSelection();
-                            },
-                        },
-                        {
-                            label: "Hide",
-                            icon: EyeOff,
-                            onPress: (ids) => {
-                                hideMultipleAlbums(Array.from(ids));
-                                clearSelection();
-                            },
-                        },
-                        {
-
-                            label: "Delete",
-                            icon: Trash2,
-                            destructive: true,
-                            onPress: (ids) => {
-                                router.push({
-                                    pathname: "/delete-preview",
-                                    params: { ids: Array.from(ids).join(","), type: "album" },
-                                });
-                            },
-                        },
-                    ]}
-                />
+                <Header.SelectionActions data={albums} actions={selectionActions} />
             </Header>
 
             <FlatList

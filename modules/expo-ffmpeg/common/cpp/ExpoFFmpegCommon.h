@@ -13,11 +13,15 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/error.h>
+#include <libavutil/opt.h>
+#include <libavutil/channel_layout.h>
 #include <libswscale/swscale.h>
+#include <libswresample/swresample.h>
 }
 
 #define LOG_TAG "ExpoFFmpeg"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
 extern std::string g_last_clip_error;
 extern double g_clip_progress;

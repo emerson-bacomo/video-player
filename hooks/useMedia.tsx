@@ -8,13 +8,19 @@ import { DEFAULT_SORT_SCOPE } from "@/constants/defaults";
 import { extractEpisode, extractPrefix, getThumbnailUri } from "@/utils/videoUtils";
 import {
     addLogDb,
+    addPendingClipAssignmentDb,
     addVideosDb,
+    clearOldPendingClipAssignmentsDb,
+    clearVideoClipSourceUriDb,
     deleteMultipleAlbumsDb,
     deleteMultipleVideosDb,
+    deletePendingClipAssignmentDb,
     deletePendingMediaDataDb,
     getAlbumsDb,
+    getAllPendingClipAssignmentsDb,
     getAllPlaybackDataDb,
     getAllVideosDb,
+    getHiddenAlbumsDb,
     getLastSyncTimestampDb,
     getPendingMediaDataDb,
     getSettingDb,
@@ -22,17 +28,19 @@ import {
     getVideosForAlbumDb,
     resetDatabaseDb,
     saveAlbumsDb,
+    saveSettingDb,
     setAlbumHiddenDb,
     setLastSyncTimestampDb,
     setVideoHiddenDb,
     updateAlbumThumbnailDb,
 } from "../utils/db";
 import { useSettings } from "./useSettings";
+import { ExportLabels, ExportQueueItem } from "./useMediaExport";
 
-import type { Album, VideoMedia } from "../types/useMedia";
+import type { Album, ExportOptions, SessionClip, VideoMedia } from "../types/useMedia";
 import { useMediaDelete } from "./useMediaDelete";
 import { useMediaHide } from "./useMediaHide";
-import { TASK_IDS, useMediaLoadingTask } from "./useMediaLoadingTask";
+import { OnBeforeSet, SetLoadingTask, TASK_IDS, useMediaLoadingTask } from "./useMediaLoadingTask";
 import { REQUIRED_MEDIA_PERMISSIONS, useMediaPermission } from "./useMediaPermission";
 import { useMediaPrefixFilter } from "./useMediaPrefixFilter";
 import { useMediaRename } from "./useMediaRename";
@@ -40,6 +48,7 @@ import { useMediaSelection } from "./useMediaSelection";
 import { AlbumSortBy, AlbumSortConfig, SortBy, SortOrder, useMediaSort, VideoSortConfig } from "./useMediaSort";
 import { useMediaThumbnailGeneration } from "./useMediaThumbnailGeneration";
 import { useMediaUpdateVideo } from "./useMediaUpdateVideo";
+import { useMediaExport } from "./useMediaExport";
 
 export type { AlbumSortBy, AlbumSortConfig, SortBy, SortOrder, VideoSortConfig };
 
@@ -63,6 +72,7 @@ export interface MediaContextType {
     updateVideoMarkers: (videoId: string, markers: { time: number; markerId: string }[] | null) => void;
     clearThumbnailCache: () => Promise<void>;
     regenerateAllThumbnails: () => Promise<void>;
+    regenerateVideoThumbnails: (videos: VideoMedia[]) => Promise<void>;
     syncDatabaseWithStorage: () => Promise<void>;
     updateVideoLastOpenedTime: (videoId: string) => void;
     resetToAlbums: () => void;
@@ -81,8 +91,8 @@ export interface MediaContextType {
     setLoadingPopupVisible: (visible: boolean | ((prev: boolean) => boolean)) => void;
     isLoadingExpanded: boolean;
     setLoadingExpanded: (expanded: boolean | ((prev: boolean) => boolean)) => void;
-    setLoadingTask: (taskOrFn: LoadingTask | null | ((prev: LoadingTask | null) => LoadingTask | null)) => void;
-    setOnBeforeSet: (fn: ((task: LoadingTask) => boolean | void) | null) => void;
+    setLoadingTask: SetLoadingTask;
+    setOnBeforeSet: (fn: OnBeforeSet | null) => void;
     renameVideo: (videoId: string, newName: string) => void;
     renameAlbum: (albumId: string, newName: string) => void;
     updateMultipleVideoProgress: (videoIds: string[], sec: number) => void;
@@ -103,6 +113,8 @@ export interface MediaContextType {
     unhideMultipleAlbums: (albumIds: string[]) => Promise<void>;
     fetchHiddenMedia: () => Promise<{ albums: Album[]; videos: VideoMedia[] }>;
     searchMedia: (query: string) => VideoMedia[];
+    hasNewClips: boolean;
+    markClipsAsViewed: () => void;
     getUnfilteredVideosForAlbum: (albumId: string) => VideoMedia[];
     getVideoById: (videoId: string) => VideoMedia | null;
     deleteMultipleVideos: (videoIds: string[]) => Promise<boolean>;
@@ -115,13 +127,31 @@ export interface MediaContextType {
     setThumbnailPriorityAlbum: (albumId: string | null) => void;
     recentlyPlayedCount: number;
     recentlyPlayedVideos: VideoMedia[];
+    sessionClips: Record<string, SessionClip>;
+    registerSessionClip: (
+        video: VideoMedia,
+        segments: { start: number; end: number }[],
+        options: ExportOptions,
+        clipSourceUri: string,
+    ) => void;
+    clearVideoClipSourceUri: (videoId: string) => void;
+    addPendingClipAssignment: (outputUri: string, sourceUri: string) => void;
+    performExport: (
+        inputUri: string,
+        segments: { start: number; end: number }[],
+        options: ExportOptions,
+        labels: ExportLabels,
+        onSuccess?: (outPathStr: string) => void,
+    ) => Promise<void>;
+    executeReexport: (clip: SessionClip, options: ExportOptions) => Promise<void>;
+    exportQueue: ExportQueueItem[];
 }
 
 const MediaContext = createContext<MediaContextType | null>(null);
 
 export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
     const [albums, setAlbums] = useState<Album[]>([]);
-    const { settings, loading: settingsLoading } = useSettings();
+    const { loading: settingsLoading, settingsRef } = useSettings();
 
     const {
         loadingTask,
@@ -148,20 +178,24 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
     // Refs declared before useMediaSort so they can be passed in
     const albumsRef = React.useRef<Record<string, Album>>({}); // Dictionary for O(1) lookup
     const [allAlbumsVideos, setAllAlbumsVideos] = useState<Record<string, VideoMedia[]>>({}); // All videos per album, sorted
+    const [sessionClips, setSessionClips] = useState<Record<string, SessionClip>>({});
+    const [hasNewClips, setHasNewClips] = useState(false);
 
-    const cleanName = React.useCallback(
-        (name: string) => {
-            if (!settings.nameReplacements || settings.nameReplacements.length === 0) return name;
-            let cleaned = name;
-            settings.nameReplacements.forEach((rule) => {
-                if (rule.active && rule.find) {
-                    cleaned = cleaned.split(rule.find).join(rule.replace || "");
-                }
-            });
-            return cleaned;
-        },
-        [settings.nameReplacements],
-    );
+    const markClipsAsViewed = useCallback(() => {
+        setHasNewClips(false);
+    }, []);
+
+    const cleanName = React.useCallback((name: string) => {
+        const currentSettings = settingsRef.current;
+        if (!currentSettings.nameReplacements || currentSettings.nameReplacements.length === 0) return name;
+        let cleaned = name;
+        currentSettings.nameReplacements.forEach((rule) => {
+            if (rule.active && rule.find) {
+                cleaned = cleaned.split(rule.find).join(rule.replace || "");
+            }
+        });
+        return cleaned;
+    }, []);
 
     const mapVideoMetadata = useCallback(
         (v: any): VideoMedia => {
@@ -178,6 +212,8 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                 uri: v.uri,
                 markers: v.markers ? (typeof v.markers === "string" ? JSON.parse(v.markers) : v.markers) : undefined,
                 lastOpenedTime: v.lastOpenedTime || 0,
+                clipSourceUri: v.clipSourceUri,
+                isNewOverride: !!v.isNewOverride,
             };
         },
         [cleanName],
@@ -217,6 +253,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
         setThumbnailPriorityAlbum,
         generateThumbnails,
         regenerateAllThumbnails,
+        regenerateVideoThumbnails,
         clearThumbnailCache,
         cancelThumbnailSession,
         hasActiveThumbnailWork,
@@ -278,13 +315,57 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
 
     const recentlyPlayedVideos = useMemo(() => {
         const allVids = Object.values(allAlbumsVideos).flat();
-        return allVids
-            .filter((v) => (v.lastOpenedTime || 0) > 0)
-            .sort((a, b) => (b.lastOpenedTime || 0) - (a.lastOpenedTime || 0))
-            .slice(0, 200);
-    }, [allAlbumsVideos]);
+        const selectedPrefixes = selectedVideoPrefixFilters["recently-played"] || [];
+
+        let filtered = allVids.filter((v) => (v.lastOpenedTime || 0) > 0);
+
+        if (selectedPrefixes.length > 0) {
+            filtered = filtered.filter((v) => v.prefix && selectedPrefixes.includes(v.prefix));
+        }
+
+        return filtered.sort((a, b) => (b.lastOpenedTime || 0) - (a.lastOpenedTime || 0));
+    }, [allAlbumsVideos, selectedVideoPrefixFilters]);
 
     const recentlyPlayedCount = recentlyPlayedVideos.length;
+
+    const registerSessionClip = useCallback(
+        (video: VideoMedia, segments: { start: number; end: number }[], options: ExportOptions, clipSourceUri: string) => {
+            const videoWithMetadata: SessionClip = {
+                ...video,
+                clipSourceUri,
+                segments,
+                exportOptions: options,
+                sessionCreatedAt: Date.now(),
+            };
+
+            setSessionClips((prev) => ({
+                ...prev,
+                [videoWithMetadata.uri]: videoWithMetadata,
+            }));
+            setHasNewClips(true);
+        },
+        [],
+    );
+
+    const clearVideoClipSourceUri = useCallback((videoId: string) => {
+        setAllAlbumsVideos((prev) => {
+            const next = { ...prev };
+            for (const albumId in next) {
+                const idx = next[albumId].findIndex((v) => v.id === videoId);
+                if (idx !== -1) {
+                    next[albumId] = [...next[albumId]];
+                    next[albumId][idx] = { ...next[albumId][idx], clipSourceUri: undefined };
+                    break;
+                }
+            }
+            return next;
+        });
+        clearVideoClipSourceUriDb(videoId);
+    }, []);
+
+    const addPendingClipAssignment = useCallback((outputUri: string, sourceUri: string) => {
+        addPendingClipAssignmentDb(outputUri, sourceUri);
+    }, []);
 
     const syncDatabaseWithStorage = async () => {
         try {
@@ -306,6 +387,19 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                     // Delete from DB
                     deleteMultipleVideosDb([video.id]);
 
+                    // Clean up floating player video if it was deleted
+                    try {
+                        const raw = getSettingDb("floatingPlayerVideo");
+                        if (raw) {
+                            const lastPlayed = JSON.parse(raw);
+                            if (lastPlayed?.id === video.id) {
+                                saveSettingDb("floatingPlayerVideo", "");
+                            }
+                        }
+                    } catch (e) {
+                        console.log("[Media] Failed to clean up lastPlayedVideo", e);
+                    }
+
                     affectedAlbums.add(video.albumId);
                     deletedVideosCount++;
                 }
@@ -320,9 +414,9 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                         if (albumVids.length === 0) {
                             delete next[albumId];
                         } else {
-                            next[albumId] = albumVids.map(mapVideoMetadata).sort((a, b) => 
-                                compareByVideoSort(a, b, getActiveVideoSort(albumsRef.current[albumId] || null))
-                            );
+                            next[albumId] = albumVids
+                                .map(mapVideoMetadata)
+                                .sort((a, b) => compareByVideoSort(a, b, getActiveVideoSort(albumsRef.current[albumId] || null)));
                         }
                     }
                     return next;
@@ -341,7 +435,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             const nextAlbums: Album[] = [];
             let changed = false;
             let albumUpdatesCount = 0;
-            
+
             for (const album of currentAlbums) {
                 const albumVids = getVideosForAlbumDb(album.id);
                 if (albumVids.length === 0) {
@@ -362,7 +456,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
 
                 if (needsMetadataUpdate) {
                     recomputePrefixOptions(album.id, albumVids);
-                    const newThumb = getAlbumThumbnailForVideos(albumVids);
+                    const newThumb = getAlbumThumbnailForVideos(albumVids.map(mapVideoMetadata), getActiveVideoSort(album));
                     if (newThumb !== album.thumbnail) {
                         updateAlbumThumbnailDb(album.id, newThumb || "");
                         albumUpdatesCount++;
@@ -383,8 +477,6 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                 setAlbums(nextAlbums);
             }
 
-
-
             if (deletedVideosCount > 0 || albumUpdatesCount > 0) {
                 console.log(
                     `[Media] Cleaned up ${deletedVideosCount} ghost records and updated ${albumUpdatesCount} album thumbnails.`,
@@ -394,7 +486,6 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             console.error("[Media] Fast sync failed:", e);
         }
     };
-
 
     const resetEverything = async () => {
         if (isResettingDatabaseRef.current || isRegeneratingThumbnailsRef.current || isSyncingRef.current) return;
@@ -439,7 +530,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             setIsResettingDatabase(false);
             isSyncingRef.current = false;
             setIsSyncing(false);
-            setLoadingTask(null);
+            setLoadingTask(null, TASK_IDS.LIBRARY_RESET);
         }
     };
 
@@ -460,18 +551,27 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                 const savedGlobalVideoSort = getSettingDb("globalVideoSort");
                 initializeSort(savedAlbumSort, savedGlobalVideoSort);
 
-                const cachedAlbums = getAlbumsDb();
+                const cachedVisibleAlbums = getAlbumsDb();
+                const cachedHiddenAlbums = getHiddenAlbumsDb();
+                const cachedAlbums = [...cachedVisibleAlbums, ...cachedHiddenAlbums];
 
                 if (cachedAlbums.length > 0) {
-                    const sortedAlbums = cachedAlbums
+                    const sortedAlbums = cachedVisibleAlbums
                         .map((a: any) => ({
                             ...a,
                             title: cleanName(a.albumName),
                         }))
                         .sort((a: any, b: any) => compareByAlbumSort(a, b));
 
+                    const hiddenAlbums = cachedHiddenAlbums.map((a: any) => ({
+                        ...a,
+                        title: cleanName(a.albumName),
+                    }));
+
                     setAlbums(sortedAlbums);
-                    sortedAlbums.forEach((a) => {
+
+                    // Populate albumsRef with ALL albums (visible and hidden)
+                    [...sortedAlbums, ...hiddenAlbums].forEach((a) => {
                         albumsRef.current[a.id] = a;
                     });
 
@@ -551,7 +651,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                 if (lastSync !== 0 && newestTimestamp !== 0 && newestTimestamp <= lastSync) {
                     console.log("[Media] Library is clean (Smart Sync). Skipping delta scan.");
                     await syncDatabaseWithStorage();
-                    setLoadingTask(null);
+                    setLoadingTask((prev) => (prev?.id === TASK_IDS.MEDIA_SYNC ? null : prev));
                     isSyncingRef.current = false;
                     setIsSyncing(false);
                     return;
@@ -560,11 +660,19 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                 console.log("[Media] Library changed. Starting delta scan...");
                 // Switch to visible now that we know there are actual changes
                 const detailText = lastSync === 0 ? "Scanning library..." : "Processing changes...";
-                setLoadingTask({ id: TASK_IDS.MEDIA_SYNC, label: syncLabel, detail: detailText, importance: "SHOW_POPUP" });
+                setLoadingTask({
+                    id: TASK_IDS.MEDIA_SYNC,
+                    label: syncLabel,
+                    detail: detailText,
+                    importance: lastSync === 0 ? "SHOW_POPUP" : undefined,
+                });
                 await syncDatabaseWithStorage();
 
                 const playbackData = getAllPlaybackDataDb();
                 const playbackMap = new Map(playbackData.map((p: any) => [p.video_id, p.last_played_sec]));
+
+                const pendingAssignments = getAllPendingClipAssignmentsDb();
+                const assignmentMap = new Map(pendingAssignments.map((a) => [a.outputUri, a.sourceUri]));
 
                 // 2. Fetch all albums upfront — needed for title lookup and parallelism
                 const fetchedAlbums = await MediaLibrary.getAlbumsAsync();
@@ -656,7 +764,21 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                                     if (pending.data.lastOpenedTime !== undefined) {
                                         video.lastOpenedTime = pending.data.lastOpenedTime;
                                     }
+                                    if (pending.data.isNewOverride !== undefined) {
+                                        video.isNewOverride = pending.data.isNewOverride;
+                                    }
                                     deletePendingMediaDataDb(videoUri);
+                                }
+
+                                // Check for pending clip source assignment
+                                if (assignmentMap.has(videoUri)) {
+                                    video.clipSourceUri = assignmentMap.get(videoUri);
+                                    addLogDb(
+                                        "INFO",
+                                        "Apply Pending Assignment",
+                                        `Applying source ${video.clipSourceUri} to ${video.filename}`,
+                                    );
+                                    deletePendingClipAssignmentDb(videoUri);
                                 }
 
                                 // Generate/Fetch thumbnail ONLY if not hidden
@@ -700,10 +822,13 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                                     albumName: albumTitleMap.get(a.id)!,
                                     assetCount: sorted.length,
                                     uri: albumUri,
-                                    thumbnail: getAlbumThumbnailForVideos(sorted),
+                                    thumbnail: getAlbumThumbnailForVideos(sorted, getActiveVideoSort(albumsRef.current[a.id])),
                                     lastModified: Math.max(...sorted.map((v) => v.modificationTime || 0)),
                                     videoSortSettingScope: albumsRef.current[a.id]?.videoSortSettingScope || DEFAULT_SORT_SCOPE,
                                     videoSortType: albumsRef.current[a.id]?.videoSortType,
+                                    prefixOptions: albumsRef.current[a.id]?.prefixOptions,
+                                    selectedPrefixOptions: albumsRef.current[a.id]?.selectedPrefixOptions,
+                                    isHidden: albumsRef.current[a.id]?.isHidden,
                                 };
 
                                 // Apply pending album data
@@ -800,7 +925,10 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             } finally {
                 isSyncingRef.current = false;
                 setIsSyncing(false);
-                if (!hasActiveThumbnailWork()) setLoadingTask(null);
+                clearOldPendingClipAssignmentsDb();
+                if (!hasActiveThumbnailWork()) {
+                    setLoadingTask(null, TASK_IDS.MEDIA_SYNC);
+                }
             }
         },
         [
@@ -855,6 +983,14 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
         await loadDataFromDB();
     };
 
+    const { exportQueue, performExport, executeReexport } = useMediaExport({
+        setLoadingTask,
+        fetchAlbums,
+        registerSessionClip,
+        allAlbumsVideos,
+        addPendingClipAssignment,
+    });
+
     const requestPermissionAndFetch = useCallback(
         () => internalRequestPermissionAndFetch(performSmartSync),
         [internalRequestPermissionAndFetch, performSmartSync],
@@ -873,7 +1009,9 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
 
                 // 2. Permission Guard for MediaLibrary scans
                 if (permissionResponse.status !== "granted") {
-                    if (!signal.aborted) setLoadingTask(null);
+                    if (!signal.aborted) {
+                        setLoadingTask(null, TASK_IDS.LIBRARY_LOAD);
+                    }
                     return;
                 }
 
@@ -887,7 +1025,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                 if (!signal.aborted) console.error("[Media] Initial load failed:", e);
             } finally {
                 if (!signal.aborted) {
-                    setLoadingTask(null);
+                    setLoadingTask(null, TASK_IDS.LIBRARY_LOAD);
                 }
             }
         };
@@ -915,6 +1053,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             performSmartSync,
             clearThumbnailCache,
             regenerateAllThumbnails,
+            regenerateVideoThumbnails,
             syncDatabaseWithStorage,
             updateVideoProgress,
             updateVideoMarkers,
@@ -965,6 +1104,15 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             setThumbnailPriorityAlbum,
             recentlyPlayedCount,
             recentlyPlayedVideos,
+            sessionClips,
+            registerSessionClip,
+            clearVideoClipSourceUri,
+            addPendingClipAssignment,
+            performExport,
+            executeReexport,
+            exportQueue,
+            hasNewClips,
+            markClipsAsViewed,
         }),
         [
             albums,
@@ -982,6 +1130,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             performSmartSync,
             clearThumbnailCache,
             regenerateAllThumbnails,
+            regenerateVideoThumbnails,
             syncDatabaseWithStorage,
             updateVideoProgress,
             updateVideoMarkers,
@@ -1031,6 +1180,15 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             setThumbnailPriorityAlbum,
             recentlyPlayedCount,
             recentlyPlayedVideos,
+            sessionClips,
+            registerSessionClip,
+            clearVideoClipSourceUri,
+            addPendingClipAssignment,
+            performExport,
+            executeReexport,
+            exportQueue,
+            hasNewClips,
+            markClipsAsViewed,
         ],
     );
 

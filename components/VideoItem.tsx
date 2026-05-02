@@ -90,6 +90,7 @@ export const VideoItem = React.memo(
                     onLongPress={() => {
                         toggleSelection(item.id);
                     }}
+                    delayLongPress={250}
                 >
                     <View className={`w-full h-full overflow-hidden ${isSelected ? "rounded-lg" : ""}`}>
                         {thumb ? (
@@ -103,7 +104,7 @@ export const VideoItem = React.memo(
                         {!isSelectionMode && (
                             <View className="absolute top-2 left-0 right-0 px-2 flex-row items-center">
                                 <VideoBadges title={item.title} />
-                                {item.lastPlayedSec === -1 && (
+                                {(item.isNewOverride || item.lastPlayedSec === -1) && (
                                     <View
                                         pointerEvents="none"
                                         className="ml-auto bg-red-600/70 h-[18px] px-2 rounded-full justify-center items-center backdrop-blur-md border border-white/15"

@@ -23,11 +23,17 @@ const SPRING = { damping: 80, stiffness: 1000 };
 
 type TuckDir = "left" | "right" | null;
 
-function getNearestCorner(cardCX: number, cardCY: number, screenW: number, screenH: number, safeTop: number, safeBottom: number) {
-    const topY = CORNER_INSET + safeTop;
-    const botY = screenH - PLAYER_H - CORNER_INSET - safeBottom - TAB_BAR_H;
-    const leftX = CORNER_INSET;
-    const rightX = screenW - PLAYER_W - CORNER_INSET;
+function getNearestCorner(
+    cardCX: number,
+    cardCY: number,
+    screenW: number,
+    screenH: number,
+    insets: { top: number; bottom: number; left: number; right: number },
+) {
+    const topY = CORNER_INSET + insets.top;
+    const botY = screenH - PLAYER_H - CORNER_INSET - insets.bottom - TAB_BAR_H;
+    const leftX = CORNER_INSET + insets.left;
+    const rightX = screenW - PLAYER_W - CORNER_INSET - insets.right;
 
     const corners = [
         { x: leftX, y: topY },
@@ -81,7 +87,7 @@ export const FloatingPlayer: React.FC = () => {
     const displayTitle = liveVideo?.title || "Video Player";
 
     // ── Initial position: bottom-right corner ─────────────────────────────
-    const initX = screenW - PLAYER_W - CORNER_INSET;
+    const initX = screenW - PLAYER_W - CORNER_INSET - insets.right;
     const initY = screenH - PLAYER_H - CORNER_INSET - insets.bottom - TAB_BAR_H;
 
     const posX = useSharedValue(initX);
@@ -163,10 +169,10 @@ export const FloatingPlayer: React.FC = () => {
                 setTuckedDir("left");
             } else if (cx > screenW - TUCK_ZONE) {
                 // Tuck right
-                posX.value = withSpring(screenW - TAB_W, SPRING);
+                posX.value = withSpring(screenW - TAB_W - insets.right, SPRING);
                 setTuckedDir("right");
             } else {
-                const corner = getNearestCorner(cx, cy, screenW, screenH, insets.top, insets.bottom);
+                const corner = getNearestCorner(cx, cy, screenW, screenH, insets);
                 posX.value = withSpring(corner.x, SPRING);
                 posY.value = withSpring(corner.y, SPRING);
                 setTuckedDir(null);
@@ -180,14 +186,37 @@ export const FloatingPlayer: React.FC = () => {
         const botY = screenH - PLAYER_H - CORNER_INSET - insets.bottom - TAB_BAR_H;
 
         if (tuckedDir === "left") {
-            posX.value = withSpring(CORNER_INSET, SPRING);
+            posX.value = withSpring(CORNER_INSET + insets.left, SPRING);
             posY.value = withSpring(cy < midY ? topY : botY, SPRING);
         } else {
-            posX.value = withSpring(screenW - PLAYER_W - CORNER_INSET, SPRING);
+            posX.value = withSpring(screenW - PLAYER_W - CORNER_INSET - insets.right, SPRING);
             posY.value = withSpring(cy < midY ? topY : botY, SPRING);
         }
         setTuckedDir(null);
     };
+
+    // Keep floater within safe bounds when screen size or insets change
+    useEffect(() => {
+        if (!isVisible) return;
+
+        // Use a small delay to ensure layout/rotation has settled
+        const timer = setTimeout(() => {
+            const cx = posX.value + PLAYER_W / 2;
+            const cy = posY.value + PLAYER_H / 2;
+
+            if (tuckedDir === "left") {
+                posX.value = withSpring(-(PLAYER_W - TAB_W) + insets.left, SPRING);
+            } else if (tuckedDir === "right") {
+                posX.value = withSpring(screenW - TAB_W - insets.right, SPRING);
+            } else {
+                const corner = getNearestCorner(cx, cy, screenW, screenH, insets);
+                posX.value = withSpring(corner.x, SPRING);
+                posY.value = withSpring(corner.y, SPRING);
+            }
+        }, 60);
+
+        return () => clearTimeout(timer);
+    }, [isVisible, screenW, screenH, insets.top, insets.bottom, insets.left, insets.right, tuckedDir]);
 
     const animStyle = useAnimatedStyle(() => ({
         transform: [{ translateX: posX.value }, { translateY: posY.value }],

@@ -88,7 +88,10 @@ export const CorePlayer = forwardRef<CorePlayerRef, CorePlayerProps>((props, ref
 
     useEffect(() => {
         isInitialSeekDone.current = false;
-        const startPos = initialTime !== undefined ? Math.max(0, initialTime) : Math.max(0, video?.lastPlayedSec || 0);
+        let startPos = initialTime !== undefined ? Math.max(0, initialTime) : Math.max(0, video?.lastPlayedSec || 0);
+        if (video?.duration > 0 && startPos >= video.duration - 0.1) {
+            startPos = 0;
+        }
         lastSaveSecRef.current = startPos;
         currentTimeRef.current = startPos;
         loadTimestampRef.current = Date.now();
@@ -128,7 +131,10 @@ export const CorePlayer = forwardRef<CorePlayerRef, CorePlayerProps>((props, ref
     const handleLoad = useCallback(
         (data: OnLoadData) => {
             durationRef.current = data.duration;
-            const startPos = initialTime !== undefined ? initialTime : video?.lastPlayedSec || 0;
+            let startPos = initialTime !== undefined ? initialTime : video?.lastPlayedSec || 0;
+            if (data.duration > 0 && startPos >= data.duration - 0.1) {
+                startPos = 0;
+            }
             if (!isInitialSeekDone.current && startPos > 0) {
                 lastSeekTimestampRef.current = Date.now(); // suppress stale t=0 progress events
                 currentTimeRef.current = startPos;
@@ -193,6 +199,7 @@ export const CorePlayer = forwardRef<CorePlayerRef, CorePlayerProps>((props, ref
             progressUpdateInterval={60}
             playInBackground={false}
             playWhenInactive={false}
+            preventsDisplaySleepDuringVideoPlayback={!paused}
         />
     );
 });

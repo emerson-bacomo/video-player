@@ -1,17 +1,16 @@
 import { Header } from "@/components/Header";
-import { Icon } from "@/components/Icon";
 import { ThemedSafeAreaView } from "@/components/Themed";
 import { VpcPreview } from "@/components/VpcPreview";
 import { useSettings } from "@/hooks/useSettings";
-import { normalizeClipDestination } from "@/utils/clipDestination";
 import { exportConfig, generateConfigData } from "@/utils/configManager";
 import { getSettingDb, saveSettingDb } from "@/utils/db";
-import * as FileSystem from "expo-file-system/legacy";
 import { router, Stack } from "expo-router";
-import { Database, FolderOpen, X } from "lucide-react-native";
-import React, { useMemo, useState } from "react";
+import { Database } from "lucide-react-native";
+import React, { useEffect, useMemo, useState } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import { toast } from "sonner-native";
+
+import { DestinationPicker } from "@/components/DestinationPicker";
 
 export default function ExportVpcPreviewScreen() {
     const { settings } = useSettings();
@@ -20,21 +19,24 @@ export default function ExportVpcPreviewScreen() {
     const [displayPath, setDisplayPath] = useState<string | null>(getSettingDb("lastExportDirectory"));
 
     const configData = useMemo(() => generateConfigData(settings), [settings]);
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-    const pickDirectory = async () => {
-        try {
-            const result = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
-            if (result.granted) {
-                const uri = result.directoryUri;
-                const normalized = normalizeClipDestination(uri) ?? uri;
-                setDirectoryUri(uri);
-                setDisplayPath(normalized);
-                saveSettingDb("lastExportDirectoryUri", uri);
-                saveSettingDb("lastExportDirectory", normalized);
-            }
-        } catch (e) {
-            console.error("Failed to pick directory", e);
+    useEffect(() => {
+        if (configData) {
+            const ids = new Set<string>();
+            ids.add("settings");
+            configData.themes.forEach((t) => ids.add(`theme:${t.name}`));
+            configData.videos.forEach((v) => ids.add(`video:${v.uri}`));
+            configData.albums.forEach((a) => ids.add(`album:${a.uri}`));
+            setSelectedIds(ids);
         }
+    }, [configData]);
+
+    const handleToggleId = (id: string) => {
+        const next = new Set(selectedIds);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        setSelectedIds(next);
     };
 
     const handleStartExport = async () => {
@@ -44,7 +46,15 @@ export default function ExportVpcPreviewScreen() {
         }
         setExporting(true);
         try {
-            const res = await exportConfig(settings);
+            // Filter configData based on selection
+            const filteredConfig = {
+                settings: selectedIds.has("settings") ? configData.settings : {},
+                themes: configData.themes.filter((t) => selectedIds.has(`theme:${t.name}`)),
+                videos: configData.videos.filter((v) => selectedIds.has(`video:${v.uri}`)),
+                albums: configData.albums.filter((a) => selectedIds.has(`album:${a.uri}`)),
+            };
+
+            const res = await exportConfig(settings, filteredConfig);
             if (res.success) {
                 toast.success("Configuration exported successfully!");
                 router.back();
@@ -63,8 +73,8 @@ export default function ExportVpcPreviewScreen() {
                 <Text className="text-blue-400 font-bold">Export Summary</Text>
             </View>
             <Text className="text-blue-100/70 text-sm leading-relaxed">
-                Your export will include all current settings, theme presets, media metadata (last played, hidden
-                status), and custom markers. This file (.vpc) can be used to restore your library state later.
+                Your export will include all current settings, theme presets, media metadata (last played, hidden status), and
+                custom markers. This file (.vpc) can be used to restore your library state later.
             </Text>
         </View>
     );
@@ -94,33 +104,25 @@ export default function ExportVpcPreviewScreen() {
                 </Header.Actions>
             </Header>
 
-            {/* Top Bar - Directory Picker */}
-            <View className="px-4 py-3 bg-zinc-900/50 border-b border-border flex-row items-center gap-3">
-                <View className="flex-1 flex-row items-center bg-zinc-800/50 rounded-xl border border-white/5 overflow-hidden">
-                    <TouchableOpacity onPress={pickDirectory} className="flex-1 flex-row items-center px-4 py-3 gap-3">
-                        <FolderOpen size={20} color="#a1a1aa" />
-                        <Text className="flex-1 text-zinc-100 text-sm" numberOfLines={1}>
-                            {displayPath || "Select Export Directory..."}
-                        </Text>
-                    </TouchableOpacity>
-
-                    {directoryUri && (
-                        <TouchableOpacity
-                            onPress={() => {
-                                setDirectoryUri(null);
-                                setDisplayPath(null);
-                                saveSettingDb("lastExportDirectoryUri", "");
-                                saveSettingDb("lastExportDirectory", "");
-                            }}
-                            className="px-4 py-3"
-                        >
-                            <Icon icon={X} size={18} className="text-error" />
-                        </TouchableOpacity>
-                    )}
-                </View>
+            <View className="px-4 py-3 bg-zinc-900/50 border-b border-border">
+                <DestinationPicker
+                    value={displayPath || ""}
+                    placeholder="Select Export Directory..."
+                    onChange={(uri, path) => {
+                        setDirectoryUri(uri);
+                        setDisplayPath(path);
+                        saveSettingDb("lastExportDirectoryUri", uri);
+                        saveSettingDb("lastExportDirectory", path);
+                    }}
+                />
             </View>
 
-            <VpcPreview configData={configData} ListHeaderComponent={headerComponent} />
+            <VpcPreview
+                configData={configData}
+                ListHeaderComponent={headerComponent}
+                selectedIds={selectedIds}
+                onToggleId={handleToggleId}
+            />
         </ThemedSafeAreaView>
     );
 }

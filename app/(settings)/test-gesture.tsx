@@ -4,6 +4,7 @@ import { BasePlayerHeader } from "@/components/PlayerHeader";
 import { PlayerOrientationButton } from "@/components/PlayerOrientationButton";
 import { ThemedKeyboardAvoidingView } from "@/components/ThemedKeyboardAvoidingView";
 import { useSettings } from "@/hooks/useSettings";
+import { useOrientationLock } from "@/hooks/useOrientationLock";
 import React, { useRef, useState } from "react";
 import { Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -11,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 export default function TestGestureScreen() {
     const { settings, updateSettings } = useSettings();
     const insets = useSafeAreaInsets();
+    useOrientationLock();
 
     // States for Mock Player
     const [currentTime, setCurrentTime] = useState(36000); // Start at 10h to avoid 0 limit
@@ -22,8 +24,11 @@ export default function TestGestureScreen() {
     // Refs
     const panStartTime = useRef<number>(0);
     const playerRef = useRef<any>({
-        seek: () => {
-            // Mock seek for testing gestures
+        get currentTime() {
+            return currentTime;
+        },
+        seek: (time: number) => {
+            setCurrentTime(time);
         },
     });
     const controlsTimeout = useRef<any>(null);
@@ -45,8 +50,6 @@ export default function TestGestureScreen() {
                     <PlayerGestureDetector
                         showControls={true}
                         setShowControls={() => {}}
-                        currentTime={currentTime}
-                        setCurrentTime={setCurrentTime}
                         duration={duration}
                         paused={paused}
                         setPaused={setPaused}
@@ -58,6 +61,7 @@ export default function TestGestureScreen() {
                         controlsTimeout={controlsTimeout}
                         skipTimeout={skipTimeout}
                         panStartTime={panStartTime}
+                        setSeekingLock={() => {}}
                     >
                         <View className="flex-1 items-center justify-center">
                             <View className="p-8 border border-white/10 rounded-3xl bg-white/5 items-center">

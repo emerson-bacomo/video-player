@@ -1,19 +1,21 @@
 import { useTheme } from "@/context/ThemeContext";
 import { cn } from "@/lib/utils";
-import { VideoMedia } from "@/types/useMedia";
+import { VideoMedia, ExportOptions, TransitionStyle } from "@/types/useMedia";
 import { normalizeClipDestination } from "@/utils/clipDestination";
 import { secondsToHhmmss } from "@/utils/secondsToHhmmss";
-import { Directory } from "expo-file-system";
 import * as FileSystem from "expo-file-system/legacy";
-import { FolderOpen, Scissors, Volume2, VolumeX, X } from "lucide-react-native";
+import { Scissors, Volume2, VolumeX } from "lucide-react-native";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { toast } from "sonner-native";
 import { Icon } from "./Icon";
-import { SelectDropdown } from "./SelectDropdown";
 import { ThemedBottomSheet, ThemedBottomSheetScrollView } from "./ThemedBottomSheet";
+import Slider from "@react-native-community/slider";
+import { DEFAULT_EXPORT_OPTIONS } from "@/constants/defaults";
+import { useSettings } from "@/hooks/useSettings";
 
-// Types
+import { DestinationPicker } from "./DestinationPicker";
+import { SelectDropdown } from "./SelectDropdown";
 
 interface ClipExportModalProps {
     visible: boolean;
@@ -22,18 +24,8 @@ interface ClipExportModalProps {
     segments: { start: number; end: number }[];
     defaultName: string;
     onExport: (options: ExportOptions) => void;
-    settings: any;
-    updateSettings?: (s: any) => Promise<void>;
-}
-
-export interface ExportOptions {
-    name: string;
-    quality: "high" | "balanced" | "low" | "custom";
-    resolution: string;
-    format: "mp4" | "gif" | "mkv" | "mov" | "avi";
-    removeAudio: boolean;
-    removeMarkers: boolean;
-    crf?: number;
+    initialOptions?: Partial<ExportOptions>;
+    isReexport?: boolean;
 }
 
 // Shared row height for all pickers / inputs
@@ -82,6 +74,14 @@ const FORMAT_OPTIONS: { label: string; value: ExportOptions["format"]; desc: str
     { label: "MKV", value: "mkv", desc: "Matroska container" },
     { label: "AVI", value: "avi", desc: "Legacy Windows" },
     { label: "GIF", value: "gif", desc: "Animated image" },
+];
+
+const TRANSITION_OPTIONS: { label: string; value: TransitionStyle }[] = [
+    { label: "Crossfade", value: "crossfade" },
+    { label: "Slide (Left)", value: "slide-left" },
+    { label: "Slide (Right)", value: "slide-right" },
+    { label: "Smear (Left)", value: "smear-left" },
+    { label: "Smear (Right)", value: "smear-right" },
 ];
 
 // Sub-components
@@ -143,22 +143,109 @@ export const ClipExportModal: React.FC<ClipExportModalProps> = ({
     segments,
     defaultName,
     onExport,
-    settings,
-    updateSettings,
+    initialOptions,
+    isReexport,
 }) => {
     const { colors } = useTheme();
+    const { settings, updateSettings } = useSettings();
 
     const [name, setName] = useState(defaultName);
-    const [quality, setQuality] = useState<ExportOptions["quality"]>("balanced");
-    const [customCRF, setCustomCRF] = useState(23);
-    const [resolution, setResolution] = useState("original");
-    const [format, setFormat] = useState<ExportOptions["format"]>("mp4");
-    const [removeAudio, setRemoveAudio] = useState(false);
-    const [removeMarkers, setRemoveMarkers] = useState(false);
+
+    // Load initial state from: 1. initialOptions, 2. settings.lastExportOptions, 3. defaults
+    const getInitialValue = <T,>(key: keyof ExportOptions, fallback: T): T => {
+        if (initialOptions && initialOptions[key] !== undefined) return initialOptions[key] as T;
+
+        const savedOptions = settings.lastExportOptions;
+        if (savedOptions && savedOptions[key] !== undefined) {
+            // Resolution check: only apply if valid for this video
+            if (key === "resolution") {
+                const resValue = savedOptions[key] as string;
+                if (resValue === "original") return resValue as T;
+                const p = parseInt(resValue);
+                const shorter = Math.min(video.width, video.height);
+                if (!isNaN(p) && p <= shorter) return resValue as T;
+                return "original" as T;
+            }
+            return savedOptions[key] as T;
+        }
+        return fallback;
+    };
+
+    const [quality, setQuality] = useState<ExportOptions["quality"]>(getInitialValue("quality", DEFAULT_EXPORT_OPTIONS.quality));
+    const [customCRF, setCustomCRF] = useState(getInitialValue("crf", DEFAULT_EXPORT_OPTIONS.crf));
+    const [resolution, setResolution] = useState(getInitialValue("resolution", DEFAULT_EXPORT_OPTIONS.resolution));
+    const [format, setFormat] = useState<ExportOptions["format"]>(getInitialValue("format", DEFAULT_EXPORT_OPTIONS.format));
+    const [preset, setPreset] = useState<string>(getInitialValue("preset", DEFAULT_EXPORT_OPTIONS.preset));
+    const [removeAudio, setRemoveAudio] = useState(getInitialValue("removeAudio", DEFAULT_EXPORT_OPTIONS.removeAudio));
+    const [removeMarkers, setRemoveMarkers] = useState(getInitialValue("removeMarkers", DEFAULT_EXPORT_OPTIONS.removeMarkers));
+
     // Local destination — starts from settings but does NOT write back unless markAsDefault is checked
     const [destination, setDestination] = useState(settings.clipDestination || "");
     const [markAsDefault, setMarkAsDefault] = useState(true);
     const [isDestinationValid, setIsDestinationValid] = useState(true);
+
+    const [useTransition, setUseTransition] = useState(segments.length > 1 ? getInitialValue("useTransition", true) : false);
+    const [transitionDuration, setTransitionDuration] = useState(() => {
+        const val = getInitialValue("transitionDuration", 1);
+        return val > 0 ? val : 1;
+    });
+    const [transitionStyle, setTransitionStyle] = useState<TransitionStyle>(getInitialValue("transitionStyle", "smear-left"));
+
+    // Persist on change globally
+    const persistOptions = useCallback(
+        (updated: Partial<ExportOptions>) => {
+            const current: ExportOptions = {
+                name,
+                quality,
+                resolution,
+                format,
+                removeAudio,
+                removeMarkers,
+                crf: customCRF,
+                preset,
+                useTransition,
+                transitionDuration: useTransition ? transitionDuration : 0,
+                transitionStyle,
+                ...updated,
+            };
+            if (updateSettings) {
+                updateSettings({ lastExportOptions: current });
+            }
+        },
+        [
+            name,
+            quality,
+            resolution,
+            format,
+            removeAudio,
+            removeMarkers,
+            customCRF,
+            preset,
+            useTransition,
+            transitionDuration,
+            transitionStyle,
+            updateSettings,
+        ],
+    );
+
+    // Sync state if video changes or modal opens with new initialOptions
+    useEffect(() => {
+        if (visible) {
+            setQuality(getInitialValue("quality", DEFAULT_EXPORT_OPTIONS.quality));
+            setCustomCRF(getInitialValue("crf", DEFAULT_EXPORT_OPTIONS.crf));
+            setResolution(getInitialValue("resolution", DEFAULT_EXPORT_OPTIONS.resolution));
+            setFormat(getInitialValue("format", DEFAULT_EXPORT_OPTIONS.format));
+            setPreset(getInitialValue("preset", DEFAULT_EXPORT_OPTIONS.preset));
+            setRemoveAudio(getInitialValue("removeAudio", DEFAULT_EXPORT_OPTIONS.removeAudio));
+            setRemoveMarkers(getInitialValue("removeMarkers", DEFAULT_EXPORT_OPTIONS.removeMarkers));
+
+            // Default transitions to last saved state if multiple segments
+            setUseTransition(segments.length > 1 ? getInitialValue("useTransition", DEFAULT_EXPORT_OPTIONS.useTransition) : false);
+            const savedDur = getInitialValue("transitionDuration", DEFAULT_EXPORT_OPTIONS.transitionDuration);
+            setTransitionDuration(Math.min(5.0, Math.max(0, savedDur)));
+            setTransitionStyle(getInitialValue("transitionStyle", DEFAULT_EXPORT_OPTIONS.transitionStyle));
+        }
+    }, [visible, video.id, segments.length]);
 
     // Sync name when defaultName changes (new clip)
     useEffect(() => {
@@ -193,18 +280,6 @@ export const ClipExportModal: React.FC<ClipExportModalProps> = ({
         validateDestination();
     }, [destination, validateDestination]);
 
-    const pickDirectory = async () => {
-        try {
-            const directory = await Directory.pickDirectoryAsync();
-            if (directory?.uri) {
-                const resolved = normalizeClipDestination(directory.uri);
-                if (resolved) setDestination(resolved);
-            }
-        } catch (err) {
-            console.warn("Failed to pick directory", err);
-        }
-    };
-
     // Export
     const handleExport = () => {
         if (!name.trim()) {
@@ -228,15 +303,27 @@ export const ClipExportModal: React.FC<ClipExportModalProps> = ({
         }
 
         onClose();
-        let targetCRF = 23;
-        if (quality === "high") targetCRF = 20;
-        else if (quality === "low") targetCRF = 28;
+        let targetCRF = DEFAULT_EXPORT_OPTIONS.crf;
+        if (quality === "high") targetCRF = 18;
+        else if (quality === "low") targetCRF = 32;
         else if (quality === "custom") targetCRF = customCRF;
 
         if (markAsDefault && destination && updateSettings) {
             updateSettings({ clipDestination: destination });
         }
-        onExport({ name, quality, resolution, format, removeAudio, removeMarkers, crf: targetCRF });
+        onExport({
+            name,
+            quality,
+            resolution,
+            format,
+            removeAudio,
+            removeMarkers,
+            crf: targetCRF,
+            preset,
+            useTransition,
+            transitionDuration: useTransition ? transitionDuration : 0,
+            transitionStyle,
+        });
     };
 
     // Format dropdown options
@@ -262,23 +349,14 @@ export const ClipExportModal: React.FC<ClipExportModalProps> = ({
                     <Icon icon={Scissors} size={18} className="text-primary" />
                 </View>
                 <View className="flex-1">
-                    <Text className="text-text text-lg font-bold">Export Clip</Text>
-                    <Text className="text-secondary text-sm">
-                        {quality === "custom"
-                            ? `CRF ${customCRF}`
-                            : quality === "high"
-                              ? "High (20)"
-                              : quality === "low"
-                                ? "Low (28)"
-                                : "Balanced (23)"}
-                    </Text>
+                    <Text className="text-text text-lg font-bold">{isReexport ? "Re-export Clip" : "Export Clip"}</Text>
                 </View>
                 <TouchableOpacity
                     onPress={handleExport}
                     className="bg-primary px-6 rounded-full items-center justify-center"
                     style={{ height: ROW_H - 12 }}
                 >
-                    <Text className="text-white font-bold text-base">Start</Text>
+                    <Text className="text-white font-bold text-base">{isReexport ? "Re-export" : "Start"}</Text>
                 </TouchableOpacity>
             </View>
 
@@ -312,39 +390,12 @@ export const ClipExportModal: React.FC<ClipExportModalProps> = ({
                 {/* Destination */}
                 <View className="gap-2">
                     <SectionLabel>Destination</SectionLabel>
-                    <View className="flex-row gap-2">
-                        <TouchableOpacity
-                            onPress={pickDirectory}
-                            style={{ height: ROW_H }}
-                            className={cn(
-                                "flex-1 flex-row items-center gap-2 bg-zinc-800 rounded-xl px-3 border",
-                                !isDestinationValid ? "border-red-500/60" : "border-white/5",
-                            )}
-                        >
-                            <Icon icon={FolderOpen} size={16} className="text-primary" />
-                            <Text
-                                className={cn("text-base flex-1", destination ? "text-text" : "text-zinc-500")}
-                                numberOfLines={1}
-                            >
-                                {destination || "Select directory..."}
-                            </Text>
-                        </TouchableOpacity>
+                    <DestinationPicker
+                        value={destination}
+                        onChange={(_, path) => setDestination(path)}
+                        isValid={isDestinationValid}
+                    />
 
-                        {destination ? (
-                            <TouchableOpacity
-                                style={{ height: ROW_H, width: ROW_H }}
-                                className="items-center justify-center bg-red-500/10 rounded-xl border border-red-500/20"
-                                onPress={() => setDestination("")}
-                            >
-                                <Icon icon={X} size={18} className="text-red-500" />
-                            </TouchableOpacity>
-                        ) : null}
-                    </View>
-                    {!isDestinationValid && (
-                        <Text className="text-red-500 text-sm font-bold uppercase tracking-tight ml-1">
-                            ! Directory not found or inaccessible
-                        </Text>
-                    )}
                     {/* Mark as default checkbox */}
                     <TouchableOpacity
                         onPress={() => setMarkAsDefault((v) => !v)}
@@ -370,16 +421,19 @@ export const ClipExportModal: React.FC<ClipExportModalProps> = ({
                         <Text className="text-zinc-500 text-sm font-mono mr-1">
                             {(() => {
                                 if (quality === "custom") return `CRF ${customCRF}`;
-                                if (quality === "high") return "CRF 20";
-                                if (quality === "balanced") return "CRF 23";
-                                if (quality === "low") return "CRF 28";
+                                if (quality === "high") return "CRF 18";
+                                if (quality === "balanced") return `CRF ${DEFAULT_EXPORT_OPTIONS.crf}`;
+                                if (quality === "low") return "CRF 32";
                                 return "---";
                             })()}
                         </Text>
                     </View>
                     <SegmentedControl
                         value={quality}
-                        onChange={setQuality}
+                        onChange={(val) => {
+                            setQuality(val);
+                            persistOptions({ quality: val });
+                        }}
                         options={[
                             { label: "High", value: "high" },
                             { label: "Balanced", value: "balanced" },
@@ -394,24 +448,20 @@ export const ClipExportModal: React.FC<ClipExportModalProps> = ({
                                 <Text className="text-zinc-400 text-sm">Target Quality (CRF)</Text>
                                 <Text className="text-primary font-bold text-base">{customCRF}</Text>
                             </View>
-                            <TouchableOpacity
-                                activeOpacity={1}
-                                className="h-10 justify-center"
-                                onPress={(e) => {
-                                    const percent = e.nativeEvent.locationX / 300;
-                                    const val = crfRange.min + (crfRange.max - crfRange.min) * Math.min(1, Math.max(0, percent));
-                                    setCustomCRF(Math.round(val));
-                                }}
-                            >
-                                <View className="h-1.5 bg-zinc-700 rounded-full w-full overflow-hidden">
-                                    <View
-                                        className="h-full bg-primary"
-                                        style={{
-                                            width: `${((customCRF - crfRange.min) / (crfRange.max - crfRange.min)) * 100}%`,
-                                        }}
-                                    />
-                                </View>
-                            </TouchableOpacity>
+                            <View className="h-10 justify-center">
+                                <Slider
+                                    onResponderGrant={() => true} // Allows touch to work inside a scrollable view
+                                    minimumValue={crfRange.min}
+                                    maximumValue={crfRange.max}
+                                    step={1}
+                                    value={customCRF}
+                                    onValueChange={setCustomCRF}
+                                    onSlidingComplete={(val) => persistOptions({ crf: val })}
+                                    minimumTrackTintColor={colors.primary}
+                                    maximumTrackTintColor="#3f3f46"
+                                    thumbTintColor={colors.primary}
+                                />
+                            </View>
                             <View className="flex-row justify-between">
                                 <Text className="text-zinc-500 text-xs">{crfRange.min} (Better)</Text>
                                 <Text className="text-zinc-500 text-xs">{crfRange.max} (Smaller)</Text>
@@ -420,22 +470,67 @@ export const ClipExportModal: React.FC<ClipExportModalProps> = ({
                     )}
                 </View>
 
+                {/* Preset */}
+                <View className="gap-2">
+                    <SectionLabel>Encoder Preset</SectionLabel>
+                    <SelectDropdown
+                        value={preset}
+                        onChange={(val) => {
+                            setPreset(val);
+                            persistOptions({ preset: val });
+                        }}
+                        options={[
+                            {
+                                label: "Ultrafast",
+                                value: "ultrafast",
+                                sublabel: "Fastest export · Largest file · Lower quality",
+                                enabled: true,
+                            },
+                            { label: "Fast", value: "fast", sublabel: "Quick export · Moderate file size", enabled: true },
+                            { label: "Medium", value: "medium", sublabel: "Balanced speed and compression", enabled: true },
+                            {
+                                label: "Slower",
+                                value: "slower",
+                                sublabel: "Best compression · Smallest file · Recommended",
+                                enabled: true,
+                            },
+                        ]}
+                    />
+                </View>
+
                 {/* Resolution + Format — side by side */}
                 <View className="flex-row gap-4">
                     <View className="flex-1 gap-2">
                         <SectionLabel>Resolution</SectionLabel>
-                        <SelectDropdown value={resolution} options={resolutionDropdownOptions} onChange={setResolution} />
+                        <SelectDropdown
+                            value={resolution}
+                            options={resolutionDropdownOptions}
+                            onChange={(val) => {
+                                setResolution(val);
+                                persistOptions({ resolution: val });
+                            }}
+                        />
                     </View>
                     <View className="flex-1 gap-2">
                         <SectionLabel>Format</SectionLabel>
-                        <SelectDropdown value={format} options={formatDropdownOptions} onChange={setFormat} />
+                        <SelectDropdown
+                            value={format}
+                            options={formatDropdownOptions}
+                            onChange={(val) => {
+                                setFormat(val);
+                                persistOptions({ format: val });
+                            }}
+                        />
                     </View>
                 </View>
 
                 {/* Segments summary */}
                 {segments.length > 0 &&
                     (() => {
-                        const totalSec = segments.reduce((acc, s) => acc + (s.end - s.start), 0);
+                        const totalSegmentsSec = segments.reduce((acc, s) => acc + (s.end - s.start), 0);
+                        const transSec = useTransition && segments.length > 1 ? (segments.length - 1) * transitionDuration : 0;
+                        const totalSec = totalSegmentsSec + transSec;
+
                         return (
                             <View className="bg-zinc-800/40 rounded-xl border border-white/5 p-3 gap-1">
                                 <View className="flex-row items-center justify-between pb-1">
@@ -445,15 +540,30 @@ export const ClipExportModal: React.FC<ClipExportModalProps> = ({
                                     <Text className="text-zinc-400 text-sm font-mono">{secondsToHhmmss(totalSec)}</Text>
                                 </View>
                                 {segments.map((seg, idx) => (
-                                    <View key={idx} className="flex-row items-center gap-2 py-1.5">
-                                        <TriangleDown color={colors.primary} size={9} />
-                                        <Text className="text-text text-sm font-mono">
-                                            {secondsToHhmmss(seg.start)} – {secondsToHhmmss(seg.end)}
-                                        </Text>
-                                        <Text className="text-zinc-500 text-sm ml-auto">
-                                            {secondsToHhmmss(seg.end - seg.start)}
-                                        </Text>
-                                    </View>
+                                    <React.Fragment key={idx}>
+                                        <View className="flex-row items-center gap-2 py-1.5">
+                                            <TriangleDown color={colors.primary} size={9} />
+                                            <Text className="text-text text-sm font-mono">
+                                                {secondsToHhmmss(seg.start)} – {secondsToHhmmss(seg.end)}
+                                            </Text>
+                                            <Text className="text-zinc-500 text-sm ml-auto">
+                                                {secondsToHhmmss(seg.end - seg.start)}
+                                            </Text>
+                                        </View>
+                                        {useTransition && idx < segments.length - 1 && (
+                                            <View className="flex-row items-center gap-2 py-1 bg-primary/5 rounded px-2 my-0.5 border border-primary/10">
+                                                <Icon icon={Scissors} size={10} className="text-primary/60" />
+                                                <Text className="text-primary/70 text-[10px] font-bold uppercase tracking-wider">
+                                                    {TRANSITION_OPTIONS.find((o) => o.value === transitionStyle)?.label ||
+                                                        transitionStyle}{" "}
+                                                    Transition
+                                                </Text>
+                                                <Text className="text-primary/50 text-[10px] font-mono ml-auto">
+                                                    +{transitionDuration}s
+                                                </Text>
+                                            </View>
+                                        )}
+                                    </React.Fragment>
                                 ))}
                             </View>
                         );
@@ -475,22 +585,94 @@ export const ClipExportModal: React.FC<ClipExportModalProps> = ({
                         </View>
                         <Switch
                             value={removeAudio}
-                            onValueChange={setRemoveAudio}
+                            onValueChange={(val) => {
+                                setRemoveAudio(val);
+                                persistOptions({ removeAudio: val });
+                            }}
                             trackColor={{ false: "#3f3f46", true: colors.primary }}
                             thumbColor={removeAudio ? "#fff" : "#a1a1aa"}
                         />
                     </View>
-                    <View className="flex-row items-center justify-between px-4" style={{ height: ROW_H }}>
+                    <View
+                        className="flex-row items-center justify-between px-4 border-b border-white/5"
+                        style={{ height: ROW_H }}
+                    >
                         <View className="flex-row items-center gap-4">
                             <TriangleDown color={removeMarkers ? colors.error : colors.primary} size={10} className="mx-0.5" />
                             <Text className="text-text text-base">Remove All Markers</Text>
                         </View>
                         <Switch
                             value={removeMarkers}
-                            onValueChange={setRemoveMarkers}
+                            onValueChange={(val) => {
+                                setRemoveMarkers(val);
+                                persistOptions({ removeMarkers: val });
+                            }}
                             trackColor={{ false: "#3f3f46", true: colors.primary }}
                             thumbColor={removeMarkers ? "#fff" : "#a1a1aa"}
                         />
+                    </View>
+
+                    {/* Transition Setting */}
+                    <View
+                        className="px-4 py-3 border-b border-white/5 gap-4"
+                        style={{ opacity: segments.length <= 1 ? 0.3 : 1 }}
+                        pointerEvents={segments.length <= 1 ? "none" : "auto"}
+                    >
+                        <View className="flex-row items-center justify-between">
+                            <View className="flex-row items-center gap-3">
+                                <Icon icon={Scissors} size={17} color={useTransition ? colors.primary : "#71717a"} />
+                                <Text className={cn("text-base", segments.length <= 1 ? "text-zinc-600" : "text-text")}>
+                                    Clip Transitions
+                                </Text>
+                            </View>
+                            <Switch
+                                value={useTransition}
+                                onValueChange={(val) => {
+                                    setUseTransition(val);
+                                    persistOptions({ useTransition: val, transitionDuration: val ? transitionDuration : 0 });
+                                }}
+                                disabled={segments.length <= 1}
+                                trackColor={{ false: "#3f3f46", true: colors.primary }}
+                                thumbColor={useTransition ? "#fff" : "#a1a1aa"}
+                            />
+                        </View>
+
+                        {useTransition && segments.length > 1 && (
+                            <View className="gap-4">
+                                <View>
+                                    <Text className="text-zinc-500 text-xs font-bold uppercase mb-2">Style</Text>
+                                    <SelectDropdown
+                                        value={transitionStyle}
+                                        options={TRANSITION_OPTIONS}
+                                        onChange={(val) => {
+                                            const s = val as TransitionStyle;
+                                            setTransitionStyle(s);
+                                            persistOptions({ transitionStyle: s });
+                                        }}
+                                    />
+                                </View>
+
+                                <View>
+                                    <View className="flex-row justify-between items-center mb-1">
+                                        <Text className="text-zinc-500 text-xs font-bold uppercase">Duration</Text>
+                                        <Text className="text-primary font-mono font-bold">{transitionDuration.toFixed(1)}s</Text>
+                                    </View>
+                                    <Slider
+                                        onResponderGrant={() => true} // Allows touch to work inside a scrollable view
+                                        style={{ height: 40 }}
+                                        minimumValue={0}
+                                        maximumValue={5}
+                                        step={0.1}
+                                        value={transitionDuration}
+                                        onValueChange={setTransitionDuration}
+                                        onSlidingComplete={(val) => persistOptions({ transitionDuration: val })}
+                                        minimumTrackTintColor={colors.primary}
+                                        maximumTrackTintColor="#3f3f46"
+                                        thumbTintColor={colors.primary}
+                                    />
+                                </View>
+                            </View>
+                        )}
                     </View>
                 </View>
             </ThemedBottomSheetScrollView>

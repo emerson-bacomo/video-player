@@ -22,6 +22,9 @@ set_target_properties(avutil PROPERTIES IMPORTED_LOCATION ${FFMPEG_LIBS_DIR}/lib
 add_library(swscale SHARED IMPORTED)
 set_target_properties(swscale PROPERTIES IMPORTED_LOCATION ${FFMPEG_LIBS_DIR}/libswscale.so)
 
+add_library(swresample SHARED IMPORTED)
+set_target_properties(swresample PROPERTIES IMPORTED_LOCATION ${FFMPEG_LIBS_DIR}/libswresample.so)
+
 # Add our module source
 add_library(expo-ffmpeg SHARED
     ../common/cpp/ExpoFFmpegModule.cpp
@@ -35,5 +38,6 @@ target_link_libraries(expo-ffmpeg
     avformat
     avutil
     swscale
+    swresample
     log # Android log library
 )

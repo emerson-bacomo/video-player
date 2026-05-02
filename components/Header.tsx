@@ -1,14 +1,7 @@
 import { useTheme } from "@/context/ThemeContext";
 import { useMedia } from "@/hooks/useMedia";
 import { router } from "expo-router";
-import {
-    CheckSquare,
-    ChevronLeft,
-    MoreVertical,
-    Search,
-    Square,
-    X,
-} from "lucide-react-native";
+import { CheckSquare, ChevronLeft, MoreVertical, Search, Square, X } from "lucide-react-native";
 import { LucideIcon } from "lucide-react-native";
 import React from "react";
 import { Text, TouchableOpacity, View } from "react-native";
@@ -25,9 +18,9 @@ export interface SelectionAction {
 
 interface SelectionActionsContextType {
     actions: SelectionAction[] | null;
-    setActions: (actions: SelectionAction[] | null) => void;
+    setActions: React.Dispatch<React.SetStateAction<SelectionAction[] | null>>;
     totalItems: number;
-    setTotalItems: (n: number) => void;
+    setTotalItems: React.Dispatch<React.SetStateAction<number>>;
     dataRef: React.RefObject<any[] | null>;
 }
 
@@ -135,7 +128,7 @@ const SelectionMode = () => {
                         <Menu.Trigger className="w-10 h-10 items-center justify-center">
                             <Icon icon={MoreVertical} size={24} className="text-text" />
                         </Menu.Trigger>
-                        <Menu.Content className="w-48">
+                        <Menu.Content>
                             {selectionActions.actions.map((act, idx) => (
                                 <Menu.Item
                                     key={idx}
@@ -170,30 +163,33 @@ const HeaderNamespace = Object.assign(Header, {
     Title,
     Actions,
     SearchAction,
-    SelectionActions: ({
-        actions,
-        data,
-    }: {
-        actions: SelectionAction[];
-        data?: any[];
-    }) => {
+    SelectionActions: ({ actions, data }: { actions: SelectionAction[]; data?: any[] }) => {
         const context = React.useContext(SelectionActionsContext);
+        const actionsRef = React.useRef(actions);
+        const dataLengthRef = React.useRef(data?.length || 0);
+
+        // Update refs immediately so SelectionMode can see them even before effect runs if needed
+        // (though SelectionMode reads from state, so it needs the state update)
         if (context) {
             context.dataRef.current = data || null;
         }
 
-        React.useEffect(() => {
-            if (context) {
-                context.setActions(actions);
-                context.setTotalItems(data?.length || 0);
-            }
+        React.useLayoutEffect(() => {
+            if (!context) return;
+
+            context.setActions(actions);
+            context.setTotalItems(data?.length || 0);
+            actionsRef.current = actions;
+            dataLengthRef.current = data?.length || 0;
+
             return () => {
-                if (context) {
-                    context.setActions(null);
-                    context.setTotalItems(0);
-                }
+                // Only clear if the current actions are the ones we set
+                // This prevents flickering when the component re-renders with new actions
+                context.setActions((prev) => (prev === actions ? null : prev));
+                context.setTotalItems((prev) => (prev === (data?.length || 0) ? 0 : prev));
             };
         }, [actions, data?.length, context]);
+
         return null;
     },
 });

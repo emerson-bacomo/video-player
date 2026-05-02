@@ -15,6 +15,13 @@ extern "C"
 JNIEXPORT jdouble JNICALL
 Java_expo_modules_ffmpeg_ExpoFFmpegModule_nativeGetClipProgress(
     JNIEnv *env, jobject thiz) {
-    LOGE("Returning progress: %.2f", g_clip_progress);
     return g_clip_progress;
 }
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_expo_modules_ffmpeg_ExpoFFmpegModule_nativeResetClipProgress(
+    JNIEnv *env, jobject thiz) {
+    g_clip_progress = 0.0;
+    g_last_clip_error = "";
+}

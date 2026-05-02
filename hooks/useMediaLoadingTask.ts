@@ -10,54 +10,58 @@ export const TASK_IDS = {
     LIBRARY_LOAD: "library-load",
 } as const;
 
+export type SetLoadingTask = (
+    taskOrFn: LoadingTask | null | ((prev: LoadingTask | null) => LoadingTask | null),
+    target?: string | ((id: string | null) => boolean),
+) => void;
+
+export type OnBeforeSet = (task: LoadingTask) => boolean | void;
+
 export const useMediaLoadingTask = (initialTask: LoadingTask | null = null) => {
     const [loadingTask, setLoadingTaskInternal] = useState<LoadingTask | null>(initialTask);
     const [isLoadingPopupVisible, setIsLoadingPopupVisible] = useState(false);
     const [isLoadingExpanded, setIsLoadingExpanded] = useState(false);
 
-    const onBeforeSetRef = useRef<((task: LoadingTask) => boolean | void) | null>(null);
+    const onBeforeSetRef = useRef<OnBeforeSet | null>(null);
 
-    const setOnBeforeSet = useCallback((fn: ((task: LoadingTask) => boolean | void) | null) => {
+    const setOnBeforeSet = useCallback((fn: OnBeforeSet | null) => {
         onBeforeSetRef.current = fn;
     }, []);
 
-    const setLoadingTask = useCallback(
-        (taskOrFn: LoadingTask | null | ((prev: LoadingTask | null) => LoadingTask | null)) => {
-            setLoadingTaskInternal((prev) => {
-                let nextTask: LoadingTask | null;
-                if (typeof taskOrFn === "function") {
-                    nextTask = (taskOrFn as (prev: LoadingTask | null) => LoadingTask | null)(prev);
-                } else {
-                    nextTask = taskOrFn;
-                }
+    const setLoadingTask: SetLoadingTask = useCallback((taskOrFn, target) => {
+        setLoadingTaskInternal((prev) => {
+            // If a target (id or filter function) is provided and we are trying to clear/set,
+            // verify that the current task matches the target.
+            if (target !== undefined) {
+                const currentId = prev?.id ?? null;
+                const matches = typeof target === "function" ? target(currentId) : currentId === target;
+                if (!matches) return prev;
+            }
 
-                if (nextTask && onBeforeSetRef.current) {
-                    const result = onBeforeSetRef.current(nextTask);
-                    if (result === false) return prev;
-                }
+            let nextTask: LoadingTask | null;
+            if (typeof taskOrFn === "function") {
+                nextTask = (taskOrFn as (prev: LoadingTask | null) => LoadingTask | null)(prev);
+            } else {
+                nextTask = taskOrFn;
+            }
 
-                return nextTask;
-            });
-        },
-        [],
-    );
+            if (nextTask && onBeforeSetRef.current) {
+                const result = onBeforeSetRef.current(nextTask);
+                if (result === false) return prev;
+            }
 
-    const lastTaskIdRef = useRef<string | null>(null);
-    const hasAutoTriggeredRef = useRef(false);
-    const dismissTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const minimizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+            return nextTask;
+        });
+    }, []);
+
     const pendingDismissRef = useRef<(() => void) | null>(null);
+    const dismissTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const minimizeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-    // Auto-dismiss and auto-minimize loading tasks
+    // Side-effects for loading task changes: Dismiss/Minimize timers
     useEffect(() => {
-        if (dismissTimeoutRef.current) {
-            clearTimeout(dismissTimeoutRef.current);
-            dismissTimeoutRef.current = null;
-        }
-        if (minimizeTimeoutRef.current) {
-            clearTimeout(minimizeTimeoutRef.current);
-            minimizeTimeoutRef.current = null;
-        }
+        if (dismissTimeoutRef.current) clearTimeout(dismissTimeoutRef.current);
+        if (minimizeTimeoutRef.current) clearTimeout(minimizeTimeoutRef.current);
 
         // Store the callback for when this specific task is dismissed
         pendingDismissRef.current = loadingTask?.onDismiss || null;
@@ -65,8 +69,9 @@ export const useMediaLoadingTask = (initialTask: LoadingTask | null = null) => {
         if (loadingTask?.dismissAfter) {
             dismissTimeoutRef.current = setTimeout(() => {
                 const callback = pendingDismissRef.current;
+                const taskIdToDismiss = loadingTask?.id;
                 console.log("[MediaLoadingTask] Task dismissed, calling onDismiss...");
-                setLoadingTask(null);
+                setLoadingTask(null, taskIdToDismiss);
                 dismissTimeoutRef.current = null;
                 // Execute callback AFTER state update to ensure UI is ready
                 callback?.();
@@ -85,6 +90,9 @@ export const useMediaLoadingTask = (initialTask: LoadingTask | null = null) => {
             if (minimizeTimeoutRef.current) clearTimeout(minimizeTimeoutRef.current);
         };
     }, [loadingTask, setLoadingTask]);
+
+    const lastTaskIdRef = useRef<string | null>(null);
+    const hasAutoTriggeredRef = useRef(false);
 
     // Side-effects for loading task changes: Visibility & Auto-Expansion based on importance
     useEffect(() => {
@@ -123,4 +131,3 @@ export const useMediaLoadingTask = (initialTask: LoadingTask | null = null) => {
         setLoadingExpanded: setIsLoadingExpanded,
     };
 };
-

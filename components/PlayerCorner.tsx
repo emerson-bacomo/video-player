@@ -1,25 +1,65 @@
 import * as Brightness from "expo-brightness";
 import * as Icons from "lucide-react-native";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dimensions, FlatList, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated from "react-native-reanimated";
 
-import { CornerPosition, PlayerOperation } from "@/context/SettingsContext";
+import { CornerPosition, PlayerOperation } from "@/constants/defaults";
 import { useSettings } from "@/hooks/useSettings";
 import { cn } from "@/lib/utils";
 import { AppModal } from "./AppModal";
+import { CorePlayerRef } from "./CorePlayer";
 import { Icon } from "./Icon";
+import { SelectDropdown } from "./SelectDropdown";
+
+let copiedOperator: Partial<PlayerOperation> | null = null;
+
+const IconItem = React.memo(
+    ({
+        name,
+        isSelected,
+        itemSize,
+        onPress,
+    }: {
+        name: string;
+        isSelected: boolean;
+        itemSize: number;
+        onPress: (name: string) => void;
+    }) => {
+        const IconComp = (Icons as any)[name];
+        if (!IconComp) return null;
+
+        return (
+            <TouchableOpacity
+                onPress={() => onPress(name)}
+                style={{ width: itemSize, height: itemSize }}
+                className={cn(
+                    "items-center justify-center rounded-lg",
+                    isSelected ? "bg-blue-600" : "bg-white/5",
+                )}
+            >
+                <Icon icon={IconComp} size={20} color={isSelected ? "white" : "#aaa"} />
+            </TouchableOpacity>
+        );
+    },
+);
 
 interface PlayerCornerProps {
     position: CornerPosition;
     hasPermission: boolean;
     showPieMenu: boolean;
     sensitivity?: number;
+    playerRef: React.RefObject<CorePlayerRef>;
+    duration: number;
     onDoubleTap: () => void;
     onSingleTap: () => void;
     onBrightnessChange: (val: number) => void;
-    onExecuteOperation: (op: PlayerOperation) => void;
+    onSkipNext: () => void;
+    onSkipPrev: () => void;
+    hasNext: boolean;
+    hasPrev: boolean;
+    onSetCentralIndicator: (indicator: any) => void;
     onModalChange?: (isOpen: boolean) => void;
 }
 
@@ -28,10 +68,16 @@ export const PlayerCorner: React.FC<PlayerCornerProps> = ({
     hasPermission,
     showPieMenu,
     sensitivity = 0.3,
+    playerRef,
+    duration,
     onDoubleTap,
     onSingleTap,
     onBrightnessChange,
-    onExecuteOperation,
+    onSkipNext,
+    onSkipPrev,
+    hasNext,
+    hasPrev,
+    onSetCentralIndicator,
     onModalChange,
 }) => {
     const { settings, updateSettings } = useSettings();
@@ -103,7 +149,7 @@ export const PlayerCorner: React.FC<PlayerCornerProps> = ({
     const doubleTapGesture = Gesture.Tap()
         .numberOfTaps(2)
         .runOnJS(true)
-        .onStart(() => {
+        .onEnd(() => {
             onDoubleTap();
         });
 
@@ -114,18 +160,86 @@ export const PlayerCorner: React.FC<PlayerCornerProps> = ({
             if (!showPieMenu) onSingleTap();
         });
 
-    const composed = Gesture.Simultaneous(panGesture, Gesture.Exclusive(doubleTapGesture, singleTapGesture));
+    const composed = Gesture.Exclusive(doubleTapGesture, panGesture, singleTapGesture);
 
     // --- Modal State ---
     const [configModal, setConfigModal] = useState<{ slotIndex: number; op: PlayerOperation | null } | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
     const [editOp, setEditOp] = useState<Partial<PlayerOperation>>({});
     const [iconPickerOpen, setIconPickerOpen] = useState(false);
+    const flatListRef = useRef<FlatList<string>>(null);
+    const [pickerWidth, setPickerWidth] = useState(0);
+
+    const [iconHistory, setIconHistory] = useState<string[]>([]);
+    const [historyIndex, setHistoryIndex] = useState(-1);
 
     // Notify parent when any modal opens/closes so it can hide the controls layer
     useEffect(() => {
         onModalChange?.(!!configModal || iconPickerOpen);
+
+        if (iconPickerOpen) {
+            if (editOp.iconName) {
+                setIconHistory([editOp.iconName]);
+                setHistoryIndex(0);
+            } else {
+                setIconHistory([]);
+                setHistoryIndex(-1);
+            }
+        } else {
+            setIconHistory([]);
+            setHistoryIndex(-1);
+        }
     }, [configModal, iconPickerOpen]);
+
+    const skipTimeout = useRef<any>(null);
+    const handleExecuteOperation = useCallback(
+        async (op: PlayerOperation) => {
+            if (op.type === "seek") {
+                const currentPos = playerRef.current?.currentTime || 0;
+                const deltaSec = op.value || 0;
+                const newTime = Math.max(0, Math.min(duration, currentPos + deltaSec));
+                playerRef.current?.seek(newTime);
+
+                const iconName = op.value >= 0 ? "skip-fwd" : "skip-back";
+                onSetCentralIndicator({
+                    icon: iconName as any,
+                    label: op.label || `${op.value > 0 ? "+" : ""}${op.value}s`,
+                });
+
+                if (skipTimeout.current) clearTimeout(skipTimeout.current);
+                skipTimeout.current = setTimeout(() => onSetCentralIndicator(null), 800);
+            } else if (op.type === "play-next") {
+                if (hasNext) onSkipNext();
+            } else if (op.type === "play-prev") {
+                if (hasPrev) onSkipPrev();
+            } else if (op.type === "double-tap-seek-left") {
+                const currentPos = playerRef.current?.currentTime || 0;
+                const amount = settings.doubleTapSeekAmount;
+                const newTime = Math.max(0, currentPos - amount);
+                playerRef.current?.seek(newTime);
+
+                onSetCentralIndicator({
+                    icon: "skip-back",
+                    label: `-${amount}s`,
+                });
+                if (skipTimeout.current) clearTimeout(skipTimeout.current);
+                skipTimeout.current = setTimeout(() => onSetCentralIndicator(null), 800);
+            } else if (op.type === "double-tap-seek-right") {
+                const currentPos = playerRef.current?.currentTime || 0;
+                const amount = settings.doubleTapSeekAmount;
+                const newTime = Math.min(duration, currentPos + amount);
+                playerRef.current?.seek(newTime);
+
+                onSetCentralIndicator({
+                    icon: "skip-fwd",
+                    label: `+${amount}s`,
+                });
+                if (skipTimeout.current) clearTimeout(skipTimeout.current);
+                skipTimeout.current = setTimeout(() => onSetCentralIndicator(null), 800);
+            }
+        },
+        [duration, onSkipNext, onSkipPrev, hasNext, hasPrev, onSetCentralIndicator, settings.doubleTapSeekAmount, playerRef],
+    );
 
     const allIconNames = useMemo(
         () =>
@@ -135,6 +249,8 @@ export const PlayerCorner: React.FC<PlayerCornerProps> = ({
                     if (k === "default" || k === "Icon") return false;
                     // Skip *Icon aliases (e.g. PlayIcon) — keep only base names (e.g. Play)
                     if (k.endsWith("Icon")) return false;
+                    // Skip Lucide-prefixed aliases (e.g. LucideFastForward duplicates FastForward)
+                    if (k.startsWith("Lucide")) return false;
                     // Must start with uppercase
                     if (k[0] !== k[0].toUpperCase()) return false;
                     // Must be a non-null object or function (forwardRef components)
@@ -152,7 +268,7 @@ export const PlayerCorner: React.FC<PlayerCornerProps> = ({
 
     useEffect(() => {
         if (configModal) {
-            setEditOp(configModal.op || { type: "seek" });
+            setEditOp(configModal.op || { type: "seek", value: 10 });
             setSearchQuery("");
         }
     }, [configModal]);
@@ -163,13 +279,34 @@ export const PlayerCorner: React.FC<PlayerCornerProps> = ({
         const currentOps = [...newConfigs[position]];
 
         const val = Number(editOp.value) || 0;
+        const type = editOp.type || "seek";
+
+        let label = editOp.label || "";
+        let iconName = editOp.iconName || "Plus";
+
+        if (type === "seek") {
+            label = `${val > 0 ? "+" : ""}${val}s`;
+            if (iconName === "Plus") iconName = val > 0 ? "FastForward" : "Rewind";
+        } else if (type === "play-next") {
+            label = "Next";
+            if (iconName === "Plus") iconName = "SkipForward";
+        } else if (type === "play-prev") {
+            label = "Prev";
+            if (iconName === "Plus") iconName = "SkipBack";
+        } else if (type === "double-tap-seek-left") {
+            label = `-${settings.doubleTapSeekAmount}s`;
+            if (iconName === "Plus") iconName = "ChevronsLeft";
+        } else if (type === "double-tap-seek-right") {
+            label = `+${settings.doubleTapSeekAmount}s`;
+            if (iconName === "Plus") iconName = "ChevronsRight";
+        }
 
         const finalizedOp: PlayerOperation = {
             id: editOp.id || Math.random().toString(36).substr(2, 9),
-            type: "seek",
+            type: type as any,
             value: val,
-            iconName: editOp.iconName || "Plus",
-            label: `${val > 0 ? "+" : ""}${val}s`,
+            iconName,
+            label,
         };
 
         currentOps[configModal.slotIndex] = finalizedOp;
@@ -187,6 +324,37 @@ export const PlayerCorner: React.FC<PlayerCornerProps> = ({
         updateSettings({ cornerConfigs: newConfigs });
         setConfigModal(null);
     };
+
+    const isLandscape = dimensions.width > dimensions.height;
+    const modalHeight = isLandscape ? dimensions.height * 0.9 : dimensions.height * 0.5;
+
+    const historyRef = useRef({ history: iconHistory, index: historyIndex });
+    useEffect(() => {
+        historyRef.current = { history: iconHistory, index: historyIndex };
+    }, [iconHistory, historyIndex]);
+
+    const handleIconSelect = useCallback((name: string) => {
+        setEditOp((p: Partial<PlayerOperation>) => {
+            if (p.iconName === name) return p;
+
+            const { history, index } = historyRef.current;
+            const newHistory = history.slice(0, index + 1);
+            newHistory.push(name);
+            setIconHistory(newHistory);
+            setHistoryIndex(newHistory.length - 1);
+
+            return { ...p, iconName: name };
+        });
+    }, []);
+
+    const renderIconItem = useCallback(
+        ({ item: name }: { item: string }) => {
+            const isSelected = editOp.iconName === name;
+            const itemSize = pickerWidth > 0 ? (pickerWidth - 32) / 5 : 40;
+            return <IconItem name={name} isSelected={isSelected} itemSize={itemSize} onPress={handleIconSelect} />;
+        },
+        [editOp.iconName, pickerWidth, handleIconSelect],
+    );
 
     return (
         <>
@@ -226,51 +394,100 @@ export const PlayerCorner: React.FC<PlayerCornerProps> = ({
                             pieRadius={PIE_RADIUS}
                             piePadding={PIE_PADDING}
                             labelRadius={LABEL_RADIUS}
-                            onExecuteOperation={onExecuteOperation}
+                            onExecuteOperation={handleExecuteOperation}
                             onSetConfigModal={setConfigModal}
+                            hasNext={hasNext}
+                            hasPrev={hasPrev}
                         />
                     )}
                 </Animated.View>
             </GestureDetector>
 
             <AppModal visible={!!configModal} onClose={() => setConfigModal(null)}>
-                <View className="px-6 pt-6 pb-2">
-                    <Text className="text-white text-xl font-bold mb-4">
-                        {configModal?.op ? "Edit Operation" : "Add Operation"}
-                    </Text>
-
-                    <View className="mb-4">
-                        <Text className="text-zinc-400 text-xs uppercase mb-2">Operator Type</Text>
-                        <View className="bg-black/40 border border-white/5 rounded-lg px-4 py-3">
-                            <Text className="text-white font-medium">Seek By</Text>
+                <View className="px-6 pt-6 pb-2 flex-col justify-between" style={{ height: modalHeight }}>
+                    <View className="flex-1">
+                        <View className="flex-row justify-between items-center mb-4">
+                            <Text className="text-white text-xl font-bold">
+                                {configModal?.op ? "Edit Operation" : "Add Operation"}
+                            </Text>
+                            <View className="flex-row gap-2">
+                                {!configModal?.op && (
+                                    <TouchableOpacity
+                                        disabled={!copiedOperator}
+                                        onPress={() => {
+                                            if (copiedOperator) setEditOp({ ...copiedOperator });
+                                        }}
+                                        className={`px-3 py-1.5 rounded-lg ${!copiedOperator ? "bg-white/5" : "bg-blue-600"}`}
+                                    >
+                                        <Text className={!copiedOperator ? "text-white/30" : "text-white"}>Paste</Text>
+                                    </TouchableOpacity>
+                                )}
+                                {configModal?.op && (
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            copiedOperator = { ...editOp };
+                                        }}
+                                        className="px-3 py-1.5 rounded-lg bg-white/10"
+                                    >
+                                        <Text className="text-white">Copy</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
                         </View>
+
+                        <View className="mb-4">
+                            <Text className="text-zinc-400 text-xs uppercase mb-2">Operator Type</Text>
+                            <SelectDropdown
+                                value={editOp.type || "seek"}
+                                options={[
+                                    { label: "Seek By", value: "seek" },
+                                    { label: "Play Next Video", value: "play-next" },
+                                    { label: "Play Previous Video", value: "play-prev" },
+                                    {
+                                        label: `Double Tap Seek Left (-${settings.doubleTapSeekAmount}s)`,
+                                        value: "double-tap-seek-left",
+                                    },
+                                    {
+                                        label: `Double Tap Seek Right (+${settings.doubleTapSeekAmount}s)`,
+                                        value: "double-tap-seek-right",
+                                    },
+                                ]}
+                                onChange={(v) => setEditOp((p) => ({ ...p, type: v as any }))}
+                            />
+                        </View>
+
+                        {editOp.type === "seek" && (
+                            <>
+                                <Text className="text-zinc-400 text-xs uppercase mb-2">Seek Value (seconds)</Text>
+                                <TextInput
+                                    keyboardType="numeric"
+                                    value={editOp.value?.toString()}
+                                    onChangeText={(t) =>
+                                        setEditOp((prev: Partial<PlayerOperation>) => ({ ...prev, value: Number(t) }))
+                                    }
+                                    placeholder="e.g. 10 or -5"
+                                    placeholderTextColor="#555"
+                                    className="bg-black/40 text-white rounded-lg px-4 py-2 mb-4 border border-white/5"
+                                />
+                            </>
+                        )}
+
+                        <Text className="text-zinc-400 text-xs uppercase mb-2">Icon</Text>
+                        <TouchableOpacity
+                            onPress={() => setIconPickerOpen(true)}
+                            className="bg-black/40 border border-white/5 rounded-lg px-4 py-3 flex-row items-center gap-3"
+                        >
+                            {editOp.iconName && (Icons as any)[editOp.iconName] ? (
+                                <Icon icon={(Icons as any)[editOp.iconName]} size={20} color="white" />
+                            ) : (
+                                <View className="w-5 h-5 rounded bg-white/10" />
+                            )}
+                            <Text className="text-white/70 flex-1">{editOp.iconName || "Select an icon..."}</Text>
+                            <Text className="text-blue-400 text-sm">Change</Text>
+                        </TouchableOpacity>
                     </View>
 
-                    <Text className="text-zinc-400 text-xs uppercase mb-2">Seek Value (seconds)</Text>
-                    <TextInput
-                        keyboardType="numeric"
-                        value={editOp.value?.toString()}
-                        onChangeText={(t) => setEditOp((prev) => ({ ...prev, value: Number(t) }))}
-                        placeholder="e.g. 10 or -5"
-                        placeholderTextColor="#555"
-                        className="bg-black/40 text-white rounded-lg px-4 py-2 mb-4 border border-white/5"
-                    />
-
-                    <Text className="text-zinc-400 text-xs uppercase mb-2">Icon</Text>
-                    <TouchableOpacity
-                        onPress={() => setIconPickerOpen(true)}
-                        className="bg-black/40 border border-white/5 rounded-lg px-4 py-3 flex-row items-center gap-3"
-                    >
-                        {editOp.iconName && (Icons as any)[editOp.iconName] ? (
-                            <Icon icon={(Icons as any)[editOp.iconName]} size={20} color="white" />
-                        ) : (
-                            <View className="w-5 h-5 rounded bg-white/10" />
-                        )}
-                        <Text className="text-white/70 flex-1">{editOp.iconName || "Select an icon..."}</Text>
-                        <Text className="text-blue-400 text-sm">Change</Text>
-                    </TouchableOpacity>
-
-                    <View className="flex-row gap-3 mt-8 mb-4">
+                    <View className="flex-row gap-3 mt-4 mb-4">
                         <TouchableOpacity
                             onPress={() => setConfigModal(null)}
                             className="flex-1 bg-white/10 py-3 rounded-xl items-center"
@@ -305,49 +522,97 @@ export const PlayerCorner: React.FC<PlayerCornerProps> = ({
                 dimmed={false}
                 className="max-w-sm"
             >
-                {/* Sticky search bar */}
-                <View className="px-4 pt-4 pb-2 border-b border-white/10">
-                    <Text className="text-white font-bold text-base mb-2">Pick Icon</Text>
-                    <TextInput
-                        value={searchQuery}
-                        onChangeText={setSearchQuery}
-                        placeholder="Search icons..."
-                        placeholderTextColor="#555"
-                        autoFocus
-                        className="bg-black/40 text-white rounded-lg px-4 py-2 border border-white/5"
+                <View style={{ height: modalHeight }} className="flex-col">
+                    {/* Sticky search bar */}
+                    <View className="px-4 pt-4 pb-2 border-b border-white/10">
+                        <View className="flex-row justify-between items-center mb-2">
+                            <Text className="text-white font-bold text-base">Pick Icon</Text>
+                            <View className="flex-row items-center gap-2">
+                                <TouchableOpacity
+                                    disabled={historyIndex <= 0}
+                                    onPress={() => {
+                                        if (historyIndex > 0) {
+                                            const prev = iconHistory[historyIndex - 1];
+                                            setHistoryIndex(historyIndex - 1);
+                                            setEditOp((p: Partial<PlayerOperation>) => ({ ...p, iconName: prev }));
+                                        }
+                                    }}
+                                    className={`px-2 py-1.5 rounded-lg ${historyIndex <= 0 ? "bg-white/5" : "bg-white/10"}`}
+                                >
+                                    <Icon icon={Icons.Undo} size={18} color={historyIndex <= 0 ? "#555" : "white"} />
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    disabled={historyIndex >= iconHistory.length - 1}
+                                    onPress={() => {
+                                        if (historyIndex < iconHistory.length - 1) {
+                                            const next = iconHistory[historyIndex + 1];
+                                            setHistoryIndex(historyIndex + 1);
+                                            setEditOp((p: Partial<PlayerOperation>) => ({ ...p, iconName: next }));
+                                        }
+                                    }}
+                                    className={`px-2 py-1.5 rounded-lg ${historyIndex >= iconHistory.length - 1 ? "bg-white/5" : "bg-white/10"}`}
+                                >
+                                    <Icon
+                                        icon={Icons.Redo}
+                                        size={18}
+                                        color={historyIndex >= iconHistory.length - 1 ? "#555" : "white"}
+                                    />
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    onPress={() => {
+                                        setIconPickerOpen(false);
+                                        setSearchQuery("");
+                                    }}
+                                    className="bg-blue-600 px-4 py-1.5 rounded-lg ml-1"
+                                >
+                                    <Text className="text-white font-medium text-sm">
+                                        Select {editOp.iconName ? `(${editOp.iconName})` : ""}
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                        <TextInput
+                            value={searchQuery}
+                            onChangeText={setSearchQuery}
+                            placeholder="Search icons..."
+                            placeholderTextColor="#555"
+                            autoFocus
+                            className="bg-black/40 text-white rounded-lg px-4 py-2 border border-white/5"
+                        />
+                    </View>
+                    <FlatList
+                        ref={flatListRef}
+                        data={filteredIcons}
+                        keyExtractor={(item) => item}
+                        numColumns={5}
+                        keyboardShouldPersistTaps="handled"
+                        showsVerticalScrollIndicator={true}
+                        indicatorStyle="white"
+                        contentContainerStyle={{ padding: 8 }}
+                        columnWrapperStyle={{ gap: 4, marginBottom: 4 }}
+                        initialNumToRender={50}
+                        maxToRenderPerBatch={50}
+                        windowSize={10}
+                        removeClippedSubviews={true}
+                        onLayout={(e) => {
+                            setPickerWidth(e.nativeEvent.layout.width);
+                            // Once the list is laid out, scroll to the selected icon if one exists
+                            if (editOp.iconName && !searchQuery) {
+                                const idx = filteredIcons.indexOf(editOp.iconName);
+                                if (idx > 0) {
+                                    flatListRef.current?.scrollToIndex({ index: idx, animated: false, viewPosition: 0.4 });
+                                }
+                            }
+                        }}
+                        onScrollToIndexFailed={(info) => {
+                            // Fallback: wait for render then retry
+                            setTimeout(() => {
+                                flatListRef.current?.scrollToIndex({ index: info.index, animated: false, viewPosition: 0.4 });
+                            }, 100);
+                        }}
+                        renderItem={renderIconItem}
                     />
                 </View>
-                <FlatList
-                    data={filteredIcons}
-                    keyExtractor={(item) => item}
-                    numColumns={5}
-                    keyboardShouldPersistTaps="handled"
-                    showsVerticalScrollIndicator={true}
-                    indicatorStyle="white"
-                    contentContainerStyle={{ padding: 8 }}
-                    columnWrapperStyle={{ gap: 4, marginBottom: 4 }}
-                    renderItem={({ item: name }) => {
-                        const IconComp = (Icons as any)[name];
-                        if (!IconComp) return null;
-                        const isSelected = editOp.iconName === name;
-                        return (
-                            <TouchableOpacity
-                                onPress={() => {
-                                    setEditOp((p) => ({ ...p, iconName: name }));
-                                    setIconPickerOpen(false);
-                                    setSearchQuery("");
-                                }}
-                                style={{ flex: 1, aspectRatio: 1 }}
-                                className={cn(
-                                    "items-center justify-center rounded-lg",
-                                    isSelected ? "bg-blue-600" : "bg-white/5",
-                                )}
-                            >
-                                <Icon icon={IconComp} size={20} color={isSelected ? "white" : "#aaa"} />
-                            </TouchableOpacity>
-                        );
-                    }}
-                />
             </AppModal>
         </>
     );
@@ -362,10 +627,12 @@ interface PieButtonsProps {
     labelRadius: number;
     onExecuteOperation: (op: PlayerOperation) => void;
     onSetConfigModal: (modal: { slotIndex: number; op: PlayerOperation | null } | null) => void;
+    hasNext: boolean;
+    hasPrev: boolean;
 }
 
 const PieButtons = React.memo<PieButtonsProps>(
-    ({ ops, isLeft, isTop, pieRadius, piePadding, labelRadius, onExecuteOperation, onSetConfigModal }) => {
+    ({ ops, isLeft, isTop, pieRadius, piePadding, labelRadius, onExecuteOperation, onSetConfigModal, hasNext, hasPrev }) => {
         const angles = [0, 30, 60, 90];
 
         return (
@@ -400,16 +667,21 @@ const PieButtons = React.memo<PieButtonsProps>(
                     const lTranslateY = isTop ? ly + piePadding : -(ly + piePadding);
 
                     const op = ops[index];
+                    const isDisabled = op && (
+                        (op.type === "play-next" && !hasNext) ||
+                        (op.type === "play-prev" && !hasPrev)
+                    );
                     const IconComp = op ? (Icons as any)[op.iconName] || Icons.HelpCircle : Icons.Plus;
 
                     return (
                         <React.Fragment key={index}>
                             <TouchableOpacity
-                                onPress={() => (op ? onExecuteOperation(op) : onSetConfigModal({ slotIndex: index, op: null }))}
+                                onPress={() => (op ? (!isDisabled && onExecuteOperation(op)) : onSetConfigModal({ slotIndex: index, op: null }))}
                                 onLongPress={() => op && onSetConfigModal({ slotIndex: index, op })}
                                 className={cn(
                                     "absolute w-12 h-12 rounded-full items-center justify-center border border-white/20 bg-black/80 shadow-lg",
                                     !op && "bg-black/25",
+                                    isDisabled && "opacity-30",
                                 )}
                                 style={{
                                     left: isLeft ? 0 : undefined,

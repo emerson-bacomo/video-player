@@ -86,7 +86,7 @@ export const PlayerCentralIndicator: React.FC<PlayerCentralIndicatorProps> = ({
                 return (
                     <View className="flex-row items-center gap-1.5 px-0.5">
                         <Zap width={FONT_SIZE_DEFAULT} height={FONT_SIZE_DEFAULT} color={iconColor} fill={iconColor} />
-                        <Text style={{ fontSize: 18, color: textColor }} className="font-black tracking-tight">
+                        <Text style={{ fontSize: FONT_SIZE_DEFAULT, color: textColor }} className="font-black tracking-tight">
                             {indicator.label}
                         </Text>
                     </View>
@@ -124,6 +124,7 @@ export const PlayerCentralIndicator: React.FC<PlayerCentralIndicatorProps> = ({
     return (
         <View className={`absolute inset-0 items-center pointer-events-none z-50 ${isActionIcon ? "justify-center" : ""}`}>
             <Animated.View
+                key={isActionIcon ? "action" : "pill"}
                 onLayout={(e) => {
                     pillHeight.value = e.nativeEvent.layout.height;
                 }}

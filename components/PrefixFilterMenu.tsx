@@ -52,7 +52,7 @@ export const PrefixFilterMenu = ({
     };
 
     return (
-        <Menu variant="POPUP" anchorHorizontal="center" horizontalScreenFill={true} maxWidth="fit-content" onOpen={handleOpen}>
+        <Menu variant="POPUP" anchorHorizontal="center" horizontalScreenFill={true} onOpen={handleOpen}>
             <Menu.Trigger
                 activeOpacity={0.7}
                 className={cn(

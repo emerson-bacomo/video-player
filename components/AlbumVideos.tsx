@@ -74,6 +74,7 @@ export const AlbumVideos = ({
         clearPrefixFilters,
         setLoadingTask,
         setThumbnailPriorityAlbum,
+        regenerateVideoThumbnails,
     } = useMedia();
 
     const albumInfo = album || { title: "Album", assetCount: 0 };
@@ -124,13 +125,35 @@ export const AlbumVideos = ({
                     const parsed = JSON.parse(dbOptionsStr);
                     if (parsed && parsed.length > 0) {
                         setPrefixOptions(parsed);
+                        return;
                     }
                 } catch (e) {}
             }
+
+            // Fallback for virtual albums or missing data: compute on the fly
+            if (videos && videos.length > 0) {
+                const prefixCounts: Record<string, number> = {};
+                videos.forEach((v) => {
+                    if (v.prefix) {
+                        prefixCounts[v.prefix] = (prefixCounts[v.prefix] || 0) + 1;
+                    }
+                });
+
+                const options = Object.entries(prefixCounts)
+                    .filter(([_, count]) => count > 1)
+                    .map(([prefix, count]) => ({
+                        value: prefix,
+                        label: prefix,
+                        count,
+                    }))
+                    .sort((a, b) => a.label.localeCompare(b.label));
+
+                setPrefixOptions(options);
+            }
         };
 
-        setTimeout(loadPrefixOptions, 0);
-    }, [id]);
+        loadPrefixOptions();
+    }, [id, videos]);
 
     const skeletonData = React.useMemo(
         () => Array.from({ length: 10 }).map((_, i) => ({ id: `skel-${i}`, isPlaceholder: true })),
@@ -197,7 +220,7 @@ export const AlbumVideos = ({
                 detail: "Processing layout...",
             });
         } else {
-            setLoadingTask(null);
+            setLoadingTask(null, "album-render");
         }
     }, [isDisplayingSkeletons, videos, deferredProcessedVideos, setLoadingTask]);
 
@@ -232,6 +255,97 @@ export const AlbumVideos = ({
         );
     };
 
+    const selectionActions = useMemo(
+        () => [
+            {
+                label: isSelectionWatched ? "Mark as Unwatched" : "Mark as Watched",
+                icon: isSelectionWatched ? Circle : CheckCircle,
+                onPress: (ids: Set<string>) => {
+                    const idsArray = Array.from(ids);
+                    const newProgress = isSelectionWatched ? -1 : Infinity;
+
+                    updateMultipleVideoProgress(idsArray, newProgress);
+                    clearSelection();
+                },
+            },
+
+            ...(hasSelectionPrefixes
+                ? [
+                      {
+                          label: "Select same prefix",
+                          icon: Film,
+                          onPress: () => {
+                              selectPrefixesOfSelected(id);
+                          },
+                      },
+                  ]
+                : []),
+            {
+                label: "Move",
+                icon: FolderInput,
+                onPress: (ids: Set<string>) => {
+                    console.log("Move multiple videos", Array.from(ids));
+                },
+            },
+            {
+                label: "Hide Selected",
+                icon: EyeOff,
+                onPress: (ids: Set<string>) => {
+                    hideMultipleVideos(Array.from(ids));
+                    clearSelection();
+                },
+            },
+            {
+                label: "Delete",
+                icon: Trash2,
+                destructive: true,
+                onPress: (ids: Set<string>) => {
+                    router.push({
+                        pathname: "/delete-preview",
+                        params: { ids: Array.from(ids).join(","), type: "video" },
+                    });
+                },
+            },
+            {
+                label: "Regenerate Thumbnails",
+                icon: Film,
+                onPress: (ids: Set<string>) => {
+                    const selectedVideos = videos?.filter((v) => ids.has(v.id)) || [];
+                    regenerateVideoThumbnails(selectedVideos);
+                    clearSelection();
+                },
+            },
+            {
+                label: "Add to Prefix Filter",
+                icon: Hash,
+                onPress: (ids: Set<string>) => {
+                    const selectedPrefixes = new Set<string>();
+                    videos?.forEach((v) => {
+                        if (ids.has(v.id) && v.prefix) {
+                            selectedPrefixes.add(v.prefix);
+                        }
+                    });
+                    selectedPrefixes.forEach((p) => updatePrefixFilter(id, p, true));
+                    clearSelection();
+                },
+            },
+        ],
+        [
+            isSelectionWatched,
+            hasSelectionPrefixes,
+            updateMultipleVideoProgress,
+            clearSelection,
+            selectPrefixesOfSelected,
+            id,
+            hideMultipleVideos,
+            videos,
+            regenerateVideoThumbnails,
+            updatePrefixFilter,
+        ],
+    );
+
+    const processedData = deferredProcessedVideos.filter((v: any) => !v.isPlaceholder);
+
     return (
         <ThemedView className="flex-1" style={{ paddingTop: insets.top }}>
             <StatusBar style="light" />
@@ -253,60 +367,7 @@ export const AlbumVideos = ({
                     </TouchableOpacity>
                 </Header.Actions>
 
-                <Header.SelectionActions
-                    data={deferredProcessedVideos.filter((v: any) => !v.isPlaceholder)}
-                    actions={[
-                        {
-                            label: isSelectionWatched ? "Mark as Unwatched" : "Mark as Watched",
-                            icon: isSelectionWatched ? Circle : CheckCircle,
-                            onPress: (ids) => {
-                                const idsArray = Array.from(ids);
-                                const newProgress = isSelectionWatched ? -1 : Infinity;
-
-                                updateMultipleVideoProgress(idsArray, newProgress);
-                                clearSelection();
-                            },
-                        },
-
-                        ...(hasSelectionPrefixes
-                            ? [
-                                  {
-                                      label: "Select same prefix",
-                                      icon: Film,
-                                      onPress: () => {
-                                          selectPrefixesOfSelected(id);
-                                      },
-                                  },
-                              ]
-                            : []),
-                        {
-                            label: "Move",
-                            icon: FolderInput,
-                            onPress: (ids) => {
-                                console.log("Move multiple videos", Array.from(ids));
-                            },
-                        },
-                        {
-                            label: "Hide Selected",
-                            icon: EyeOff,
-                            onPress: (ids) => {
-                                hideMultipleVideos(Array.from(ids));
-                                clearSelection();
-                            },
-                        },
-                        {
-                            label: "Delete",
-                            icon: Trash2,
-                            destructive: true,
-                            onPress: (ids) => {
-                                router.push({
-                                    pathname: "/delete-preview",
-                                    params: { ids: Array.from(ids).join(","), type: "video" },
-                                });
-                            },
-                        },
-                    ]}
-                />
+                <Header.SelectionActions data={processedData} actions={selectionActions} />
             </Header>
 
             <FlatList
@@ -479,6 +540,32 @@ export const AlbumVideos = ({
                             <Icon icon={EyeOff} size={22} className="text-secondary" />
                             <Text className="text-text text-base font-medium">Hide</Text>
                         </TouchableOpacity>
+
+                        <TouchableOpacity
+                            className="flex-row items-center px-4 py-4 gap-4"
+                            onPress={() => {
+                                const videoToRegen = menuVideo;
+                                setMenuVideo(null);
+                                regenerateVideoThumbnails([videoToRegen]);
+                            }}
+                        >
+                            <Icon icon={Film} size={22} className="text-secondary" />
+                            <Text className="text-text text-base font-medium">Regenerate thumbnail</Text>
+                        </TouchableOpacity>
+
+                        {menuVideo.prefix && prefixOptions.some((o) => o.value === menuVideo.prefix) && (
+                            <TouchableOpacity
+                                className="flex-row items-center px-4 py-4 gap-4"
+                                onPress={() => {
+                                    const prefix = menuVideo.prefix!;
+                                    setMenuVideo(null);
+                                    updatePrefixFilter(id, prefix, true);
+                                }}
+                            >
+                                <Icon icon={Hash} size={22} className="text-secondary" />
+                                <Text className="text-text text-base font-medium">Add to prefix filter</Text>
+                            </TouchableOpacity>
+                        )}
 
                         <View className="h-[1px] bg-border/50 my-2 mx-4" />
 

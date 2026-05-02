@@ -71,32 +71,43 @@ export default function LogsScreen() {
 
         return (
             <View className="mb-3 border-b border-zinc-800 pb-3">
-                <View className="flex-row items-center gap-2 mb-1">
-                    <Icon
-                        icon={isError ? AlertCircle : isWarning ? AlertTriangle : Info}
-                        size={14}
-                        className={cn(isError ? "text-red-500" : isWarning ? "text-yellow-500" : "text-blue-500")}
-                    />
-                    <Text className="text-[10px] text-zinc-500 font-mono">{format(item.timestamp, "yyyy-MM-dd HH:mm:ss")}</Text>
-                    <View
-                        className={cn(
-                            "px-1.5 py-0.5 rounded",
-                            isError ? "bg-red-500/10" : isWarning ? "bg-yellow-500/10" : "bg-blue-500/10",
-                        )}
-                    >
-                        <Text
+                <View className="flex-row items-center justify-between mb-1.5">
+                    <View className="flex-row items-center gap-2">
+                        <Icon
+                            icon={isError ? AlertCircle : isWarning ? AlertTriangle : Info}
+                            size={14}
+                            className={cn(isError ? "text-red-500" : isWarning ? "text-yellow-500" : "text-blue-500")}
+                        />
+                        <View
                             className={cn(
-                                "text-[8px] font-bold",
-                                isError ? "text-red-500" : isWarning ? "text-yellow-500" : "text-blue-500",
+                                "px-1.5 py-0.5 rounded",
+                                isError ? "bg-red-500/10" : isWarning ? "bg-yellow-500/10" : "bg-blue-500/10",
                             )}
                         >
-                            {item.level}
-                        </Text>
+                            <Text
+                                className={cn(
+                                    "text-[8px] font-bold",
+                                    isError ? "text-red-500" : isWarning ? "text-yellow-500" : "text-blue-500",
+                                )}
+                            >
+                                {item.level}
+                            </Text>
+                        </View>
+                        <View className="px-1.5 py-0.5 rounded bg-zinc-800/50 border border-zinc-700/50">
+                            <Text className="text-[8px] text-zinc-400 font-bold uppercase tracking-tight">
+                                {item.action}
+                            </Text>
+                        </View>
                     </View>
+                    <Text className="text-[10px] text-zinc-500 font-mono">
+                        {format(item.timestamp, "yyyy-MM-dd HH:mm:ss")}
+                    </Text>
                 </View>
                 <Text className="text-text text-sm font-medium leading-5">{item.message}</Text>
                 {item.details && (
-                    <Text className="text-zinc-500 text-xs mt-1 font-mono bg-zinc-900/50 p-2 rounded">{item.details}</Text>
+                    <Text className="text-zinc-500 text-xs mt-1 font-mono bg-zinc-900/50 p-2 rounded">
+                        {item.details}
+                    </Text>
                 )}
             </View>
         );
@@ -118,7 +129,7 @@ export default function LogsScreen() {
             </Header>
 
             <View className="flex-row justify-end px-4 py-2 items-center gap-2">
-                <Menu variant="POPUP" anchorHorizontal="center" horizontalScreenFill={true} maxWidth="fit-content">
+                <Menu variant="POPUP" anchorHorizontal="center" horizontalScreenFill={true}>
                     <Menu.Trigger
                         activeOpacity={0.7}
                         className={cn(

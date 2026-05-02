@@ -1,18 +1,33 @@
 import { Icon } from "@/components/Icon";
 import { ChevronDown, ChevronRight, Folder, Palette, Settings, Video } from "lucide-react-native";
+import * as Icons from "lucide-react-native";
 import React, { useMemo, useState } from "react";
-import { SectionList, Text, TouchableOpacity, View } from "react-native";
+import { SectionList, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ConfigData } from "@/utils/configManager";
 import { cn } from "@/lib/utils";
 
 interface VpcPreviewProps {
     configData: ConfigData;
     ListHeaderComponent?: React.ReactElement;
+    selectedIds: Set<string>;
+    onToggleId: (id: string) => void;
 }
 
-export function VpcPreview({ configData, ListHeaderComponent }: VpcPreviewProps) {
+export function VpcPreview({ configData, ListHeaderComponent, selectedIds, onToggleId }: VpcPreviewProps) {
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
+    const [pages, setPages] = useState<Record<string, number>>({});
+    const insets = useSafeAreaInsets();
+    const { height: viewportHeight } = useWindowDimensions();
+
+    const ITEM_HEIGHT = 64;
+    const TOP_CONTROLS_HEIGHT = 160; // Approximate height of headers/insets/warnings
+
+    const pageSize = useMemo(() => {
+        const availableHeight = viewportHeight - insets.top - insets.bottom - TOP_CONTROLS_HEIGHT;
+        return Math.max(5, Math.floor(availableHeight / ITEM_HEIGHT));
+    }, [viewportHeight, insets]);
 
     const formatTime = (seconds: number) => {
         if (seconds < 0) return "Never played";
@@ -28,9 +43,13 @@ export function VpcPreview({ configData, ListHeaderComponent }: VpcPreviewProps)
         }));
     };
 
-    const sections = useMemo(
-        () => [
-            {
+    const sections = useMemo(() => {
+        const result = [];
+
+        // 1. Settings
+        const settingsCount = Object.keys(configData.settings || {}).length;
+        if (settingsCount > 0) {
+            result.push({
                 title: "Settings",
                 icon: Settings,
                 type: "settings",
@@ -38,81 +57,115 @@ export function VpcPreview({ configData, ListHeaderComponent }: VpcPreviewProps)
                     ? []
                     : [
                           {
-                              id: "global-settings",
+                              id: "settings",
                               label: "Global Configuration",
-                              sub: `${Object.keys(configData.settings || {}).length} values`,
+                              sub: `${settingsCount} values`,
                               raw: configData.settings,
                           },
                       ],
-                count: Object.keys(configData.settings || {}).length,
-            },
-            {
+                count: settingsCount,
+            });
+        }
+
+        // 2. Themes
+        if (configData.themes && configData.themes.length > 0) {
+            const currentPage = pages["Themes"] || 1;
+            const data = configData.themes.map((t) => ({
+                id: `theme:${t.name}`,
+                label: t.name,
+                sub: `${Object.keys(t.colors || {}).length} colors`,
+                raw: t,
+            }));
+
+            result.push({
                 title: "Themes",
                 icon: Palette,
                 type: "theme",
-                data: collapsedSections["Themes"]
-                    ? []
-                    : configData.themes.map((t) => ({
-                          id: String(t.id),
-                          label: t.name,
-                          sub: `${Object.keys(t.colors || {}).length} colors`,
-                          raw: t,
-                      })),
-                count: configData.themes.length,
-            },
-            {
+                data: collapsedSections["Themes"] ? [] : data.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+                count: data.length,
+            });
+        }
+
+        // 3. Videos
+        if (configData.videos && configData.videos.length > 0) {
+            const currentPage = pages["Videos"] || 1;
+            const data = configData.videos.map((v) => ({
+                id: `video:${v.uri}`,
+                label: v.uri.split("/").pop(),
+                sub: v.uri,
+                raw: v,
+            }));
+
+            result.push({
                 title: "Videos",
                 icon: Video,
                 type: "video",
-                data: collapsedSections["Videos"]
-                    ? []
-                    : configData.videos.slice(0, 10).map((v) => ({
-                          id: v.uri,
-                          label: v.uri.split("/").pop(),
-                          sub: v.uri,
-                          raw: v,
-                      })),
-                count: configData.videos.length,
-            },
-            {
+                data: collapsedSections["Videos"] ? [] : data.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+                count: data.length,
+            });
+        }
+
+        // 4. Albums
+        if (configData.albums && configData.albums.length > 0) {
+            const currentPage = pages["Albums"] || 1;
+            const data = configData.albums.map((a) => ({
+                id: `album:${a.uri}`,
+                label: a.uri.split("/").pop(),
+                sub: a.uri,
+                raw: a,
+            }));
+
+            result.push({
                 title: "Albums",
                 icon: Folder,
                 type: "album",
-                data: collapsedSections["Albums"]
-                    ? []
-                    : configData.albums.slice(0, 10).map((a) => ({
-                          id: a.uri,
-                          label: a.uri.split("/").pop(),
-                          sub: a.uri,
-                          raw: a,
-                      })),
-                count: configData.albums.length,
-            },
-        ],
-        [configData, collapsedSections],
-    );
+                data: collapsedSections["Albums"] ? [] : data.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+                count: data.length,
+            });
+        }
+
+        return result;
+    }, [configData, collapsedSections, pages, pageSize]);
 
     const renderItem = ({ item, section }: { item: any; section: any }) => {
         const isExpanded = expandedId === item.id;
+        const isSelected = selectedIds.has(item.id);
         const raw = item.raw;
 
         return (
             <View className="border-b border-white/5">
-                <TouchableOpacity
-                    activeOpacity={0.7}
-                    onPress={() => setExpandedId(isExpanded ? null : item.id)}
-                    className="px-4 py-3 flex-row gap-3 items-center justify-between bg-black"
-                >
-                    <Icon icon={isExpanded ? ChevronDown : ChevronRight} size={16} className="text-text" />
-                    <View className="flex-1">
-                        <Text className="text-zinc-100 font-medium" numberOfLines={1}>
-                            {item.label}
-                        </Text>
-                        <Text className="text-zinc-500 text-xs mt-0.5" numberOfLines={1}>
-                            {item.sub}
-                        </Text>
-                    </View>
-                </TouchableOpacity>
+                <View className="flex-row items-center bg-black">
+                    <TouchableOpacity
+                        activeOpacity={0.7}
+                        onPress={() => setExpandedId(isExpanded ? null : item.id)}
+                        className="flex-1 px-4 py-3 flex-row gap-3 items-center"
+                    >
+                        <Icon icon={isExpanded ? ChevronDown : ChevronRight} size={16} className="text-text" />
+                        <View className="flex-1">
+                            <Text className="text-zinc-100 font-medium" numberOfLines={1}>
+                                {item.label}
+                            </Text>
+                            <Text className="text-zinc-500 text-xs mt-0.5" numberOfLines={1}>
+                                {item.sub}
+                            </Text>
+                        </View>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        onPress={() => onToggleId(item.id)}
+                        className="p-4"
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                        <View
+                            className={cn(
+                                "w-6 h-6 rounded-md border-2 items-center justify-center",
+                                isSelected ? "bg-primary border-primary" : "border-zinc-700 bg-transparent",
+                            )}
+                        >
+                            {isSelected && <Icon icon={Icons.Check} size={14} color="white" />}
+                        </View>
+                    </TouchableOpacity>
+                </View>
 
                 {isExpanded && (
                     <View className="px-4 py-3 bg-zinc-900/50 gap-2 ml-11 mr-5">
@@ -132,10 +185,43 @@ export function VpcPreview({ configData, ListHeaderComponent }: VpcPreviewProps)
                                         </Text>
                                     </View>
                                 )}
-                                {raw.markers !== undefined && (
-                                    <View className="flex-row justify-between">
-                                        <Text className="text-zinc-500 text-xs">Markers</Text>
-                                        <Text className="text-zinc-300 text-xs font-medium">{raw.markers.length} markers</Text>
+                                {raw.markers !== undefined && raw.markers.length > 0 && (
+                                    <View className="mt-1">
+                                        <Text className="text-zinc-500 text-[10px] font-bold uppercase mb-1.5">
+                                            Markers ({raw.markers.length})
+                                        </Text>
+                                        <View className="flex-row flex-wrap gap-1.5">
+                                            {raw.markers.map((m: any, idx: number) => (
+                                                <View
+                                                    key={idx}
+                                                    className="bg-zinc-800/80 px-2 py-1 rounded border border-white/5 flex-row items-center gap-1"
+                                                >
+                                                    <View className="w-1 h-1 rounded-full bg-primary" />
+                                                    <Text className="text-zinc-300 text-[10px] font-mono">
+                                                        {formatTime(m.time)}
+                                                    </Text>
+                                                </View>
+                                            ))}
+                                        </View>
+                                    </View>
+                                )}
+                                {raw.segments !== undefined && raw.segments.length > 0 && (
+                                    <View className="mt-1">
+                                        <Text className="text-zinc-500 text-[10px] font-bold uppercase mb-1.5">
+                                            Segments ({raw.segments.length})
+                                        </Text>
+                                        <View className="flex-row flex-wrap gap-1.5">
+                                            {raw.segments.map((s: any, idx: number) => (
+                                                <View
+                                                    key={idx}
+                                                    className="bg-zinc-800/80 px-2 py-1 rounded border border-white/5"
+                                                >
+                                                    <Text className="text-zinc-300 text-[10px] font-mono">
+                                                        {s.start.toFixed(1)}s - {s.end.toFixed(1)}s
+                                                    </Text>
+                                                </View>
+                                            ))}
+                                        </View>
                                     </View>
                                 )}
                                 {raw.isHidden && (
@@ -192,7 +278,45 @@ export function VpcPreview({ configData, ListHeaderComponent }: VpcPreviewProps)
                                         );
                                     }
 
-                                    if (typeof value === "object" && value !== null) return null;
+                                    if (typeof value === "object" && value !== null) {
+                                        // Handle cornerConfigs (Pie Menu Operations)
+                                        if (key === "cornerConfigs") {
+                                            return (
+                                                <View key={key} className="mt-1">
+                                                    <Text className="text-zinc-500 text-[10px] font-bold uppercase mb-1">
+                                                        Pie Menu Operations
+                                                    </Text>
+                                                    {Object.entries(value).map(([pos, ops]: [string, any]) => (
+                                                        <View key={pos} className="mb-2">
+                                                            <Text className="text-zinc-600 text-[9px] uppercase mb-1">
+                                                                {pos.replace("-", " ")}
+                                                            </Text>
+                                                            <View className="flex-row flex-wrap gap-1">
+                                                                {(ops as any[]).map((op, idx) =>
+                                                                    op ? (
+                                                                        <View
+                                                                            key={idx}
+                                                                            className="flex-row items-center bg-zinc-800/50 px-2 py-1 rounded border border-white/5 gap-1.5"
+                                                                        >
+                                                                            <Icon
+                                                                                icon={(Icons as any)[op.iconName] || Icons.HelpCircle}
+                                                                                size={10}
+                                                                                color="white"
+                                                                            />
+                                                                            <Text className="text-zinc-200 text-[9px]">
+                                                                                {op.label}
+                                                                            </Text>
+                                                                        </View>
+                                                                    ) : null,
+                                                                )}
+                                                            </View>
+                                                        </View>
+                                                    ))}
+                                                </View>
+                                            );
+                                        }
+                                        return null;
+                                    }
                                     return (
                                         <View key={key} className="flex-row justify-between">
                                             <Text className="text-zinc-500 text-xs capitalize">
@@ -275,18 +399,36 @@ export function VpcPreview({ configData, ListHeaderComponent }: VpcPreviewProps)
                 </TouchableOpacity>
             )}
             renderItem={renderItem}
+            renderSectionFooter={({ section }) => {
+                if (collapsedSections[section.title] || section.count <= pageSize) return null;
+                const currentPage = pages[section.title] || 1;
+                const totalPages = Math.ceil(section.count / pageSize);
+
+                return (
+                    <View className="flex-row items-center justify-between px-4 py-3 bg-zinc-900/30 border-b border-white/5">
+                        <TouchableOpacity
+                            disabled={currentPage === 1}
+                            onPress={() => setPages((p) => ({ ...p, [section.title]: currentPage - 1 }))}
+                            className={cn("px-3 py-1 rounded-lg", currentPage === 1 ? "opacity-30" : "bg-white/5")}
+                        >
+                            <Text className="text-white text-xs">Previous</Text>
+                        </TouchableOpacity>
+                        <Text className="text-zinc-500 text-[10px]">
+                            Page {currentPage} of {totalPages}
+                        </Text>
+                        <TouchableOpacity
+                            disabled={currentPage === totalPages}
+                            onPress={() => setPages((p) => ({ ...p, [section.title]: currentPage + 1 }))}
+                            className={cn("px-3 py-1 rounded-lg", currentPage === totalPages ? "opacity-30" : "bg-white/5")}
+                        >
+                            <Text className="text-white text-xs">Next</Text>
+                        </TouchableOpacity>
+                    </View>
+                );
+            }}
             stickySectionHeadersEnabled={false}
             contentContainerStyle={{ paddingBottom: 40 }}
             ListHeaderComponent={ListHeaderComponent}
-            ListFooterComponent={
-                (configData.videos.length > 10 && !collapsedSections["Videos"]) ||
-                (configData.albums.length > 10 && !collapsedSections["Albums"]) ? (
-                    <Text className="text-zinc-500 text-center py-6 text-xs italic">
-                        ... and {Math.max(0, configData.videos.length - 10) + Math.max(0, configData.albums.length - 10)} more
-                        items
-                    </Text>
-                ) : null
-            }
         />
     );
 }

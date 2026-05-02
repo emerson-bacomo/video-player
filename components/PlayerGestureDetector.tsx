@@ -107,6 +107,7 @@ export function PlayerGestureDetector({
         () =>
             Gesture.Tap()
                 .numberOfTaps(1)
+                .maxDuration(500)
                 .maxDistance(15)
                 .runOnJS(true)
                 .onEnd((event) => {
@@ -143,6 +144,7 @@ export function PlayerGestureDetector({
         () =>
             Gesture.Tap()
                 .numberOfTaps(2)
+                .maxDuration(500)
                 .maxDistance(15)
                 .runOnJS(true)
                 .onEnd((event) => {
@@ -304,12 +306,13 @@ export function PlayerGestureDetector({
 
     // Compose
     const composedGesture = useMemo(() => {
-        // Taps are exclusive to prevent double-firings
-        const taps = Gesture.Exclusive(doubleTapGesture, singleTapGesture);
+        // Taps and LongPress are exclusive to prevent overlap.
+        // If a long press starts, it cancels the single tap.
+        const interactionGroup = Gesture.Exclusive(doubleTapGesture, longPressGesture, singleTapGesture);
 
-        // Everything else is simultaneous for maximum responsiveness
-        // Pan and LongPress are manually guarded via isSpeedHolding.current
-        return Gesture.Simultaneous(taps, panGesture, longPressGesture);
+        // Pan is simultaneous for maximum responsiveness.
+        // Pan and LongPress are manually guarded via isSpeedHolding.current and isActualPan.current.
+        return Gesture.Simultaneous(interactionGroup, panGesture);
     }, [doubleTapGesture, singleTapGesture, longPressGesture, panGesture]);
 
     return <GestureDetector gesture={composedGesture}>{children}</GestureDetector>;

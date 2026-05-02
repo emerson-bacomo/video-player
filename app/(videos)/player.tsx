@@ -21,8 +21,10 @@ import { useTheme } from "@/context/ThemeContext";
 import { useMedia } from "@/hooks/useMedia";
 import { usePlayerClip } from "@/hooks/usePlayerClip";
 import { useSafeNavigation } from "@/hooks/useSafeNavigation";
+import { useOrientationLock } from "@/hooks/useOrientationLock";
 import { useSettings } from "@/hooks/useSettings";
 import { toast } from "sonner-native";
+
 
 export default function PlayerScreen() {
     const { videoId, albumId, initialTime } = useLocalSearchParams<{
@@ -32,8 +34,8 @@ export default function PlayerScreen() {
     }>();
     const router = useRouter();
     const { safeBack } = useSafeNavigation();
-    const { settings, updateSettings } = useSettings();
-    const { getUnfilteredVideosForAlbum, setLoadingTask, fetchAlbums, updateVideoMarkers, allAlbumsVideos } = useMedia();
+    const { settings } = useSettings();
+    const { allAlbumsVideos, getUnfilteredVideosForAlbum, setLoadingTask } = useMedia();
 
     const activeVideo = useMemo(() => {
         if (!videoId || !albumId) return null;
@@ -65,7 +67,14 @@ export default function PlayerScreen() {
     const [paused, setPaused] = useState(true);
     const [isEnded, setIsEnded] = useState(false);
     const [playbackRate, setPlaybackRate] = useState(1.0);
-    const [duration, setDuration] = useState(0);
+    const [duration, setDuration] = useState(activeVideo?.duration || 0);
+
+    // Sync duration from metadata if it's missing (e.g. after hot reload)
+    useEffect(() => {
+        if (activeVideo?.duration && duration === 0) {
+            setDuration(activeVideo.duration);
+        }
+    }, [activeVideo?.duration, duration]);
     const playerRef = useRef<CorePlayerRef>({ currentTime: 0, seek: () => {} });
 
     const [showPieMenu, setShowPieMenu] = useState(false);
@@ -73,6 +82,7 @@ export default function PlayerScreen() {
     const isCornerModalOpen = useRef(false);
     const wasPlayingBeforePie = useRef(false);
     const [showSuccessBadge, setShowSuccessBadge] = useState(false);
+    useOrientationLock();
 
     const {
         isClipMode,
@@ -96,19 +106,20 @@ export default function PlayerScreen() {
         getNextMarkerTime,
         isInSegment,
         maxSegmentEndTime,
+        markers,
     } = usePlayerClip({
         activeVideo,
         videoId,
         duration,
         playerRef,
         setPaused,
-        settings,
-        updateSettings,
-        fetchAlbums,
-        setLoadingTask,
         showControls,
-        updateVideoMarkers,
+        currentDisplayTime,
     });
+
+    const { 
+        executeReexport, 
+    } = useMedia();
 
     const currentIndex = playlist.findIndex((v) => v.id === videoId);
     const hasNext = currentIndex !== -1 && currentIndex < playlist.length - 1;
@@ -118,6 +129,7 @@ export default function PlayerScreen() {
     const hasNextMarker = !!getNextMarkerTime(playerRef.current.currentTime);
 
     const isDraggingMarker = useRef(false);
+    const lastPreviewSeekTarget = useRef<number>(-1);
 
     // Handle auto-hide controls
     const resetControlsTimer = useCallback(() => {
@@ -139,12 +151,20 @@ export default function PlayerScreen() {
                 if (maxSegmentEndTime > 0 && posSec >= maxSegmentEndTime) {
                     setPreviewActive(false);
                     setPaused(true);
+                    lastPreviewSeekTarget.current = -1;
                 } else if (!isInSegment(posSec)) {
                     const nextStart = getNextClipStart(posSec);
-                    if (nextStart !== -1) {
+                    // Only allow forward seeking to skip gaps. Never seek backwards in the progress handler.
+                    if (nextStart !== -1 && nextStart !== lastPreviewSeekTarget.current && nextStart > posSec) {
+                        lastPreviewSeekTarget.current = nextStart;
                         playerRef.current.seek(nextStart);
                     }
+                } else {
+                    // Reset if we are successfully inside a segment
+                    lastPreviewSeekTarget.current = -1;
                 }
+            } else {
+                lastPreviewSeekTarget.current = -1;
             }
         },
         [isReadyForDisplay, previewActive, isInSegment, getNextClipStart, setPreviewActive, maxSegmentEndTime],
@@ -262,7 +282,7 @@ export default function PlayerScreen() {
     // On mount: clear any background task that isn't clip-related (e.g. thumbnail generation).
     // The player has its own LoadingStatus in PlayerHeader that only shows clip tasks anyway.
     useEffect(() => {
-        setLoadingTask((prev) => (prev && !prev.id?.startsWith("clip-") ? null : prev));
+        setLoadingTask(null, (id) => !id?.startsWith("clip-"));
     }, []);
 
     const handleCornerModalChange = useCallback((isOpen: boolean) => {
@@ -288,26 +308,7 @@ export default function PlayerScreen() {
         });
     }, [paused]);
 
-    const handleExecuteOperation = useCallback(
-        async (op: any) => {
-            if (op.type === "seek") {
-                const currentPos = playerRef.current.currentTime;
-                const deltaSec = op.value || 0;
-                const newTime = Math.max(0, Math.min(duration, currentPos + deltaSec));
-                playerRef.current.seek(newTime);
 
-                const iconName = op.value >= 0 ? "skip-fwd" : "skip-back";
-                setCentralIndicator({
-                    icon: iconName as any,
-                    label: op.label || `${op.value > 0 ? "+" : ""}${op.value}s`,
-                });
-
-                if (skipTimeout.current) clearTimeout(skipTimeout.current);
-                skipTimeout.current = setTimeout(() => setCentralIndicator(null), 800);
-            }
-        },
-        [duration],
-    );
 
     const brightnessTimeoutRef = useRef<any>(null);
     const handleBrightnessChange = useCallback((val: number) => {
@@ -439,8 +440,14 @@ export default function PlayerScreen() {
                             hasPermission={hasBrightnessPermission}
                             showPieMenu={showPieMenu && !showControls}
                             sensitivity={settings.brightnessSensitivity}
+                            playerRef={playerRef}
+                            duration={duration}
                             onDoubleTap={handleCornerDoubleTap}
-                            onExecuteOperation={handleExecuteOperation}
+                            onSkipNext={handleSkipNext}
+                            onSkipPrev={handleSkipPrevious}
+                            hasNext={hasNext}
+                            hasPrev={hasPrevious}
+                            onSetCentralIndicator={setCentralIndicator}
                             onModalChange={handleCornerModalChange}
                             onSingleTap={() => {
                                 if (isCornerModalOpen.current) return;
@@ -471,6 +478,10 @@ export default function PlayerScreen() {
                     video={activeVideo || undefined}
                     setPaused={setPaused}
                     onLayout={(e) => setHeaderLayout(e.nativeEvent.layout)}
+                    onReexport={async (clip, opts) => {
+                        await executeReexport(clip, opts);
+                        setShowSuccessBadge(true);
+                    }}
                 />
 
                 <PlayerControls
@@ -495,9 +506,19 @@ export default function PlayerScreen() {
                             resetControlsTimer();
                         }
                     }}
+                    markers={markers}
                     markerPairs={markerPairs}
                     previewActive={previewActive}
-                    onTogglePreview={() => setPreviewActive(!previewActive)}
+                    onTogglePreview={() => {
+                        if (!previewActive) {
+                            const firstStart = markerPairs.find((p) => p.id !== "pair-realtime")?.start.time;
+                            if (firstStart !== undefined && !isInSegment(playerRef.current.currentTime)) {
+                                playerRef.current.seek(firstStart);
+                            }
+                            setPaused(false);
+                        }
+                        setPreviewActive(!previewActive);
+                    }}
                     onAddMarker={() => {
                         addMarker(playerRef.current.currentTime);
                     }}
@@ -543,12 +564,9 @@ export default function PlayerScreen() {
                 headerLayout={headerLayout}
             />
 
-            <SuccessBadge
-                visible={showSuccessBadge && !showControls}
-                onVisible={setShowSuccessBadge}
-                duration={1000}
-                style={{ top: insets.top + 15 }}
-            />
+            {showSuccessBadge && !showControls && (
+                <SuccessBadge onVisible={setShowSuccessBadge} duration={1000} style={{ top: insets.top + 15, zIndex: 10000 }} />
+            )}
 
             {!hasBrightnessPermission && permissionChecked && (
                 <View className="absolute z-[100] inset-0 flex-1 bg-black justify-center items-center p-6">
@@ -581,14 +599,10 @@ export default function PlayerScreen() {
                     video={activeVideo}
                     segments={exportSegments}
                     defaultName={defaultExportName}
-                    onExport={(opts) => {
-                        executeExport(opts);
-                        if (!showControls) {
-                            setShowSuccessBadge(true);
-                        }
+                    onExport={async (opts) => {
+                        await executeExport(opts);
+                        setShowSuccessBadge(true);
                     }}
-                    settings={settings}
-                    updateSettings={updateSettings}
                 />
             )}
         </View>

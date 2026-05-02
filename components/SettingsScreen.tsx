@@ -1,3 +1,4 @@
+import { Orientation } from "@/constants/defaults";
 import { Button } from "@/components/Button";
 import { Header } from "@/components/Header";
 import { Icon } from "@/components/Icon";
@@ -5,12 +6,12 @@ import { LoadingStatus } from "@/components/LoadingStatus";
 import { ThemedCard, ThemedSafeAreaView } from "@/components/Themed";
 import { useTheme } from "@/context/ThemeContext";
 import { useMedia } from "@/hooks/useMedia";
-import { Orientation, useSettings } from "@/hooks/useSettings";
+import { useSettings } from "@/hooks/useSettings";
 import { cn } from "@/lib/utils";
 import { normalizeClipDestination } from "@/utils/clipDestination";
 import { pickAndValidateVpc, setPendingImportData } from "@/utils/configManager";
-import { Directory } from "expo-file-system";
 import * as FileSystem from "expo-file-system/legacy";
+import { DestinationPicker } from "./DestinationPicker";
 import { router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import {
@@ -20,7 +21,6 @@ import {
     Download,
     EyeOff,
     Filter,
-    FolderOpen,
     History,
     Monitor,
     Palette,
@@ -30,7 +30,6 @@ import {
     Sun,
     Trash2,
     Upload,
-    X,
 } from "lucide-react-native";
 import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
@@ -129,21 +128,7 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
         }
     };
 
-    const pickDirectory = async () => {
-        try {
-            const directory = await Directory.pickDirectoryAsync();
-            if (directory?.uri) {
-                const resolvedDestination = normalizeClipDestination(directory.uri);
-                if (!resolvedDestination) {
-                    console.warn("Failed to resolve picked clip destination", directory.uri);
-                    return;
-                }
-                updateSettings({ clipDestination: resolvedDestination });
-            }
-        } catch (err) {
-            console.warn("Failed to pick directory", err);
-        }
-    };
+    // pickDirectory removed as it's now in DestinationPicker
 
     const handleExport = () => {
         router.push("/export-vpc-preview");
@@ -233,32 +218,11 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
                     <Text className="text-zinc-500 text-sm font-bold uppercase tracking-wider mb-4">Clipping</Text>
                     <ThemedCard className="p-4">
                         <Text className="text-text font-semibold mb-2">Clip Destination Directory</Text>
-                        <View className="flex-row items-stretch gap-2">
-                            <TouchableOpacity
-                                className={cn(
-                                    "flex-1 p-4 rounded-xl border bg-background flex-row items-center justify-between",
-                                    !isDestinationValid ? "border-red-500/50" : "border-border",
-                                )}
-                                onPress={pickDirectory}
-                            >
-                                <Text
-                                    className={cn("text-text flex-1 mr-2", !settings.clipDestination && "text-secondary")}
-                                    numberOfLines={1}
-                                >
-                                    {settings.clipDestination || "Select directory..."}
-                                </Text>
-                                <Icon icon={FolderOpen} size={20} className="text-primary" />
-                            </TouchableOpacity>
-
-                            {settings.clipDestination ? (
-                                <TouchableOpacity
-                                    className="px-4 items-center justify-center bg-red-500/10 rounded-xl border border-red-500/20"
-                                    onPress={() => updateSettings({ clipDestination: "" })}
-                                >
-                                    <Icon icon={X} size={20} className="text-red-500" />
-                                </TouchableOpacity>
-                            ) : null}
-                        </View>
+                        <DestinationPicker
+                            value={settings.clipDestination || ""}
+                            onChange={(_, path) => updateSettings({ clipDestination: path })}
+                            isValid={isDestinationValid}
+                        />
 
                         {!isDestinationValid && (
                             <Text className="text-red-500 text-[10px] font-bold uppercase tracking-tighter mt-2 ml-1">

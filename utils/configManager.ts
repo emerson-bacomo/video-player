@@ -8,6 +8,7 @@ import {
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { toast } from "sonner-native";
+import JSZip from "jszip";
 import { normalizeClipDestination } from "./clipDestination";
 import {
     addLogDb,
@@ -99,24 +100,31 @@ export const generateConfigData = (currentSettings: any): ConfigData => {
     };
 };
 
-export const exportConfig = async (currentSettings: any): Promise<{ success: boolean; cancelled?: boolean }> => {
+export const exportConfig = async (
+    currentSettings: any,
+    overrideConfig?: ConfigData,
+): Promise<{ success: boolean; cancelled?: boolean }> => {
     try {
         addLogDb("INFO", "Export Data", "Starting config export");
 
-        const config = generateConfigData(currentSettings);
-
+        const config = overrideConfig || generateConfigData(currentSettings);
         const json = JSON.stringify(config, null, 2);
+
+        // 2. Create Zip
+        const zip = new JSZip();
+        zip.file("config.json", json);
+        const base64 = await zip.generateAsync({ type: "base64", compression: "DEFLATE" });
+
         const dateSuffix = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
         const fileName = `config-${dateSuffix}.vpc`;
 
-        // 4. Determine save directory — store the raw SAF tree URI, NOT the normalized file path
+        // 4. Determine save directory
         let rawDirectoryUri: string | null = getSettingDb("lastExportDirectoryUri");
 
         if (rawDirectoryUri) {
             try {
-                // Validate the SAF tree is still accessible
                 const perms = await FileSystem.StorageAccessFramework.readDirectoryAsync(rawDirectoryUri);
-                void perms; // just checking it doesn't throw
+                void perms;
             } catch {
                 rawDirectoryUri = "";
                 saveSettingDb("lastExportDirectoryUri", "");
@@ -124,9 +132,6 @@ export const exportConfig = async (currentSettings: any): Promise<{ success: boo
         }
 
         if (!rawDirectoryUri) {
-            // Use the legacy SAF picker — it returns a guaranteed content:// tree URI
-            // compatible with createFileAsync. The new Directory.pickDirectoryAsync() may
-            // return a file:// URI which breaks the SAF write flow.
             const result = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
             if (!result.granted) {
                 addLogDb("INFO", "Export Data", "Export cancelled by user");
@@ -135,18 +140,17 @@ export const exportConfig = async (currentSettings: any): Promise<{ success: boo
 
             rawDirectoryUri = result.directoryUri;
             saveSettingDb("lastExportDirectoryUri", rawDirectoryUri);
-            addLogDb("INFO", "Export Data", "Saved new export directory", rawDirectoryUri);
         }
 
-        // Write via SAF — createFileAsync returns a writable content:// document URI
+        // Write via SAF
         const fileContentUri = await FileSystem.StorageAccessFramework.createFileAsync(
             rawDirectoryUri,
             fileName,
-            "application/json",
+            "application/octet-stream",
         );
-        await FileSystem.writeAsStringAsync(fileContentUri, json);
+        await FileSystem.writeAsStringAsync(fileContentUri, base64, { encoding: FileSystem.EncodingType.Base64 });
 
-        // Track in DB with whatever display path we have
+        // Track in DB
         const displayPath = normalizeClipDestination(rawDirectoryUri) ?? rawDirectoryUri;
         const trackingPath = `${displayPath}/${fileName}`;
         addVpcExportDb(trackingPath, fileName, json);
@@ -160,7 +164,11 @@ export const exportConfig = async (currentSettings: any): Promise<{ success: boo
     }
 };
 
-export const applyConfigData = async (config: ConfigData, onSettingsLoaded: (settings: any) => Promise<void>) => {
+export const applyConfigData = async (
+    config: ConfigData,
+    onSettingsLoaded: (settings: any) => Promise<void>,
+    onDataChanged?: () => Promise<void>,
+) => {
     // 1. Apply Settings - Merge sparse with defaults
     if (config.settings) {
         try {
@@ -168,18 +176,25 @@ export const applyConfigData = async (config: ConfigData, onSettingsLoaded: (set
 
             // Check clipDestination permission if it's a content URI
             if (mergedSettings.clipDestination && mergedSettings.clipDestination.startsWith("content://")) {
+                console.log("[Import] Checking permission for clip destination:", mergedSettings.clipDestination);
+                let hasPermission = false;
                 try {
                     // Try to read directory to check permission
                     await FileSystem.StorageAccessFramework.readDirectoryAsync(mergedSettings.clipDestination);
+                    hasPermission = true;
                 } catch (e) {
+                    hasPermission = false;
+                }
+
+                if (!hasPermission) {
                     console.log("[Import] Permission missing for clip destination, asking user...");
+                    toast.info("Please grant permission for the imported clip destination.");
                     const result = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync(
                         mergedSettings.clipDestination,
                     );
                     if (result.granted) {
                         mergedSettings.clipDestination = result.directoryUri;
                     } else {
-                        // User denied, maybe reset it or keep as is (will fail later)
                         toast.error("Permission denied for clip destination. It may not work until updated in settings.");
                     }
                 }
@@ -277,13 +292,32 @@ export const applyConfigData = async (config: ConfigData, onSettingsLoaded: (set
             addLogDb("ERROR", "Import Data", "Failed to apply album data", error.message);
         }
     }
+
+    if (onDataChanged) {
+        // Small delay to ensure settings are flushed to context/refs
+        setTimeout(async () => {
+            await onDataChanged();
+        }, 100);
+    }
 };
 
+export const pickAndValidateVpcLegacy = async (assetUri: string): Promise<ConfigData | null> => {
+    try {
+        const content = await FileSystem.readAsStringAsync(assetUri);
+        const config: ConfigData = JSON.parse(content);
+        if (!config || !config.settings || !Array.isArray(config.videos) || !Array.isArray(config.albums)) {
+            return null;
+        }
+        return config;
+    } catch {
+        return null;
+    }
+};
 
 export const pickAndValidateVpc = async (): Promise<ConfigData | null> => {
     try {
         const result = await DocumentPicker.getDocumentAsync({
-            type: "*/*",
+            type: ["*/*"],
             copyToCacheDirectory: true,
         });
 
@@ -292,34 +326,40 @@ export const pickAndValidateVpc = async (): Promise<ConfigData | null> => {
         }
 
         const asset = result.assets[0];
-        // if (!asset.name.toLowerCase().endsWith(".vpc")) {
-        //     toast.error("Invalid file type. Please select a .vpc file.");
-        //     return null;
-        // }
+        const isJson = asset.name.toLowerCase().endsWith(".json");
+        const isVpc = asset.name.toLowerCase().endsWith(".vpc");
 
-        const content = await FileSystem.readAsStringAsync(asset.uri);
-        const config: ConfigData = JSON.parse(content);
-
-        if (!config || !config.settings || !Array.isArray(config.videos) || !Array.isArray(config.albums)) {
-            toast.error("Invalid .vpc file content.");
+        if (!isJson && !isVpc) {
+            toast.error("Invalid file type. Please select a .vpc or .json file.");
             return null;
         }
 
-        return config;
+        // Try as Zip first (New Format)
+        try {
+            const contentBase64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
+            const zip = await JSZip.loadAsync(contentBase64, { base64: true });
+            const configFile = zip.file("config.json");
+
+            if (configFile) {
+                const content = await configFile.async("string");
+                const config: ConfigData = JSON.parse(content);
+                if (config && config.settings) return config;
+            }
+        } catch (e) {
+            // Not a zip, continue to legacy check
+        }
+
+        // Fallback to Legacy JSON
+        const legacyConfig = await pickAndValidateVpcLegacy(asset.uri);
+        if (legacyConfig) {
+            if (isVpc) toast.info("Imported legacy .vpc format");
+            return legacyConfig;
+        }
+
+        toast.error("Invalid file content.");
+        return null;
     } catch (error: any) {
         toast.error("Failed to read file: " + error.message);
         return null;
     }
 };
-
-export const importConfig = async (
-    onSettingsLoaded: (settings: any) => Promise<void>,
-): Promise<{ success: boolean; cancelled?: boolean }> => {
-    // Legacy support or direct import if needed
-    const config = await pickAndValidateVpc();
-    if (!config) return { success: false, cancelled: true };
-
-    await applyConfigData(config, onSettingsLoaded);
-    return { success: true };
-};
-

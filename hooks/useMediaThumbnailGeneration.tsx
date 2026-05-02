@@ -1,4 +1,4 @@
-import { LoadingTask } from "@/components/LoadingStatus";
+import { SetLoadingTask } from "./useMediaLoadingTask";
 import * as FileSystem from "expo-file-system/legacy";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { unstable_batchedUpdates } from "react-native";
@@ -27,7 +27,7 @@ interface UseMediaThumbnailGenerationProps {
     albumSortRef: React.RefObject<AlbumSortConfig>;
     compareByVideoSort: (a: VideoMedia, b: VideoMedia, vSort?: VideoSortConfig) => number;
     getActiveVideoSort: (album: Album | null) => VideoSortConfig;
-    setLoadingTask: (task: LoadingTask | null) => void;
+    setLoadingTask: SetLoadingTask;
     mapVideoMetadata: (v: any) => VideoMedia;
 }
 
@@ -123,13 +123,11 @@ export const useMediaThumbnailGeneration = ({
     const hasActiveThumbnailWork = useCallback(() => activeWorkers.current > 0 || isDraining.current, []);
 
     const getAlbumThumbnailForVideos = useCallback(
-        (albumVideos: VideoMedia[], sortToUse?: VideoSortConfig) => {
+        (albumVideos: VideoMedia[], sortToUse: VideoSortConfig) => {
             if (albumVideos.length === 0) return undefined;
+
             const sortedVideos = [...albumVideos].sort((a, b) => compareByVideoSort(a, b, sortToUse));
-            const firstVideo = sortedVideos[0];
-            return (
-                firstVideo?.thumbnail || firstVideo?.baseThumbnailUri || (firstVideo ? getThumbnailUri(firstVideo.id) : undefined)
-            );
+            return sortedVideos[0]?.thumbnail;
         },
         [compareByVideoSort],
     );
@@ -178,7 +176,7 @@ export const useMediaThumbnailGeneration = ({
                 dismissAfter: THUMBNAIL_SUCCESS_MS,
             });
         } else {
-            setLoadingTask(null);
+            setLoadingTask(null, TASK_IDS.THUMBNAIL_GEN);
         }
         completedThumbnailCountRef.current = 0;
         totalThumbnailCountRef.current = 0;
@@ -235,8 +233,7 @@ export const useMediaThumbnailGeneration = ({
                 const latestTitle = batch[batch.length - 1]?.title ?? null;
                 const now = Date.now();
                 const shouldUpdateTask =
-                    latestTitle &&
-                    (lastLoadingDetailRef.current !== latestTitle || now - lastProgressUpdateRef.current > 100);
+                    latestTitle && (lastLoadingDetailRef.current !== latestTitle || now - lastProgressUpdateRef.current > 100);
 
                 unstable_batchedUpdates(() => {
                     if (shouldUpdateTask) {
@@ -393,9 +390,83 @@ export const useMediaThumbnailGeneration = ({
         } catch (e) {
             console.error("[useMediaThumbnailGeneration] Failed to clear cache:", e);
         } finally {
-            setLoadingTask(null);
+            setLoadingTask(null, TASK_IDS.CACHE_CLEAR);
         }
     }, [setAlbums, setAllAlbumsVideos, setLoadingTask, cancelThumbnailSession]);
+
+    const regenerateVideoThumbnails = useCallback(
+        async (videos: VideoMedia[]) => {
+            if (videos.length === 0) return;
+
+            try {
+                const videoIds = new Set(videos.map((v) => v.id));
+                const albumIds = new Set(videos.map((v) => v.albumId));
+
+                // 1. Delete thumbnail files and update DB for all videos
+                await Promise.all(
+                    videos.map(async (v) => {
+                        const thumbUri = getThumbnailUri(v.id);
+                        await FileSystem.deleteAsync(thumbUri, { idempotent: true });
+                        updateVideoThumbnailDb(v.id, "");
+                    }),
+                );
+
+                // 2. Update state in memory
+                unstable_batchedUpdates(() => {
+                    setAllAlbumsVideos((prev) => {
+                        const next = { ...prev };
+                        albumIds.forEach((albumId) => {
+                            if (albumId && next[albumId]) {
+                                next[albumId] = next[albumId].map((v) => {
+                                    if (videoIds.has(v.id)) {
+                                        return { ...v, thumbnail: undefined, baseThumbnailUri: getThumbnailUri(v.id) };
+                                    }
+                                    return v;
+                                });
+                            }
+                        });
+                        return next;
+                    });
+
+                    setAlbums((prev) => {
+                        let changed = false;
+                        const next = prev.map((album) => {
+                            if (!albumIds.has(album.id)) return album;
+                            // If the album's current thumbnail was one of the ones we just cleared,
+                            // we should probably clear it or wait for the new one.
+                            // The easiest way is to check if it points to a thumb_ file of a video we cleared.
+                            const matchingVideo = videos.find((v) => v.albumId === album.id && album.thumbnail?.includes(v.id));
+                            if (matchingVideo) {
+                                changed = true;
+                                updateAlbumThumbnailDb(album.id, "");
+                                return { ...album, thumbnail: undefined };
+                            }
+                            return album;
+                        });
+                        return changed ? next : prev;
+                    });
+                });
+
+                // 3. Add to queue
+                const newToQueue: VideoMedia[] = [];
+                videos.forEach((v) => {
+                    const videoToQueue = mapVideoMetadata({ ...v, thumbnail: undefined });
+                    if (!thumbnailQueue.current.some((p) => p.id === videoToQueue.id)) {
+                        newToQueue.push(videoToQueue);
+                    }
+                });
+
+                if (newToQueue.length > 0) {
+                    thumbnailQueue.current.push(...newToQueue);
+                    totalThumbnailCountRef.current = thumbnailQueue.current.length;
+                    processQueue();
+                }
+            } catch (e) {
+                console.error("[useMediaThumbnailGeneration] Failed to regenerate thumbnails:", e);
+            }
+        },
+        [setAllAlbumsVideos, setAlbums, mapVideoMetadata, processQueue],
+    );
 
     const generateThumbnails = useCallback(
         async (regenerate: boolean = false): Promise<void> => {
@@ -452,7 +523,7 @@ export const useMediaThumbnailGeneration = ({
                 console.error("[useMediaThumbnailGeneration] Generation failed:", e);
             } finally {
                 if (!didQueue && thumbnailQueue.current.length === 0) {
-                    setLoadingTask(null);
+                    setLoadingTask(null, TASK_IDS.THUMBNAIL_GEN);
                 }
             }
         },
@@ -483,6 +554,7 @@ export const useMediaThumbnailGeneration = ({
         getAlbumThumbnailForVideos,
         getThumbnailCached,
         updateAlbumRank,
+        regenerateVideoThumbnails,
         thumbnailQueue,
     };
 };

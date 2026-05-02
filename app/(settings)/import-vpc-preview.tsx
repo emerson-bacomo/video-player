@@ -16,6 +16,25 @@ export default function ImportVpcPreviewScreen() {
     const { loadDataFromDB } = useMedia();
     const [importing, setImporting] = useState(false);
     const [configData] = useState(getPendingImportData());
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+    useEffect(() => {
+        if (configData) {
+            const ids = new Set<string>();
+            ids.add("settings");
+            configData.themes.forEach((t) => ids.add(`theme:${t.name}`));
+            configData.videos.forEach((v) => ids.add(`video:${v.uri}`));
+            configData.albums.forEach((a) => ids.add(`album:${a.uri}`));
+            setSelectedIds(ids);
+        }
+    }, [configData]);
+
+    const handleToggleId = (id: string) => {
+        const next = new Set(selectedIds);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        setSelectedIds(next);
+    };
 
     useEffect(() => {
         if (!configData) {
@@ -29,13 +48,19 @@ export default function ImportVpcPreviewScreen() {
     const handleStartImport = async () => {
         setImporting(true);
         try {
-            await applyConfigData(configData, updateSettings);
-            
+            // Filter configData based on selection
+            const filteredConfig = {
+                settings: selectedIds.has("settings") ? configData.settings : {},
+                themes: configData.themes.filter((t) => selectedIds.has(`theme:${t.name}`)),
+                videos: configData.videos.filter((v) => selectedIds.has(`video:${v.uri}`)),
+                albums: configData.albums.filter((a) => selectedIds.has(`album:${a.uri}`)),
+            };
+
+            await applyConfigData(filteredConfig, updateSettings, loadDataFromDB);
+
             toast.success("Configuration imported successfully!");
             setPendingImportData(null);
-            
-            // Reload everything
-            await loadDataFromDB();
+
             router.back();
         } catch (error: any) {
             toast.error("Import failed: " + error.message);
@@ -83,7 +108,12 @@ export default function ImportVpcPreviewScreen() {
                 </Header.Actions>
             </Header>
 
-            <VpcPreview configData={configData} ListHeaderComponent={headerComponent} />
+            <VpcPreview
+                configData={configData}
+                ListHeaderComponent={headerComponent}
+                selectedIds={selectedIds}
+                onToggleId={handleToggleId}
+            />
         </ThemedSafeAreaView>
     );
 }

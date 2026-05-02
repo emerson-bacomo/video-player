@@ -33,6 +33,15 @@ cssInterop(ThemedBottomSheetScrollView, {
     contentContainerClassName: "contentContainerStyle",
 });
 
+import { BottomSheetFlatList as GBottomSheetFlatList } from "@gorhom/bottom-sheet";
+export const ThemedBottomSheetFlatList = GBottomSheetFlatList as any;
+
+cssInterop(ThemedBottomSheetFlatList, {
+    className: "style",
+    contentContainerClassName: "contentContainerStyle",
+    columnWrapperClassName: "columnWrapperStyle",
+});
+
 interface ThemedBottomSheetProps {
     isVisible: boolean;
     children?: React.ReactNode;

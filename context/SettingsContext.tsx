@@ -5,17 +5,6 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 
 const SETTINGS_FILE = `${FileSystem.documentDirectory}settings.json`;
 
-export type Orientation = "landscape" | "portrait" | "system";
-export type CornerPosition = "top-left" | "top-right" | "bottom-left" | "bottom-right";
-
-export interface PlayerOperation {
-    id: string;
-    type: "seek" | "custom";
-    value: number;
-    iconName: string;
-    label: string;
-}
-
 interface SettingsContextType {
     settings: Settings;
     updateSettings: (newSettings: Partial<Settings>) => Promise<void>;
@@ -52,7 +41,9 @@ export const SettingsProvider = ({ children }: { children: React.ReactNode }) =>
                 // Log changes
                 Object.keys(newSettings).forEach((key) => {
                     const val = (newSettings as any)[key];
-                    addLogDb("INFO", "Change Setting", `Setting updated: ${key}`, val);
+                    if (JSON.stringify(val) !== JSON.stringify((prev as any)[key])) {
+                        addLogDb("INFO", "Change Setting", `Setting updated: ${key}`, val);
+                    }
                 });
 
                 return updated;
