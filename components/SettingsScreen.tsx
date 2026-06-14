@@ -8,9 +8,8 @@ import { useTheme } from "@/context/ThemeContext";
 import { useMedia } from "@/hooks/useMedia";
 import { useSettings } from "@/hooks/useSettings";
 import { cn } from "@/lib/utils";
-import { normalizeClipDestination } from "@/utils/clipDestination";
+import { validateMediaDestination } from "@/utils/mediaDestination";
 import { pickAndValidateVpc, setPendingImportData } from "@/utils/configManager";
-import * as FileSystem from "expo-file-system/legacy";
 import { DestinationPicker } from "./DestinationPicker";
 import { router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -53,32 +52,24 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
     const [sensitivityInput, setSensitivityInput] = useState("");
     const [panSensitivityInput, setPanSensitivityInput] = useState("");
     const [seekAmountInput, setSeekAmountInput] = useState("");
-    const [isDestinationValid, setIsDestinationValid] = useState(true);
+    const [isClipDestinationValid, setIsClipDestinationValid] = useState(true);
+    const [isScreenshotDestinationValid, setIsScreenshotDestinationValid] = useState(true);
 
-    const validateDestination = useCallback(async () => {
-        if (!settings.clipDestination) {
-            setIsDestinationValid(true);
-            return;
-        }
-
-        const resolved = normalizeClipDestination(settings.clipDestination);
-        if (!resolved) {
-            setIsDestinationValid(false);
-            return;
-        }
-
-        try {
-            const info = await FileSystem.getInfoAsync(`file://${resolved}`);
-            setIsDestinationValid(info.exists && info.isDirectory);
-        } catch (e) {
-            console.warn("Failed to validate clip destination", e);
-            setIsDestinationValid(false);
-        }
+    const validateClipDestination = useCallback(async () => {
+        setIsClipDestinationValid(await validateMediaDestination(settings.clipDestination));
     }, [settings.clipDestination]);
 
+    const validateScreenshotDestination = useCallback(async () => {
+        setIsScreenshotDestinationValid(await validateMediaDestination(settings.screenshotDestination));
+    }, [settings.screenshotDestination]);
+
     useEffect(() => {
-        validateDestination();
-    }, [settings.clipDestination, validateDestination]);
+        validateClipDestination();
+    }, [settings.clipDestination, validateClipDestination]);
+
+    useEffect(() => {
+        validateScreenshotDestination();
+    }, [settings.screenshotDestination, validateScreenshotDestination]);
 
     useEffect(() => {
         if (!settingsLoading) {
@@ -86,7 +77,7 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
             setPanSensitivityInput(String(settings.panSeekSensitivity));
             setSeekAmountInput(String(settings.doubleTapSeekAmount));
         }
-    }, [settingsLoading]);
+    }, [settings.brightnessSensitivity, settings.doubleTapSeekAmount, settings.panSeekSensitivity, settingsLoading]);
 
     if (settingsLoading) {
         return (
@@ -221,16 +212,38 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
                         <DestinationPicker
                             value={settings.clipDestination || ""}
                             onChange={(_, path) => updateSettings({ clipDestination: path })}
-                            isValid={isDestinationValid}
+                            isValid={isClipDestinationValid}
                         />
 
-                        {!isDestinationValid && (
+                        {!isClipDestinationValid && (
                             <Text className="text-red-500 text-[10px] font-bold uppercase tracking-tighter mt-2 ml-1">
                                 ! Invalid path: Directory not found or inaccessible
                             </Text>
                         )}
                         <Text className="text-secondary text-xs mt-3">
                             Videos will be saved to this directory in your media library.
+                        </Text>
+                    </ThemedCard>
+                </View>
+
+                {/* Screenshots */}
+                <View className="mb-8">
+                    <Text className="text-zinc-500 text-sm font-bold uppercase tracking-wider mb-4">Screenshots</Text>
+                    <ThemedCard className="p-4">
+                        <Text className="text-text font-semibold mb-2">Screenshot Destination Directory</Text>
+                        <DestinationPicker
+                            value={settings.screenshotDestination || ""}
+                            onChange={(_, path) => updateSettings({ screenshotDestination: path })}
+                            isValid={isScreenshotDestinationValid}
+                        />
+
+                        {!isScreenshotDestinationValid && (
+                            <Text className="text-red-500 text-[10px] font-bold uppercase tracking-tighter mt-2 ml-1">
+                                ! Invalid path: Directory not found or inaccessible
+                            </Text>
+                        )}
+                        <Text className="text-secondary text-xs mt-3">
+                            Screenshots will be saved to this directory in your media library.
                         </Text>
                     </ThemedCard>
                 </View>
@@ -336,7 +349,8 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
                             <Text className="text-text font-semibold">Find and Replace Patterns</Text>
                         </View>
                         <Text className="text-secondary text-xs mb-6">
-                            Clean up display names by removing unwanted text. Rules only apply when you click "Apply" above.
+                            Clean up display names by removing unwanted text. Rules only apply when you click &quot;Apply&quot;
+                            above.
                         </Text>
 
                         {settings.nameReplacements.length === 0 ? (
@@ -595,7 +609,7 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
                             <View className="flex-1 mr-4">
                                 <Text className="text-text font-medium">Similar Prefix Only</Text>
                                 <Text className="text-secondary text-[10px] mt-1">
-                                    Only auto-play if the next video shares the same series prefix (e.g. "[Series]").
+                                    Only auto-play if the next video shares the same series prefix (e.g. &quot;[Series]&quot;).
                                 </Text>
                             </View>
                             <TouchableOpacity

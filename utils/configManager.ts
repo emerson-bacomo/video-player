@@ -9,7 +9,7 @@ import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { toast } from "sonner-native";
 import JSZip from "jszip";
-import { normalizeClipDestination } from "./clipDestination";
+import { normalizeMediaDestination } from "@/utils/mediaDestination";
 import {
     addLogDb,
     addVpcExportDb,
@@ -151,7 +151,7 @@ export const exportConfig = async (
         await FileSystem.writeAsStringAsync(fileContentUri, base64, { encoding: FileSystem.EncodingType.Base64 });
 
         // Track in DB
-        const displayPath = normalizeClipDestination(rawDirectoryUri) ?? rawDirectoryUri;
+        const displayPath = normalizeMediaDestination(rawDirectoryUri) ?? rawDirectoryUri;
         const trackingPath = `${displayPath}/${fileName}`;
         addVpcExportDb(trackingPath, fileName, json);
 

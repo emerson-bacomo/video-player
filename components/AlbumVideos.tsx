@@ -77,7 +77,10 @@ export const AlbumVideos = ({
         regenerateVideoThumbnails,
     } = useMedia();
 
-    const albumInfo = album || { title: "Album", assetCount: 0 };
+    const albumInfo = useMemo(
+        () => album || { title: "Album", assetCount: 0 },
+        [album],
+    );
     const { colors } = useTheme();
     const insets = useSafeAreaInsets();
     const { safeBack } = useSafeNavigation();
@@ -127,7 +130,7 @@ export const AlbumVideos = ({
                         setPrefixOptions(parsed);
                         return;
                     }
-                } catch (e) {}
+                } catch {}
             }
 
             // Fallback for virtual albums or missing data: compute on the fly
@@ -222,7 +225,7 @@ export const AlbumVideos = ({
         } else {
             setLoadingTask(null, "album-render");
         }
-    }, [isDisplayingSkeletons, videos, deferredProcessedVideos, setLoadingTask]);
+    }, [isDisplayingSkeletons, videos, deferredProcessedVideos, setLoadingTask, isThumbnailGenerating]);
 
     const selectedVideo = useMemo(() => (videos || []).find((v) => v.id === selectedVideoId) || null, [videos, selectedVideoId]);
 

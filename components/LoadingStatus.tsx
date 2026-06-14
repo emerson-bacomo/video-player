@@ -1,9 +1,11 @@
 import { AlertCircle, CheckCircle2, ChevronDown, ChevronLeft, Database, Film, Info } from "lucide-react-native";
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Dimensions, LayoutAnimation, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, LayoutAnimation, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Portal } from "react-native-portalize";
+import { useIsFocused } from "@react-navigation/native";
 import { useMedia } from "../hooks/useMedia";
+import { useStableSafeAreaInsets } from "@/hooks/useStableSafeAreaInsets";
 
 import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
@@ -30,42 +32,74 @@ export interface LoadingStatusProps {
      */
     popupSide?: "bottom" | "left";
     onBeforeSet?: (task: LoadingTask) => boolean | void;
+    forceHidden?: boolean;
 }
 
-export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "bottom", onBeforeSet }) => {
+export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "bottom", onBeforeSet, forceHidden = false }) => {
     const { loadingTask, isLoadingPopupVisible, setLoadingPopupVisible, isLoadingExpanded, setLoadingExpanded, setOnBeforeSet } =
         useMedia();
-    const screenWidth = Dimensions.get("window").width;
-    const MENU_OFFSET = 40;
+    const { width: screenWidth } = useWindowDimensions();
     const ARROW_WIDTH = 12;
+    const POPUP_GAP = 8;
 
     // Local display state — only for deferred clear (250ms fade-out delay)
     const [taskToDisplay, setTaskToDisplay] = useState<LoadingTask | null>(loadingTask);
     const [canExpand, setCanExpand] = useState(false);
     const [iconX, setIconX] = useState<number>(screenWidth - 60);
     const [iconWidth, setIconWidth] = useState<number>(32);
+    const [iconY, setIconY] = useState<number>(0);
+    const [iconHeight, setIconHeight] = useState<number>(32);
     const [etaSeconds, setEtaSeconds] = useState<number | null>(null);
     const etaSnapshotRef = useRef<{ progress: number; time: number; id: string } | null>(null);
     const onEtaUpdateRef = useRef(taskToDisplay?.onEtaUpdate);
     const ignoreCountRef = useRef(0);
     const lastReportedEtaRef = useRef<number | null>(null);
-    const containerRef = useRef<View>(null);
+    const indicatorRef = useRef<View>(null);
+    const popupRef = useRef<View>(null);
+    const [popupMeasuredCorrection, setPopupMeasuredCorrection] = useState(0);
     const fadeAnim = useSharedValue(0);
+
+    const isFocused = useIsFocused();
+    const effectivelyVisible = isLoadingPopupVisible && isFocused && !forceHidden;
 
     // Geometry
 
-    // "bottom" mode: centered tooltip with screen clamping
-    const insets = useSafeAreaInsets();
+    // When screenWidth changes (orientation change), reset measured position
+    // so the overflow calculation doesn't use a stale value from the previous orientation.
+    // measureInWindow in handleLayout will update to the real indicator position on the next frame.
+    const prevScreenWidth = useRef(screenWidth);
+    useEffect(() => {
+        if (screenWidth !== prevScreenWidth.current) {
+            setIconX(screenWidth - 60);
+            setIconWidth(32);
+            setIconY(0);
+            setIconHeight(32);
+            prevScreenWidth.current = screenWidth;
+        }
+    }, [screenWidth]);
+
+    // "bottom" mode: centered tooltip with screen-edge overflow handling
+    const insets = useStableSafeAreaInsets();
     const tooltipWidth = Math.min(screenWidth - 32, 320);
     const indicatorCenter = iconX + iconWidth / 2;
-    const idealLeft = indicatorCenter - tooltipWidth / 2;
 
-    // Clamp to screen edges + safe area insets
     const leftMargin = Math.max(insets.left, 16);
     const rightMargin = Math.max(insets.right, 16);
-    const clampedLeft = Math.max(leftMargin, Math.min(screenWidth - tooltipWidth - rightMargin, idealLeft));
-    const localLeftOffset = clampedLeft - iconX;
-    const arrowLeft = indicatorCenter - clampedLeft - ARROW_WIDTH / 2;
+    const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+    const centeredLeftOffset = iconWidth / 2 - tooltipWidth / 2;
+    const centeredScreenLeft = iconX + centeredLeftOffset;
+    const centeredScreenRight = centeredScreenLeft + tooltipWidth;
+    const rightBoundary = screenWidth - rightMargin;
+    const rightOverflow = Math.max(0, centeredScreenRight - rightBoundary);
+    const leftOverflow = Math.max(0, leftMargin - (centeredScreenLeft - rightOverflow));
+
+    // left: 0 aligns the popup with the indicator; start centered from there,
+    // then shift only enough to keep the popup inside the screen padding.
+    const plannedLocalLeftOffset = centeredLeftOffset - rightOverflow + leftOverflow;
+    const localLeftOffset = plannedLocalLeftOffset + popupMeasuredCorrection;
+    const popupScreenLeft = iconX + localLeftOffset;
+    const popupScreenTop = iconY + iconHeight + POPUP_GAP;
+    const arrowLeft = clamp(indicatorCenter - popupScreenLeft - ARROW_WIDTH / 2, ARROW_WIDTH, tooltipWidth - ARROW_WIDTH * 2);
 
     // "left" mode: popup sits immediately to the left of the indicator
     const LEFT_GAP = 16;
@@ -186,8 +220,12 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "botto
 
     // Animate when user manually toggles visibility
     useEffect(() => {
-        fadeAnim.value = withTiming(isLoadingPopupVisible && !!taskToDisplay ? 1 : 0, { duration: 120 });
-    }, [isLoadingPopupVisible, taskToDisplay, fadeAnim]);
+        fadeAnim.value = withTiming(effectivelyVisible && !!taskToDisplay ? 1 : 0, { duration: 120 });
+    }, [effectivelyVisible, taskToDisplay, fadeAnim]);
+
+    useEffect(() => {
+        setPopupMeasuredCorrection(0);
+    }, [effectivelyVisible, screenWidth]);
 
     const toggleVisible = () => setLoadingPopupVisible((prev) => !prev);
     const toggleExpanded = () => {
@@ -196,10 +234,25 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "botto
     };
 
     const handleLayout = () => {
-        containerRef.current?.measureInWindow((x, _y, width) => {
-            if (x !== 0 && (Math.abs(x - iconX) > 1 || width !== iconWidth)) {
-                setIconX(x);
-                setIconWidth(width);
+        indicatorRef.current?.measure((_x, _y, width, height, pageX, pageY) => {
+            setIconX(pageX);
+            setIconY(pageY);
+            setIconWidth(width);
+            setIconHeight(height);
+        });
+    };
+
+    const handlePopupLayout = () => {
+        if (popupSide !== "bottom") return;
+
+        popupRef.current?.measureInWindow((x, _y, width, _height) => {
+            const maxRight = screenWidth - rightMargin;
+            const rightCorrection = Math.min(0, maxRight - (x + width));
+            const leftCorrection = Math.max(0, leftMargin - (x + rightCorrection));
+            const nextCorrection = rightCorrection + leftCorrection;
+
+            if (Math.abs(nextCorrection - popupMeasuredCorrection) > 0.5) {
+                setPopupMeasuredCorrection(nextCorrection);
             }
         });
     };
@@ -298,78 +351,84 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "botto
     );
 
     return (
-        <View ref={containerRef} onLayout={handleLayout} className="relative items-end">
-            <TouchableOpacity activeOpacity={0.7} onPress={toggleVisible} className="p-1">
-                {taskToDisplay.status === "success" ? (
-                    <Icon icon={CheckCircle2} size={20} className="text-success" />
-                ) : taskToDisplay.status === "error" ? (
-                    <Icon icon={AlertCircle} size={20} className="text-error" />
-                ) : (
-                    <ActivityIndicator size="small" color="#3b82f6" />
-                )}
-            </TouchableOpacity>
+        <View className="relative items-end">
+            <View ref={indicatorRef} onLayout={handleLayout}>
+                <TouchableOpacity activeOpacity={0.7} onPress={toggleVisible} className="p-1">
+                    {taskToDisplay.status === "success" ? (
+                        <Icon icon={CheckCircle2} size={20} className="text-success" />
+                    ) : taskToDisplay.status === "error" ? (
+                        <Icon icon={AlertCircle} size={20} className="text-error" />
+                    ) : (
+                        <ActivityIndicator size="small" color="#3b82f6" />
+                    )}
+                </TouchableOpacity>
+            </View>
 
-            {isLoadingPopupVisible && (
+            {effectivelyVisible && (
                 <>
                     {popupSide === "left" ? (
-                        <Animated.View
-                            style={[
-                                animatedStyle,
-                                {
-                                    right: iconWidth + LEFT_GAP,
-                                    width: leftSideWidth,
-                                    top: -24,
-                                },
-                            ]}
-                            className="absolute z-50"
-                            pointerEvents="box-none"
-                        >
-                            <View
-                                pointerEvents="none"
-                                style={{
-                                    position: "absolute",
-                                    top: 32,
-                                    right: -ARROW_WIDTH / 2,
-                                    zIndex: 55,
-                                }}
+                        <Portal>
+                            <Animated.View
+                                style={[
+                                    animatedStyle,
+                                    {
+                                        left: iconX - leftSideWidth - LEFT_GAP,
+                                        width: leftSideWidth,
+                                        top: iconY - 24,
+                                    },
+                                ]}
+                                pointerEvents="box-none"
                             >
                                 <View
-                                    className="bg-zinc-900 border-t border-r border-zinc-800"
+                                    pointerEvents="none"
                                     style={{
-                                        width: ARROW_WIDTH,
-                                        height: ARROW_WIDTH,
-                                        transform: [{ rotate: "45deg" }],
+                                        position: "absolute",
+                                        top: 32,
+                                        right: -ARROW_WIDTH / 2,
+                                        zIndex: 55,
                                     }}
-                                />
-                            </View>
-                            {renderPopupContent(leftSideWidth)}
-                        </Animated.View>
+                                >
+                                    <View
+                                        className="bg-zinc-900 border-t border-r border-zinc-800"
+                                        style={{
+                                            width: ARROW_WIDTH,
+                                            height: ARROW_WIDTH,
+                                            transform: [{ rotate: "45deg" }],
+                                        }}
+                                    />
+                                </View>
+                                {renderPopupContent(leftSideWidth)}
+                            </Animated.View>
+                        </Portal>
                     ) : (
-                        <Animated.View
-                            style={[animatedStyle, { left: localLeftOffset, width: tooltipWidth, top: MENU_OFFSET }]}
-                            className="absolute z-50"
-                            pointerEvents="box-none"
-                        >
-                            <View
-                                pointerEvents="none"
-                                style={{
-                                    position: "absolute",
-                                    top: -ARROW_WIDTH / 2,
-                                    left: arrowLeft,
-                                    zIndex: 55,
-                                }}
+                        <Portal>
+                            <Animated.View
+                                ref={popupRef}
+                                onLayout={handlePopupLayout}
+                                style={[animatedStyle, { left: popupScreenLeft, width: tooltipWidth, top: popupScreenTop }]}
+                                pointerEvents="box-none"
                             >
                                 <View
-                                    className="bg-zinc-900 border-t border-l border-zinc-800"
+                                    pointerEvents="none"
                                     style={{
-                                        width: ARROW_WIDTH,
-                                        height: ARROW_WIDTH,
-                                        transform: [{ rotate: "45deg" }],
+                                        position: "absolute",
+                                        top: -ARROW_WIDTH / 2,
+                                        left: arrowLeft,
+                                        zIndex: 55,
                                     }}
-                                />
-                            </View>
-                            {renderPopupContent(tooltipWidth)}
-                        </Animated.View>
+                                >
+                                    <View
+                                        className="bg-zinc-900 border-t border-l border-zinc-800"
+                                        style={{
+                                            width: ARROW_WIDTH,
+                                            height: ARROW_WIDTH,
+                                            transform: [{ rotate: "45deg" }],
+                                        }}
+                                    />
+                                </View>
+                                {renderPopupContent(tooltipWidth)}
+                            </Animated.View>
+                        </Portal>
                     )}
                 </>
             )}

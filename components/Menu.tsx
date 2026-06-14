@@ -1,17 +1,17 @@
 import { cn } from "@/utils/cn";
-import React, { createContext, useContext, useLayoutEffect, useRef, useState } from "react";
+import React, { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-    Dimensions,
     DimensionValue,
     FlatList,
     FlatListProps,
     GestureResponderEvent,
     TouchableOpacity,
     TouchableOpacityProps,
-    TouchableWithoutFeedback,
+    useWindowDimensions,
     View,
 } from "react-native";
-import Modal from "react-native-modal";
+import { Modal, ModalRef } from "./Modal";
+import Animated, { useAnimatedStyle, useSharedValue, withTiming, Easing } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type MenuVariant = "POPUP" | "MODAL";
@@ -47,9 +47,6 @@ interface MenuContextType {
     children: React.ReactNode;
     closeMenu: () => void;
     onClose?: () => void;
-    shouldRender: boolean;
-    contentHeight: number;
-    setContentHeight: (h: number) => void;
     activeData: any;
     setActiveData: (data: any) => void;
 }
@@ -86,7 +83,6 @@ export const Menu = ({
     onOpen?: () => void;
 }) => {
     const [internalVisible, setInternalVisible] = useState(false);
-    const [shouldRender, setShouldRender] = useState(false);
     const [menuLayout, setMenuLayout] = useState({
         top: 0,
         left: 16,
@@ -98,7 +94,6 @@ export const Menu = ({
     });
     const [raisedLayout, setRaisedLayout] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
     const [raisedElement, setRaisedElement] = useState<React.ReactNode | null>(null);
-    const [contentHeight, setContentHeight] = useState(0);
     const [activeData, setInternalActiveData] = useState<any>(null);
 
     const triggerRef = useRef<View>(null);
@@ -115,19 +110,11 @@ export const Menu = ({
     };
     const visible = controlledVisible ?? internalVisible;
 
-    // Synchronize shouldRender with visible
-    useLayoutEffect(() => {
-        if (visible) {
-            setShouldRender(true);
-        }
-    }, [visible]);
-
     const setVisible = (nextVisible: boolean) => {
         if (controlledVisible === undefined) {
             setInternalVisible(nextVisible);
         }
         if (nextVisible) {
-            setShouldRender(true);
             onOpen?.();
         } else {
             setActiveData(null);
@@ -175,21 +162,14 @@ export const Menu = ({
     };
 
     useLayoutEffect(() => {
-        if (visible && !activeData) {
+        if (visible && !activeData && menuLayout.top === 0) {
             updateLayout();
         }
-    }, [visible, children]);
+    }, [visible, children, menuLayout.top, activeData]);
 
     const triggerElement = React.Children.toArray(children).find(
         (child) => React.isValidElement(child) && child.type === Trigger,
     ) as React.ReactElement<TouchableOpacityProps> | null;
-
-    const handleModalHide = () => {
-        setShouldRender(false);
-        if (visible) {
-            onClose?.();
-        }
-    };
 
     return (
         <MenuContext.Provider
@@ -210,10 +190,7 @@ export const Menu = ({
                 setRaisedElement,
                 children,
                 closeMenu: () => setVisible(false),
-                onClose: handleModalHide,
-                shouldRender,
-                contentHeight,
-                setContentHeight,
+                onClose: onClose,
                 activeData,
                 setActiveData,
             }}
@@ -230,11 +207,11 @@ const Trigger = ({ children, data, ...props }: TouchableOpacityProps & { data?: 
 
     const localTriggerRef = useRef<View>(null);
 
-    const open = () => {
+    const open = async () => {
         if (data) {
             // Global Mode: provide specific refs and data
             context.setActiveData(data);
-            context.updateLayout(localTriggerRef as any, localRaise?.raisedRef as any);
+            await context.updateLayout(localTriggerRef as any, localRaise?.raisedRef as any);
             context.setVisible(true);
 
             if (localRaise?.children) {
@@ -242,7 +219,7 @@ const Trigger = ({ children, data, ...props }: TouchableOpacityProps & { data?: 
             }
         } else {
             // Local Mode: pass local ref to updateLayout
-            context.updateLayout(localTriggerRef as any);
+            await context.updateLayout(localTriggerRef as any);
             context.setVisible(true);
         }
     };
@@ -312,14 +289,32 @@ const Content = ({
         triggerElement,
         raisedElement,
         onClose,
-        shouldRender,
         activeData,
     } = context;
 
     const insets = useSafeAreaInsets();
-    const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
+    const { width: screenWidth, height: screenHeight } = useWindowDimensions();
     const [contentHeight, setContentHeight] = useState(0);
     const [contentWidth, setContentWidth] = useState(0);
+
+    // Box-only animation — Modal handles the backdrop
+    const opacity = useSharedValue(0);
+    const modalRef = useRef<ModalRef>(null);
+
+    useEffect(() => {
+        const showDur = modalRef.current?.showDuration ?? 100;
+        const hideDur = modalRef.current?.hideDuration ?? 80;
+
+        if (visible) {
+            opacity.value = withTiming(1, { duration: showDur, easing: Easing.out(Easing.quad) });
+        } else {
+            opacity.value = withTiming(0, { duration: hideDur, easing: Easing.in(Easing.quad) });
+        }
+    }, [opacity, visible]);
+
+    const contentAnimatedStyle = useAnimatedStyle(() => ({
+        opacity: opacity.value,
+    }));
 
     // Auto-flip: If it would overflow the bottom, show it above the trigger
     const spaceBelow = screenHeight - (menuLayout.triggerY + menuLayout.triggerHeight) - insets.bottom - BOTTOM_PADDING;
@@ -344,87 +339,76 @@ const Content = ({
           )
         : menuLayout.top;
 
-    if (!shouldRender) return null;
-
     return (
         <Modal
-            isVisible={visible}
-            hasBackdrop={false}
-            onBackButtonPress={() => setVisible(false)}
-            onModalHide={onClose}
-            animationIn="fadeIn"
-            animationOut="fadeOut"
-            animationInTiming={50}
-            animationOutTiming={100}
-            useNativeDriver={true}
-            style={{ margin: 0 }}
+            ref={modalRef}
+            center={false}
+            animationType="none"
+            visible={visible}
+            onClose={onClose}
+            onRequestClose={() => setVisible(false)}
         >
-            <View className="flex-1">
-                {/* Manual Backdrop */}
-                <TouchableWithoutFeedback onPress={() => setVisible(false)}>
-                    <View className="absolute inset-0 bg-black/80" />
-                </TouchableWithoutFeedback>
-
-                {variant === "POPUP" && (
-                    <>
-                        {/* Duplication Layer: Duplicates either the 'Raise' card or the 'Trigger' button above the backdrop */}
-                        {raisedElement && raisedLayout ? (
-                            <View
-                                pointerEvents="none"
-                                style={{
-                                    position: "absolute",
-                                    top: raisedLayout.y,
-                                    left: raisedLayout.x,
-                                    width: raisedLayout.width,
-                                    height: raisedLayout.height,
-                                }}
-                            >
-                                {raisedElement}
-                            </View>
-                        ) : (
-                            <View
-                                pointerEvents="none"
-                                style={{
-                                    position: "absolute",
-                                    top: menuLayout.triggerY,
-                                    left: menuLayout.triggerX,
-                                }}
-                            >
-                                {triggerElement && (
-                                    <TouchableOpacity
-                                        activeOpacity={triggerElement.props.activeOpacity}
-                                        className={triggerElement.props.className}
-                                        style={triggerElement.props.style}
-                                    >
-                                        {triggerElement.props.children}
-                                    </TouchableOpacity>
-                                )}
-                            </View>
-                        )}
-
+            {menuLayout.top > 0 && variant === "POPUP" && (
+                <>
+                    {/* Duplication Layer: Duplicates either the 'Raise' card or the 'Trigger' button above the backdrop */}
+                    {raisedElement && raisedLayout ? (
                         <View
                             pointerEvents="none"
                             style={{
                                 position: "absolute",
-                                top: isAbove
-                                    ? menuLayout.triggerY - ARROW_SIZE / 2 - MENU_OFFSET - 1
-                                    : menuLayout.top - ARROW_SIZE / 2 + 1,
-                                left: menuLayout.triggerX + menuLayout.triggerWidth / 2 - ARROW_SIZE / 2,
-                                zIndex: 55,
+                                top: raisedLayout.y,
+                                left: raisedLayout.x,
+                                width: raisedLayout.width,
+                                height: raisedLayout.height,
                             }}
                         >
-                            <View
-                                className={cn("bg-menu border-border", isAbove ? "border-b border-r" : "border-t border-l")}
-                                style={{
-                                    width: ARROW_SIZE,
-                                    height: ARROW_SIZE,
-                                    transform: [{ rotate: "45deg" }],
-                                }}
-                            />
+                            {raisedElement}
                         </View>
-
+                    ) : (
                         <View
+                            pointerEvents="none"
                             style={{
+                                position: "absolute",
+                                top: menuLayout.triggerY,
+                                left: menuLayout.triggerX,
+                            }}
+                        >
+                            {triggerElement && (
+                                <TouchableOpacity
+                                    activeOpacity={triggerElement.props.activeOpacity}
+                                    className={triggerElement.props.className}
+                                    style={triggerElement.props.style}
+                                >
+                                    {triggerElement.props.children}
+                                </TouchableOpacity>
+                            )}
+                        </View>
+                    )}
+
+                    <View
+                        pointerEvents="none"
+                        style={{
+                            position: "absolute",
+                            top: isAbove
+                                ? menuLayout.triggerY - ARROW_SIZE / 2 - MENU_OFFSET - 1
+                                : menuLayout.top - ARROW_SIZE / 2 + 1,
+                            left: menuLayout.triggerX + menuLayout.triggerWidth / 2 - ARROW_SIZE / 2,
+                            zIndex: 55,
+                        }}
+                    >
+                        <View
+                            className={cn("bg-menu border-border", isAbove ? "border-b border-r" : "border-t border-l")}
+                            style={{
+                                width: ARROW_SIZE,
+                                height: ARROW_SIZE,
+                                transform: [{ rotate: "45deg" }],
+                            }}
+                        />
+                    </View>
+
+                    <Animated.View
+                        style={[
+                            {
                                 position: "absolute",
                                 top: finalTop,
                                 ...(horizontalScreenFill
@@ -444,54 +428,55 @@ const Content = ({
                                                   ),
                                               ),
                                           }),
-                            }}
+                            },
+                            contentAnimatedStyle,
+                        ]}
+                    >
+                        <View
+                            onLayout={(e) => setContentWidth(e.nativeEvent.layout.width)}
+                            className={cn("rounded-xl shadow-2xl border bg-menu border-border flex-shrink", className)}
+                            style={[
+                                {
+                                    width: width === "fit-content" ? undefined : width,
+                                    maxWidth: screenWidth - 32,
+                                    maxHeight: popupMaxHeight,
+                                },
+                            ]}
                         >
                             <View
-                                onLayout={(e) => setContentWidth(e.nativeEvent.layout.width)}
-                                className={cn("rounded-xl shadow-2xl border bg-menu border-border flex-shrink", className)}
-                                style={[
-                                    {
-                                        width: width === "fit-content" ? undefined : width,
-                                        maxWidth: screenWidth - 32,
-                                        maxHeight: popupMaxHeight,
-                                    },
-                                ]}
+                                onLayout={(e) => {
+                                    const { width: layoutWidth, height: layoutHeight } = e.nativeEvent.layout;
+                                    if (layoutHeight > 0) setContentHeight(layoutHeight);
+                                    if (layoutWidth > 0) setContentWidth(layoutWidth);
+                                }}
+                                className="rounded-2xl overflow-hidden flex-shrink"
                             >
-                                <View
-                                    onLayout={(e) => {
-                                        const { width: layoutWidth, height: layoutHeight } = e.nativeEvent.layout;
-                                        if (layoutHeight > 0) setContentHeight(layoutHeight);
-                                        if (layoutWidth > 0) setContentWidth(layoutWidth);
-                                    }}
-                                    className="rounded-2xl overflow-hidden flex-shrink"
-                                >
-                                    {(() => {
-                                        const resolvedChildren =
-                                            typeof children === "function"
-                                                ? activeData
-                                                    ? (children as any)(activeData)
-                                                    : null
-                                                : children;
+                                {(() => {
+                                    const resolvedChildren =
+                                        typeof children === "function"
+                                            ? activeData
+                                                ? (children as any)(activeData)
+                                                : null
+                                            : children;
 
-                                        const childrenArray = React.Children.toArray(resolvedChildren);
-                                        const items = childrenArray.filter(
-                                            (child) => !React.isValidElement(child) || child.type !== EmptyContent,
-                                        );
-                                        const empty = childrenArray.find(
-                                            (child) => React.isValidElement(child) && child.type === EmptyContent,
-                                        );
+                                    const childrenArray = React.Children.toArray(resolvedChildren);
+                                    const items = childrenArray.filter(
+                                        (child) => !React.isValidElement(child) || child.type !== EmptyContent,
+                                    );
+                                    const empty = childrenArray.find(
+                                        (child) => React.isValidElement(child) && child.type === EmptyContent,
+                                    );
 
-                                        if (items.length > 0) {
-                                            return items;
-                                        }
-                                        return empty || null;
-                                    })()}
-                                </View>
+                                    if (items.length > 0) {
+                                        return items;
+                                    }
+                                    return empty || null;
+                                })()}
                             </View>
                         </View>
-                    </>
-                )}
-            </View>
+                    </Animated.View>
+                </>
+            )}
         </Modal>
     );
 };

@@ -2,7 +2,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { router, usePathname } from "expo-router";
 import { ChevronLeft, ChevronRight, Maximize2, Play, RotateCcw, X } from "lucide-react-native";
 import React, { useEffect, useRef, useState } from "react";
-import { Dimensions, Text, TouchableOpacity, View } from "react-native";
+import { Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -61,7 +61,7 @@ export const FloatingPlayer: React.FC = () => {
     const { allAlbumsVideos, getVideoById } = useMedia();
     const insets = useSafeAreaInsets();
     const pathname = usePathname();
-    const { width: screenW, height: screenH } = Dimensions.get("window");
+    const { width: screenW, height: screenH } = useWindowDimensions();
     const playerRef = useRef<any>(null);
 
     // ── Live metadata ──────────────────────────────────────────────────────

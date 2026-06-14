@@ -1,35 +1,55 @@
-import { Album } from "@/types/useMedia";
+import type { Album, VideoMedia } from "@/types/useMedia";
 import { getAllVideosDb, getVideosForAlbumDb, renameAlbumDb, renameVideoDb, saveVideosDb } from "@/utils/db";
 import * as FileSystem from "expo-file-system/legacy";
-import { useCallback } from "react";
+import React, { useCallback } from "react";
 
 export const useMediaRename = (
     setAlbums: React.Dispatch<React.SetStateAction<Album[]>>,
     compareByAlbumSort: (a: Album, b: Album) => number,
+    albumsRef: React.RefObject<Record<string, Album>>,
+    setAllAlbumsVideos: React.Dispatch<React.SetStateAction<Record<string, VideoMedia[]>>>,
 ) => {
-    const renameVideo = useCallback(async (videoId: string, newName: string) => {
-        // 1. Rename in DB
-        renameVideoDb(videoId, newName);
+    const renameVideo = useCallback(
+        async (videoId: string, newName: string) => {
+            // 1. Rename in DB
+            renameVideoDb(videoId, newName);
 
-        // 2. Physical rename (best effort)
-        const video = getAllVideosDb().find((v) => v.id === videoId);
-        if (video && video.uri && video.uri.startsWith("file://")) {
-            try {
-                const oldPath = video.uri;
-                const extension = oldPath.substring(oldPath.lastIndexOf("."));
-                const parentPath = oldPath.substring(0, oldPath.lastIndexOf("/"));
-                const newPath = `${parentPath}/${newName}${extension}`;
+            // 2. Physical rename (best effort)
+            const video = getAllVideosDb().find((v) => v.id === videoId);
+            if (video && video.uri && video.uri.startsWith("file://")) {
+                try {
+                    const oldPath = video.uri;
+                    const extension = oldPath.substring(oldPath.lastIndexOf("."));
+                    const parentPath = oldPath.substring(0, oldPath.lastIndexOf("/"));
+                    const newPath = `${parentPath}/${newName}${extension}`;
 
-                console.log(`[Media] Physically renaming file from ${oldPath} to ${newPath}`);
-                await FileSystem.moveAsync({
-                    from: oldPath,
-                    to: newPath,
-                });
-            } catch (e) {
-                console.error("[Media] Physical file rename failed:", e);
+                    console.log(`[Media] Physically renaming file from ${oldPath} to ${newPath}`);
+                    await FileSystem.moveAsync({
+                        from: oldPath,
+                        to: newPath,
+                    });
+                } catch (e) {
+                    console.error("[Media] Physical file rename failed:", e);
+                }
             }
-        }
-    }, []);
+
+            // 3. Update in-memory video title immediately
+            setAllAlbumsVideos((prev) => {
+                const next = { ...prev };
+                for (const albumId in next) {
+                    const idx = next[albumId].findIndex((v) => v.id === videoId);
+                    if (idx !== -1) {
+                        const newVids = [...next[albumId]];
+                        newVids[idx] = { ...newVids[idx], filename: newName, title: newName };
+                        next[albumId] = newVids;
+                        break;
+                    }
+                }
+                return next;
+            });
+        },
+        [setAllAlbumsVideos],
+    );
 
     const renameAlbum = useCallback(
         async (albumId: string, newName: string) => {
@@ -72,6 +92,10 @@ export const useMediaRename = (
                 }
             }
 
+            // 4. Sync albumsRef and albums state
+            if (albumsRef.current[albumId]) {
+                albumsRef.current[albumId] = { ...albumsRef.current[albumId], title: newName, albumName: newName };
+            }
             setAlbums((prev) => {
                 const index = prev.findIndex((a) => a.id === albumId);
                 if (index === -1) return prev;
@@ -80,7 +104,7 @@ export const useMediaRename = (
                 return next.sort((a, b) => compareByAlbumSort(a, b));
             });
         },
-        [setAlbums, compareByAlbumSort],
+        [setAlbums, albumsRef, compareByAlbumSort],
     );
 
     return {

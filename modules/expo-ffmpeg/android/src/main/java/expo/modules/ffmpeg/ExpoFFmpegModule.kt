@@ -63,6 +63,91 @@ class ExpoFFmpegModule : Module() {
       }.start()
     }
 
+    AsyncFunction("takeScreenshot") { videoPath: String, outPath: String, timestamp: Double, promise: Promise ->
+      Thread {
+        try {
+          val resolvedPath = resolveContentUri(videoPath)
+          android.util.Log.e("ExpoFFmpeg", "takeScreenshot: videoPath=$videoPath resolvedPath=$resolvedPath timestamp=$timestamp")
+          val pixels = nativeTakeScreenshot(resolvedPath, timestamp)
+          if (pixels == null) {
+            promise.reject("SCREENSHOT_FAILED", "takeScreenshot: nativeTakeScreenshot returned null for path=$resolvedPath timestamp=$timestamp", null)
+            return@Thread
+          }
+          if (pixels.size < 3) {
+            promise.reject("SCREENSHOT_FAILED", "takeScreenshot: pixel array too small, size=${pixels.size} for path=$resolvedPath", null)
+            return@Thread
+          }
+
+          val width = pixels[0]
+          val height = pixels[1]
+          val bitmap = android.graphics.Bitmap.createBitmap(pixels, 2, width, width, height, android.graphics.Bitmap.Config.ARGB_8888)
+
+          val resolvedOutPath = if (outPath.startsWith("file://")) {
+            java.net.URI(outPath).path
+          } else {
+            outPath
+          }
+          val filename = java.io.File(resolvedOutPath).name
+
+          var resultUri = "file://$resolvedOutPath"
+
+          try {
+            val outFile = java.io.File(resolvedOutPath)
+            outFile.parentFile?.mkdirs()
+            outFile.outputStream().use { out ->
+              bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 100, out)
+            }
+          } catch (e: java.io.FileNotFoundException) {
+            android.util.Log.e("ExpoFFmpeg", "Direct write failed, trying MediaStore: ${e.message}")
+            try {
+              val storageRoot = android.os.Environment.getExternalStorageDirectory().absolutePath
+              val relativePath = if (resolvedOutPath.startsWith(storageRoot)) {
+                val rel = resolvedOutPath.removePrefix(storageRoot).trimStart('/')
+                rel.substringBeforeLast('/', "").ifEmpty { "Pictures" }
+              } else {
+                android.os.Environment.DIRECTORY_PICTURES
+              }
+
+              val primaryDir = relativePath.split("/").firstOrNull() ?: ""
+              val allowedDirs = setOf("DCIM", "Pictures")
+              
+              val contentUri = if (primaryDir in allowedDirs) {
+                android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+              } else {
+                android.provider.MediaStore.Files.getContentUri("external")
+              }
+
+              val contentValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+              }
+
+              val context = appContext.reactContext ?: throw Exception("No ReactContext")
+              val uri = context.contentResolver.insert(contentUri, contentValues)
+              if (uri != null) {
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                  bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 100, out)
+                }
+                resultUri = uri.toString()
+              } else {
+                promise.reject("NEEDS_MANAGE_EXTERNAL_STORAGE", "Failed to write screenshot. Please grant All Files Access.", null)
+                return@Thread
+              }
+            } catch (me: Exception) {
+              android.util.Log.e("ExpoFFmpeg", "MediaStore fallback failed: ${me.message}")
+              promise.reject("NEEDS_MANAGE_EXTERNAL_STORAGE", "Failed to write screenshot. Please grant All Files Access.", null)
+              return@Thread
+            }
+          }
+
+          promise.resolve(resultUri)
+        } catch (e: Exception) {
+          promise.reject("SCREENSHOT_FAILED", "takeScreenshot: ${e.message}", e)
+        }
+      }.start()
+    }
+
     AsyncFunction("clipVideo") { videoPath: String, outPath: String, segments: List<Map<String, Double>>, options: Map<String, Any>, promise: Promise ->
       if (isProcessing) {
         promise.resolve(false)
@@ -145,6 +230,19 @@ class ExpoFFmpegModule : Module() {
           } else {
             outPath
           }
+
+          try {
+            val outFile = java.io.File(resolvedOutPath)
+            outFile.parentFile?.mkdirs()
+            if (!outFile.exists()) {
+              outFile.createNewFile()
+              outFile.delete()
+            }
+          } catch (e: Exception) {
+            promise.reject("NEEDS_MANAGE_EXTERNAL_STORAGE", "Cannot write to destination. Please grant All Files Access.", e)
+            return@Thread
+          }
+
           val result = nativeClipVideo(
             resolvedPath, 
             resolvedOutPath, 
@@ -157,6 +255,7 @@ class ExpoFFmpegModule : Module() {
             options["transitionStyle"] as? String ?: "smear-left",
             options["preset"] as? String ?: "slower"
           )
+
           promise.resolve(result)
         } catch (e: Exception) {
           e.printStackTrace()
@@ -204,9 +303,40 @@ class ExpoFFmpegModule : Module() {
         }
     }
 
+    AsyncFunction("checkManageExternalStorage") {
+      if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+        android.os.Environment.isExternalStorageManager()
+      } else {
+        true
+      }
+    }
+
+    AsyncFunction("requestManageExternalStorage") { promise: Promise ->
+      val context = appContext.reactContext ?: run {
+        promise.resolve(false)
+        return@AsyncFunction
+      }
+      if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+        if (!android.os.Environment.isExternalStorageManager()) {
+          try {
+            val intent = android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+            intent.data = android.net.Uri.parse("package:" + context.packageName)
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+          } catch (e: Exception) {
+            val intent = android.content.Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+          }
+        }
+      }
+      promise.resolve(true)
+    }
+
   }
 
   private external fun nativeGenerateThumbnail(videoPath: String): IntArray?
+  private external fun nativeTakeScreenshot(videoPath: String, timestamp: Double): IntArray?
   private external fun nativeClipVideo(
     videoPath: String, 
     outPath: String, 

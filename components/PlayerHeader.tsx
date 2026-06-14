@@ -1,12 +1,11 @@
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
-import { ChevronLeft, MoreVertical, Settings as SettingsIcon } from "lucide-react-native";
+import { ChevronLeft, MoreVertical, Settings as SettingsIcon, ExternalLink, Scissors } from "lucide-react-native";
 import React, { useEffect, useState } from "react";
-import { Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
+import { Text, TouchableOpacity, View } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { VideoMedia, ExportOptions, SessionClip } from "../types/useMedia";
+import { VideoMedia, SessionClip } from "../types/useMedia";
 import { LoadingStatus } from "./LoadingStatus";
 import { Menu } from "./Menu";
 import { PlayerOrientationButton } from "./PlayerOrientationButton";
@@ -14,9 +13,11 @@ import { VideoBadges } from "./VideoBadges";
 import { VideoItemDetailsModal } from "./VideoItemDetailsModal";
 import { SessionClipsBottomSheet } from "./SessionClipsBottomSheet";
 import { useMedia } from "@/hooks/useMedia";
-import { ExternalLink, Scissors } from "lucide-react-native";
 import { ClipExportModal } from "./ClipExportModal";
 import { useSafeNavigation } from "@/hooks/useSafeNavigation";
+import { usePlayerContext } from "@/context/PlayerContext";
+import { useOrientationLayout } from "@/hooks/useOrientationLayout";
+import { useStableSafeAreaInsets } from "@/hooks/useStableSafeAreaInsets";
 
 interface BasePlayerHeaderProps {
     children?: React.ReactNode;
@@ -25,9 +26,9 @@ interface BasePlayerHeaderProps {
 }
 
 export const BasePlayerHeader: React.FC<BasePlayerHeaderProps> = ({ children, rightSection, onLayout }) => {
-    const { width, height } = useWindowDimensions();
-    const insets = useSafeAreaInsets();
-    const isPortrait = height > width;
+    const { isLandscape } = useOrientationLayout();
+    const insets = useStableSafeAreaInsets(isLandscape);
+    const isPortrait = !isLandscape;
     const handleBack = () => {
         ScreenOrientation.unlockAsync();
         router.back();
@@ -55,9 +56,7 @@ export const BasePlayerHeader: React.FC<BasePlayerHeaderProps> = ({ children, ri
                 </View>
 
                 {isPortrait ? (
-                    /* Side Gradient for L-shape in Portrait */
                     <View className="-mt-12" style={{ marginRight: -Math.max(insets.right, 16) }}>
-                        {/* Background Gradient with Rounding */}
                         <View className="absolute inset-0 rounded-bl-[40px] overflow-hidden">
                             <LinearGradient
                                 colors={["rgba(0, 0, 0, 0.8)", "transparent"]}
@@ -67,8 +66,6 @@ export const BasePlayerHeader: React.FC<BasePlayerHeaderProps> = ({ children, ri
                                 className="absolute inset-0"
                             />
                         </View>
-
-                        {/* Interactive Content (No overflow-hidden so popups can expand) */}
                         <View className="pt-12 pl-1 pr-4 pb-6 items-center flex-col-reverse gap-2">{rightSection}</View>
                     </View>
                 ) : (
@@ -79,17 +76,11 @@ export const BasePlayerHeader: React.FC<BasePlayerHeaderProps> = ({ children, ri
     );
 };
 
-interface PlayerHeaderProps {
-    video?: VideoMedia;
-    onLayout?: (event: any) => void;
-    setPaused?: (paused: boolean) => void;
-    onReexport?: (clip: SessionClip, opts: ExportOptions) => Promise<void> | void;
-}
-
-export const PlayerHeader: React.FC<PlayerHeaderProps> = ({ video, onLayout, setPaused, onReexport }) => {
+export const PlayerHeader: React.FC<{ onSuccessAction?: () => void }> = ({ onSuccessAction }) => {
+    const { activeVideo: video, setPaused, setHeaderLayout, isMenuOpen, resetControlsTimer, showControls } = usePlayerContext();
     const [isInfoModalVisible, setIsInfoModalVisible] = React.useState(false);
-    const { width, height } = useWindowDimensions();
-    const isPortrait = height > width;
+    const { isLandscape } = useOrientationLayout();
+    const isPortrait = !isLandscape;
     const displayTitle = video?.title || "Video Player";
 
     const handleSettings = () => {
@@ -97,7 +88,8 @@ export const PlayerHeader: React.FC<PlayerHeaderProps> = ({ video, onLayout, set
         router.push("/player-settings");
     };
 
-    const { sessionClips, allAlbumsVideos, clearVideoClipSourceUri, hasNewClips, markClipsAsViewed } = useMedia();
+    const { sessionClips, allAlbumsVideos, clearVideoClipSourceUri, hasNewClips, markClipsAsViewed, executeReexport } =
+        useMedia();
     const { safePush } = useSafeNavigation();
     const [isBottomSheetVisible, setIsBottomSheetVisible] = React.useState(false);
     const [bottomSheetView, setBottomSheetView] = React.useState<"clips" | "export">("clips");
@@ -165,10 +157,9 @@ export const PlayerHeader: React.FC<PlayerHeaderProps> = ({ video, onLayout, set
                 </TouchableOpacity>
             )}
 
-            {/* Portrait: indicator sits on the right strip → popup opens to the left.
-                Landscape: indicator is inline in the header → default bottom popup. */}
             <LoadingStatus
                 popupSide={isPortrait ? "left" : "bottom"}
+                forceHidden={!showControls}
                 onBeforeSet={(task) => {
                     // Only auto-show popup for clipping-related tasks
                     if (!task.id?.startsWith("clip-")) {
@@ -183,7 +174,15 @@ export const PlayerHeader: React.FC<PlayerHeaderProps> = ({ video, onLayout, set
                 <SettingsIcon size={22} color="white" />
             </TouchableOpacity>
 
-            <Menu>
+            <Menu
+                onOpen={() => {
+                    isMenuOpen.current = true;
+                }}
+                onClose={() => {
+                    isMenuOpen.current = false;
+                    resetControlsTimer();
+                }}
+            >
                 <Menu.Trigger className="p-2">
                     <MoreVertical size={24} color="white" />
                 </Menu.Trigger>
@@ -209,12 +208,12 @@ export const PlayerHeader: React.FC<PlayerHeaderProps> = ({ video, onLayout, set
 
     return (
         <>
-            <BasePlayerHeader rightSection={rightSection} onLayout={onLayout}>
+            <BasePlayerHeader rightSection={rightSection} onLayout={(e) => setHeaderLayout(e.nativeEvent.layout)}>
                 <TouchableOpacity
                     className="flex-row items-center gap-2"
                     onPress={() => {
                         if (video) {
-                            setPaused?.(true);
+                            setPaused(true);
                             setIsInfoModalVisible(true);
                         }
                     }}
@@ -257,9 +256,10 @@ export const PlayerHeader: React.FC<PlayerHeaderProps> = ({ video, onLayout, set
                     video={clipToReexport}
                     segments={clipToReexport.segments}
                     defaultName={clipToReexport.exportOptions.name}
-                    onExport={(options) => {
+                    onExport={async (options) => {
                         setIsBottomSheetVisible(false);
-                        onReexport?.(clipToReexport, options);
+                        await executeReexport(clipToReexport, options);
+                        onSuccessAction?.();
                     }}
                     isReexport
                     initialOptions={clipToReexport.exportOptions}

@@ -1,6 +1,7 @@
 import { AlbumItem, AlbumItemSkeleton } from "@/components/AlbumItem";
 import { AlbumItemDetailsModal } from "@/components/AlbumItemDetailsModal";
 import { RecentlyPlayedAlbum } from "@/components/AlbumItemRecentlyPlayed";
+import { ScreenshotsAlbum } from "@/components/AlbumItemScreenshots";
 import { EmptyAlbumState } from "@/components/EmptyAlbumState";
 import { Header } from "@/components/Header";
 import { Icon } from "@/components/Icon";
@@ -41,6 +42,8 @@ const AlbumListScreen = () => {
         recentlyPlayedVideos,
         allAlbumsVideos,
         updateMultipleVideoProgress,
+        screenshots,
+        screenshotsCount,
     } = useMedia();
     const { colors } = useTheme();
     const deferredAlbumSort = useDeferredValue(albumSort);
@@ -98,6 +101,7 @@ const AlbumListScreen = () => {
     const renderAlbumItem = ({ item }: { item: any }) => {
         if (item.isPlaceholder) return <AlbumItemSkeleton width={itemWidth} />;
         if (item.id === "recently-played") return <RecentlyPlayedAlbum item={item} width={itemWidth} />;
+        if (item.id === "screenshots") return <ScreenshotsAlbum item={item} width={itemWidth} />;
         return (
             <AlbumItem
                 item={item}
@@ -141,8 +145,18 @@ const AlbumListScreen = () => {
                 thumbnail: recentlyPlayedVideos?.[0]?.thumbnail,
             });
         }
+        if (screenshotsCount > 0) {
+            sorted.push({
+                id: "screenshots",
+                title: "Screenshots",
+                albumName: "Screenshots",
+                assetCount: screenshotsCount,
+                uri: "",
+                thumbnail: screenshots?.[0]?.uri,
+            });
+        }
         return sorted;
-    }, [loadingTask, albums, skeletonData, deferredAlbumSort, compareByAlbumSort]);
+    }, [loadingTask, albums, skeletonData, deferredAlbumSort, compareByAlbumSort, recentlyPlayedCount, recentlyPlayedVideos, screenshotsCount, screenshots]);
 
     const selectionActions = useMemo(
         () => [

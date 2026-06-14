@@ -1,6 +1,6 @@
 import React from "react";
 import { Text, View } from "react-native";
-import { extractEpisode, extractSeason } from "../utils/videoUtils";
+import { extractEpisode, extractSeason } from "@/utils/videoUtils";
 import { cn } from "@/lib/utils";
 
 export const getSeasonColor = (season: number) => {

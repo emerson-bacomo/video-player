@@ -1,5 +1,6 @@
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import { DarkTheme, ThemeProvider as NavigationThemeProvider } from "@react-navigation/native";
+import { Host } from "react-native-portalize";
 import { Stack } from "expo-router";
 import { Platform, View } from "react-native";
 import React, { useEffect } from "react";
@@ -10,13 +11,12 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Toaster } from "sonner-native";
 import { FloatingPlayer } from "../components/FloatingPlayer";
 import { FloatingPlayerProvider } from "../context/FloatingPlayerContext";
-import { PlaybackProvider } from "../context/PlaybackContext";
 import { SettingsProvider } from "../context/SettingsContext";
 import { ThemeProvider, useTheme } from "../context/ThemeContext";
 import "../global.css";
 import { MediaProvider } from "../hooks/useMedia";
 import { initDB } from "../utils/db";
-import { ensureNotifeeChannels } from "../utils/clipNotification";
+import { ensureNotifeeChannels } from "@/utils/clipNotification";
 
 // Register the Notifee foreground service handler.
 // This MUST be called before any component renders so Android can keep
@@ -68,8 +68,8 @@ function InnerRoot() {
 
     return (
         <View className="bg-background flex-1" style={[themeVars]}>
-            <SettingsProvider>
-                <PlaybackProvider>
+            <Host>
+                <SettingsProvider>
                     <MediaProvider>
                         <BottomSheetModalProvider>
                             <SafeAreaProvider>
@@ -105,13 +105,13 @@ function InnerRoot() {
                                     </Stack>
                                 </NavigationThemeProvider>
                             </SafeAreaProvider>
-                            {/* Floats above all screens, hidden automatically on the player route */}
-                            <FloatingPlayer />
-                            <Toaster />
                         </BottomSheetModalProvider>
+                        {/* Floats above all screens, hidden automatically on the player route */}
+                        <FloatingPlayer />
+                        <Toaster />
                     </MediaProvider>
-                </PlaybackProvider>
-            </SettingsProvider>
+                </SettingsProvider>
+            </Host>
         </View>
     );
 }

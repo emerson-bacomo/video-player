@@ -3,6 +3,7 @@ import React from "react";
 import { Text, View } from "react-native";
 import Animated, { FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { usePlayerContext } from "@/context/PlayerContext";
 
 // Design Tokens
 const FONT_SIZE_PLAY_PAUSE = 36;
@@ -11,25 +12,16 @@ const BG_COLOR = "rgba(0, 0, 0, 0.4)";
 const BORDER_COLOR = "rgba(255, 255, 255, 0.35)";
 
 export interface PlayerCentralIndicatorProps {
-    indicator: {
+    indicator?: {
         icon: "play" | "pause" | "skip-fwd" | "skip-back" | "seek" | "speed" | "brightness" | null;
         label?: string;
         value?: number;
         direction?: -1 | 1;
     } | null;
-    panSeekTime?: number | null;
-    panStartTime?: number;
-    showControls?: boolean;
-    headerLayout?: { y: number; height: number } | null;
 }
 
-export const PlayerCentralIndicator: React.FC<PlayerCentralIndicatorProps> = ({
-    indicator,
-    panSeekTime,
-    panStartTime = 0,
-    showControls = false,
-    headerLayout,
-}) => {
+export const PlayerCentralIndicator: React.FC = () => {
+    const { centralIndicator: indicator, panSeekTime, panStartTime, showControls, headerLayout } = usePlayerContext();
     const pillHeight = useSharedValue(0);
     const insets = useSafeAreaInsets();
 
@@ -103,8 +95,8 @@ export const PlayerCentralIndicator: React.FC<PlayerCentralIndicatorProps> = ({
                 );
             case "seek":
                 if (panSeekTime == null) return null;
-                const isForward = panSeekTime >= panStartTime;
-                const diff = Math.abs(Math.round(panSeekTime - panStartTime));
+                const isForward = panSeekTime >= panStartTime.current;
+                const diff = Math.abs(Math.round(panSeekTime - panStartTime.current));
                 return (
                     <View className="flex-row items-center gap-1.5">
                         {isForward ? <ChevronsRight color="white" size={20} /> : <ChevronsLeft color="white" size={20} />}

@@ -2,6 +2,7 @@ import { requireNativeModule } from "expo-modules-core";
 
 interface ExpoFFmpegModule {
     generateThumbnail(videoPath: string, outPath: string): Promise<boolean>;
+    takeScreenshot(videoPath: string, outPath: string, timestamp: number): Promise<string | null>;
     clipVideo(
         videoPath: string,
         outPath: string,
@@ -18,6 +19,8 @@ interface ExpoFFmpegModule {
   ): Promise<boolean>;
     getLastClipError(): Promise<string>;
     scanFile(filePath: string): Promise<string | null>;
+    checkManageExternalStorage(): Promise<boolean>;
+    requestManageExternalStorage(): Promise<boolean>;
 }
 
 const module = requireNativeModule<ExpoFFmpegModule>("ExpoFFmpeg");

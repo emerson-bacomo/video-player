@@ -1,7 +1,7 @@
 import { useTheme } from "@/context/ThemeContext";
 import { cn } from "@/lib/utils";
 import { VideoMedia, ExportOptions, TransitionStyle } from "@/types/useMedia";
-import { normalizeClipDestination } from "@/utils/clipDestination";
+import { normalizeMediaDestination } from "@/utils/mediaDestination";
 import { secondsToHhmmss } from "@/utils/secondsToHhmmss";
 import * as FileSystem from "expo-file-system/legacy";
 import { Scissors, Volume2, VolumeX } from "lucide-react-native";
@@ -262,7 +262,7 @@ export const ClipExportModal: React.FC<ClipExportModalProps> = ({
             setIsDestinationValid(true);
             return;
         }
-        const resolved = normalizeClipDestination(destination);
+        const resolved = normalizeMediaDestination(destination);
 
         if (!resolved) {
             setIsDestinationValid(false);

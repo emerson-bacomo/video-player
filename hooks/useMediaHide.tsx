@@ -1,4 +1,4 @@
-import { Album } from "@/types/useMedia";
+import type { Album, VideoMedia } from "@/types/useMedia";
 import { addLogDb, getHiddenAlbumsDb, getHiddenVideosDb, setAlbumHiddenDb, setVideoHiddenDb } from "@/utils/db";
 import { useCallback } from "react";
 
@@ -6,27 +6,66 @@ export const useMediaHide = (
     setAlbums: React.Dispatch<React.SetStateAction<Album[]>>,
     fetchAlbums: () => Promise<void>,
     clearSelection: () => void,
+    albumsRef: React.RefObject<Record<string, Album>>,
+    setAllAlbumsVideos: React.Dispatch<React.SetStateAction<Record<string, VideoMedia[]>>>,
 ) => {
-    const hideVideo = useCallback(async (videoId: string) => {
-        setVideoHiddenDb(videoId, true);
-        addLogDb("INFO", "Hide Media", `Hid video ID: ${videoId}`);
-    }, []);
+    const hideVideo = useCallback(
+        async (videoId: string) => {
+            setVideoHiddenDb(videoId, true);
+            addLogDb("INFO", "Hide Media", `Hid video ID: ${videoId}`);
+
+            // Remove video from allAlbumsVideos immediately
+            setAllAlbumsVideos((prev) => {
+                const next = { ...prev };
+                for (const albumId in next) {
+                    const idx = next[albumId].findIndex((v) => v.id === videoId);
+                    if (idx !== -1) {
+                        const newVids = [...next[albumId]];
+                        newVids.splice(idx, 1);
+                        next[albumId] = newVids;
+                        break;
+                    }
+                }
+                return next;
+            });
+        },
+        [setAllAlbumsVideos],
+    );
 
     const hideAlbum = useCallback(
         async (albumId: string) => {
             setAlbumHiddenDb(albumId, true);
             addLogDb("INFO", "Hide Media", `Hid album ID: ${albumId}`);
             setAlbums((prev) => prev.filter((a) => a.id !== albumId));
+            delete albumsRef.current[albumId];
+            setAllAlbumsVideos((prev) => {
+                const next = { ...prev };
+                delete next[albumId];
+                return next;
+            });
         },
-        [setAlbums],
+        [setAlbums, albumsRef, setAllAlbumsVideos],
     );
 
     const hideMultipleVideos = useCallback(
         async (videoIds: string[]) => {
             videoIds.forEach((id) => setVideoHiddenDb(id, true));
             clearSelection();
+
+            // Remove videos from allAlbumsVideos immediately
+            setAllAlbumsVideos((prev) => {
+                const idSet = new Set(videoIds);
+                const next = { ...prev };
+                for (const albumId in next) {
+                    const filtered = next[albumId].filter((v) => !idSet.has(v.id));
+                    if (filtered.length !== next[albumId].length) {
+                        next[albumId] = filtered;
+                    }
+                }
+                return next;
+            });
         },
-        [clearSelection],
+        [clearSelection, setAllAlbumsVideos],
     );
 
     const hideMultipleAlbums = useCallback(
@@ -34,9 +73,15 @@ export const useMediaHide = (
             const idSet = new Set(albumIds);
             albumIds.forEach((id) => setAlbumHiddenDb(id, true));
             setAlbums((prev) => prev.filter((a) => !idSet.has(a.id)));
+            albumIds.forEach((id) => delete albumsRef.current[id]);
+            setAllAlbumsVideos((prev) => {
+                const next = { ...prev };
+                albumIds.forEach((id) => delete next[id]);
+                return next;
+            });
             clearSelection();
         },
-        [setAlbums, clearSelection],
+        [setAlbums, albumsRef, setAllAlbumsVideos, clearSelection],
     );
 
     const unhideVideo = useCallback(

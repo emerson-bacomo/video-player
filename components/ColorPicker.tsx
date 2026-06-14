@@ -1,13 +1,9 @@
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Dimensions, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, { useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
-
-const { width } = Dimensions.get("window");
-const PICKER_SIZE = width - 80;
-const HUE_HEIGHT = 20;
 
 interface HSVColor {
     h: number;
@@ -118,6 +114,9 @@ export const ColorPicker = ({
     initialColor: string;
     onColorChange: (color: string) => void;
 }) => {
+    const { width } = useWindowDimensions();
+    const PICKER_SIZE = width - 80;
+
     const hsvRef = useRef<HSVColor>({ h: 0, s: 1, v: 1 });
     const [displayHex, setDisplayHex] = useState(initialColor.toUpperCase());
     const [currentHueColor, setCurrentHueColor] = useState("#ff0000");
@@ -184,7 +183,10 @@ export const ColorPicker = ({
     return (
         <View className="items-center gap-5 p-5 rounded-3xl bg-card">
             <GestureDetector gesture={svGesture}>
-                <View style={[styles.svArea, { backgroundColor: currentHueColor }]}>
+                <View
+                    className="rounded-lg overflow-hidden"
+                    style={{ width: PICKER_SIZE, height: PICKER_SIZE, backgroundColor: currentHueColor }}
+                >
                     <LinearGradient
                         colors={["rgba(255,255,255,1)", "rgba(255,255,255,0)"]}
                         start={{ x: 0, y: 0 }}
@@ -197,19 +199,22 @@ export const ColorPicker = ({
                         end={{ x: 0, y: 1 }}
                         style={StyleSheet.absoluteFill}
                     />
-                    <Animated.View style={[styles.svIndicator, svIndicatorStyle]} />
+                    <Animated.View className="w-5 h-5 rounded-full border-2 border-white absolute" style={svIndicatorStyle} />
                 </View>
             </GestureDetector>
 
             <GestureDetector gesture={hueGesture}>
-                <View style={styles.hueArea}>
+                <View className="rounded-full justify-center" style={{ width: PICKER_SIZE, height: 20 }}>
                     <LinearGradient
                         colors={["#ff0000", "#ffff00", "#00ff00", "#00ffff", "#0000ff", "#ff00ff", "#ff0000"]}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 1, y: 0 }}
-                        style={styles.hueGradient}
+                        className="w-full h-full rounded-full"
                     />
-                    <Animated.View style={[styles.hueIndicator, hueIndicatorStyle]} />
+                    <Animated.View
+                        className="w-5 h-5 rounded-full border-2 border-white absolute bg-transparent"
+                        style={hueIndicatorStyle}
+                    />
                 </View>
             </GestureDetector>
 
@@ -217,41 +222,3 @@ export const ColorPicker = ({
         </View>
     );
 };
-
-const styles = StyleSheet.create({
-    svArea: {
-        width: PICKER_SIZE,
-        height: PICKER_SIZE,
-        borderRadius: 8,
-        overflow: "hidden",
-    },
-    svIndicator: {
-        width: 20,
-        height: 20,
-        borderRadius: 10,
-        borderWidth: 2,
-        borderColor: "white",
-        position: "absolute",
-    },
-    hueArea: {
-        width: PICKER_SIZE,
-        height: HUE_HEIGHT,
-        borderRadius: 10,
-        overflow: "visible",
-        justifyContent: "center",
-    },
-    hueGradient: {
-        width: "100%",
-        height: "100%",
-        borderRadius: 10,
-    },
-    hueIndicator: {
-        width: 20,
-        height: 20,
-        borderRadius: 10,
-        borderWidth: 2,
-        borderColor: "white",
-        position: "absolute",
-        backgroundColor: "transparent",
-    },
-});

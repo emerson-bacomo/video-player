@@ -1,13 +1,9 @@
 import * as ScreenOrientation from "expo-screen-orientation";
 import { useEffect } from "react";
-import { usePlayback } from "../context/PlaybackContext";
+import { usePlayerContext } from "../context/PlayerContext";
 
-/**
- * Hook to apply orientation locking based on the current playback context.
- * Useful for player-like screens where orientation should be locked while mounted.
- */
 export const useOrientationLock = () => {
-    const { orientation } = usePlayback();
+    const { orientation } = usePlayerContext();
 
     useEffect(() => {
         const lock = async () => {

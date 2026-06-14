@@ -17,6 +17,7 @@ export interface PlayerOperation {
 
 export interface Settings {
     clipDestination: string;
+    screenshotDestination: string;
     defaultOrientation: Orientation;
     brightnessSensitivity: number;
     nameReplacements: { find: string; replace: string; active: boolean }[];
@@ -31,6 +32,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
     clipDestination: "",
+    screenshotDestination: "",
     defaultOrientation: "system",
     brightnessSensitivity: 1.0,
     nameReplacements: [],

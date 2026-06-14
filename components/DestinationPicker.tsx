@@ -4,7 +4,7 @@ import { FolderOpen, X } from "lucide-react-native";
 import { Icon } from "./Icon";
 import { cn } from "@/lib/utils";
 import * as FileSystem from "expo-file-system/legacy";
-import { normalizeClipDestination } from "@/utils/clipDestination";
+import { normalizeMediaDestination } from "@/utils/mediaDestination";
 
 interface DestinationPickerProps {
     value: string; // Display path
@@ -32,7 +32,7 @@ export function DestinationPicker({
             const result = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
             if (result.granted) {
                 const uri = result.directoryUri;
-                const normalized = normalizeClipDestination(uri) ?? uri;
+                const normalized = normalizeMediaDestination(uri) ?? uri;
                 onChange(uri, normalized);
             }
         } catch (err) {

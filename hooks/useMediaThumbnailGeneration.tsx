@@ -5,7 +5,7 @@ import { unstable_batchedUpdates } from "react-native";
 import ExpoFFmpeg from "../modules/expo-ffmpeg";
 import { Album, VideoMedia } from "../types/useMedia";
 import { clearAllThumbnailsDb, getAllVideosDb, updateAlbumThumbnailDb, updateVideoThumbnailDb } from "../utils/db";
-import { getThumbnailUri } from "../utils/videoUtils";
+import { getThumbnailUri } from "@/utils/videoUtils";
 import { AlbumSortConfig, VideoSortConfig } from "./useMediaSort";
 
 const MAX_WORKERS = 4;

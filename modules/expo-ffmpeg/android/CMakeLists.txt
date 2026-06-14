@@ -29,6 +29,7 @@ set_target_properties(swresample PROPERTIES IMPORTED_LOCATION ${FFMPEG_LIBS_DIR}
 add_library(expo-ffmpeg SHARED
     ../common/cpp/ExpoFFmpegModule.cpp
     ../common/cpp/ThumbnailGenerator.cpp
+    ../common/cpp/ScreenshotGenerator.cpp
     ../common/cpp/VideoClipper.cpp
 )
 

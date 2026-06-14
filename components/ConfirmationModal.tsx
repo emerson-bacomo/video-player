@@ -1,6 +1,6 @@
 import React from "react";
 import { Text, View } from "react-native";
-import { AppModal } from "./AppModal";
+import { Modal } from "./Modal";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
 import { LucideIcon } from "lucide-react-native";
@@ -77,8 +77,11 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
     };
 
     return (
-        <AppModal visible={visible} onClose={onClose}>
-            <View className="p-6">
+        <Modal visible={visible} onClose={onClose} animationType="scale">
+            <View
+                style={{ maxHeight: "90%" }}
+                className="w-full max-w-[320px] rounded-2xl shadow-2xl border bg-zinc-900 border-white/10 overflow-hidden p-6"
+            >
                 <View className="items-center mb-4">
                     {icon && (
                         <View className={cn(modalIconBgVariants({ variant }))}>
@@ -114,6 +117,6 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                     )}
                 </View>
             </View>
-        </AppModal>
+        </Modal>
     );
 };

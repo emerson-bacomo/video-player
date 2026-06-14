@@ -46,6 +46,7 @@ export interface VideoMedia {
     prefix?: string;
     rawPrefix?: string;
     episode?: number;
+    season?: number;
     size?: number;
     isPlaceholder?: boolean;
     albumId: string;

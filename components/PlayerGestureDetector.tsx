@@ -1,31 +1,11 @@
-import React, { Dispatch, RefObject, SetStateAction, useMemo, useRef } from "react";
+import React, { useMemo, useRef } from "react";
 import { Dimensions } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useSettings } from "../hooks/useSettings";
-import { CorePlayerRef } from "./CorePlayer";
-import { PlayerCentralIndicatorProps } from "./PlayerCentralIndicator";
+import { usePlayerContext } from "@/context/PlayerContext";
 
 export interface PlayerGestureDetectorProps {
     children: React.ReactNode;
-
-    // Playback state
-    showControls: boolean;
-    setShowControls: Dispatch<SetStateAction<boolean>>;
-    duration: number;
-    paused: boolean;
-    setPaused: Dispatch<SetStateAction<boolean>>;
-    setPlaybackRate: Dispatch<SetStateAction<number>>;
-    setCentralIndicator: Dispatch<SetStateAction<PlayerCentralIndicatorProps["indicator"]>>;
-    setPanSeekTime: Dispatch<SetStateAction<number | null>>;
-    // Callbacks
-    resetControlsTimer: () => void;
-
-    // Refs
-    playerRef: RefObject<CorePlayerRef>;
-    controlsTimeout: RefObject<any>;
-    skipTimeout: RefObject<any>;
-    panStartTime: RefObject<number>;
-    setSeekingLock: (locked: boolean) => void;
 }
 
 /**
@@ -33,25 +13,27 @@ export interface PlayerGestureDetectorProps {
  * interactions: single-tap (toggle controls), double-tap (±10 s / play-pause),
  * long-press (2× speed / frame rewind), and horizontal pan (scrub).
  */
-export function PlayerGestureDetector({
-    children,
-    showControls,
-    setShowControls,
-    duration,
-    paused,
-    setPaused,
-    setPlaybackRate,
-    setCentralIndicator,
-    setPanSeekTime,
-    resetControlsTimer,
-    playerRef,
-    controlsTimeout,
-    skipTimeout,
-    panStartTime,
-    setSeekingLock,
-}: PlayerGestureDetectorProps) {
+export function PlayerGestureDetector({ children }: PlayerGestureDetectorProps) {
+    const {
+        showControls,
+        setShowControls,
+        duration,
+        paused,
+        setPaused,
+        setPlaybackRate,
+        setCentralIndicator,
+        setPanSeekTime,
+        resetControlsTimer,
+        playerRef,
+        controlsTimeout,
+        panStartTime,
+        setSeekingLock,
+    } = usePlayerContext();
+
     const { settings } = useSettings();
     const doubleTapSeekAmount = settings.doubleTapSeekAmount;
+
+    const skipTimeout = useRef<any>(null);
     const holdSeekTimer = useRef<any>(null);
     const lastTapHandledAt = useRef<number>(0);
     const accumulatedSeek = useRef<number>(0);
@@ -75,7 +57,7 @@ export function PlayerGestureDetector({
             } else {
                 accumulatedSeek.current = amount;
                 currentSeekDir.current = side;
-                seekTargetRef.current = playerRef.current.currentTime;
+                seekTargetRef.current = playerRef.current?.currentTime || 0;
             }
 
             const nextTime =
@@ -84,7 +66,7 @@ export function PlayerGestureDetector({
                     : Math.min(duration, seekTargetRef.current + amount);
 
             seekTargetRef.current = nextTime;
-            playerRef.current.seek(nextTime);
+            playerRef.current?.seek(nextTime);
             lastTapHandledAt.current = now;
 
             setCentralIndicator({
@@ -127,7 +109,9 @@ export function PlayerGestureDetector({
                     const h = Dimensions.get("window").height;
                     const isCornerX = event.x < w * 0.2 || event.x > w * 0.8;
                     const isCornerY = event.y < h * 0.2 || event.y > h * 0.8;
-                    if (isCornerX && isCornerY) return;
+                    if (isCornerX && isCornerY) {
+                        return;
+                    }
 
                     if (showControls) {
                         if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
@@ -136,7 +120,7 @@ export function PlayerGestureDetector({
                         resetControlsTimer();
                     }
                 }),
-        [showControls, resetControlsTimer, handleSnowballTap],
+        [showControls, resetControlsTimer, handleSnowballTap, controlsTimeout, setShowControls],
     );
 
     // Double tap: start snowball seek or play/pause
@@ -179,7 +163,7 @@ export function PlayerGestureDetector({
                         skipTimeout.current = setTimeout(() => setCentralIndicator(null), 800);
                     }
                 }),
-        [paused, showControls, setShowControls, handleSnowballTap, setPaused, setCentralIndicator, controlsTimeout, skipTimeout],
+        [paused, showControls, setShowControls, handleSnowballTap, setPaused, setCentralIndicator, controlsTimeout],
     );
 
     // Long press: 2× forward speed
@@ -210,7 +194,7 @@ export function PlayerGestureDetector({
                     if (holdSeekTimer.current) clearInterval(holdSeekTimer.current);
                     setCentralIndicator(null);
                 }),
-        [paused, showControls, setPlaybackRate, setPaused, setCentralIndicator, resetControlsTimer, holdSeekTimer],
+        [paused, showControls, setPlaybackRate, setPaused, setCentralIndicator, resetControlsTimer],
     );
 
     const panGesture = useMemo(
@@ -221,7 +205,8 @@ export function PlayerGestureDetector({
                 .onStart((event) => {
                     if (isSpeedHolding.current) return;
                     // Only CLEAR the timer — don't reschedule. Controls stay visible
-                    // during the entire pan. resetControlsTimer() will be called on end.
+                    // during the entire pan. resetControlsTimer(false) is called on end
+                    // to reset the auto-hide countdown without forcing visibility.
                     if (controlsTimeout.current) clearTimeout(controlsTimeout.current);
                     if (Math.abs(event.translationY) > Math.abs(event.translationX)) {
                         isActualPan.current = false;
@@ -229,6 +214,7 @@ export function PlayerGestureDetector({
                     }
                     isActualPan.current = true;
                     isPanValidated.current = false;
+                    wasControlsShownBeforePan.current = showControls;
                     // Reset panStartTime marker to indicate we haven't "started" the UI yet
                     panStartTime.current = -1;
                 })
@@ -258,7 +244,7 @@ export function PlayerGestureDetector({
                     // 2. UI Activation (Happens once we've confirmed it's horizontal or moved enough)
                     // We wait for 15px total to show the indicator to avoid the +0s flicker on vertical swipes
                     if (panStartTime.current === -1 && Math.abs(event.translationX) > 15) {
-                        panStartTime.current = playerRef.current.currentTime;
+                        panStartTime.current = playerRef.current?.currentTime || 0;
                         wasPlayingBeforePan.current = !paused;
                         setPaused(true);
                         setSeekingLock(true);
@@ -271,12 +257,14 @@ export function PlayerGestureDetector({
                         const dpPerCm = 160 / 2.54;
                         const deltaSec = (event.translationX / dpPerCm) * settings.panSeekSensitivity;
                         const newTimeSec = Math.max(0, Math.min(duration, panStartTime.current + deltaSec));
-                        playerRef.current.seek(newTimeSec);
+                        playerRef.current?.seek(newTimeSec);
                         setPanSeekTime(newTimeSec);
                     }
                 })
                 .onEnd(() => {
-                    if (!isActualPan.current || panStartTime.current === -1) return;
+                    if (!isActualPan.current || panStartTime.current === -1) {
+                        return;
+                    }
                     if (wasPlayingBeforePan.current) setPaused(false);
                     setPanSeekTime(null);
                     setCentralIndicator(null);
@@ -285,7 +273,11 @@ export function PlayerGestureDetector({
                     isPanValidated.current = false;
                     // Start the auto-hide countdown only after the seek is fully done.
                     // This ensures rapid back-to-back pans never hide controls mid-sequence.
-                    resetControlsTimer();
+                    // Only show controls if they were visible before the pan started,
+                    // so that a simultaneous single-tap that hides controls is respected.
+                    if (wasControlsShownBeforePan.current) {
+                        resetControlsTimer(false);
+                    }
                 }),
         [
             duration,
@@ -301,7 +293,6 @@ export function PlayerGestureDetector({
             playerRef,
             panStartTime,
         ],
-
     );
 
     // Compose

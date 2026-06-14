@@ -65,6 +65,14 @@ export const useMediaPrefixFilter = (
             const nextFiltersStr = JSON.stringify(nextFilters);
             updateAlbumSelectedPrefixOptionsDb(albumId, nextFiltersStr);
 
+            // Update albumsRef so performSmartSync doesn't resurrect stale selectedPrefixOptions
+            if (albumsRef.current[albumId]) {
+                albumsRef.current[albumId] = {
+                    ...albumsRef.current[albumId],
+                    selectedPrefixOptions: nextFiltersStr,
+                };
+            }
+
             // Update videos in memory
             const unfilteredVideos = getUnfilteredVideosForAlbum(albumId);
             const filteredVideos = applyFiltersToVideos(albumId, unfilteredVideos);
@@ -102,6 +110,14 @@ export const useMediaPrefixFilter = (
             setSelectedVideoPrefixFiltersState(nextState);
 
             updateAlbumSelectedPrefixOptionsDb(albumId, null);
+
+            // Update albumsRef so performSmartSync doesn't resurrect stale selectedPrefixOptions
+            if (albumsRef.current[albumId]) {
+                albumsRef.current[albumId] = {
+                    ...albumsRef.current[albumId],
+                    selectedPrefixOptions: undefined,
+                };
+            }
 
             // Update videos in memory
             const unfilteredVideos = getUnfilteredVideosForAlbum(albumId);
@@ -155,6 +171,14 @@ export const useMediaPrefixFilter = (
                 updateAlbumPrefixOptionsDb(albumId, optionsStr);
             }
 
+            // Sync albumsRef with latest prefixOptions
+            if (albumsRef.current[albumId]) {
+                albumsRef.current[albumId] = {
+                    ...albumsRef.current[albumId],
+                    prefixOptions: optionsStr,
+                };
+            }
+
             // Validate active filters
             const selectedPrefixOptions = getAlbumSelectedPrefixOptionsDb(albumId);
             if (selectedPrefixOptions) {
@@ -166,6 +190,14 @@ export const useMediaPrefixFilter = (
                             // Update selection
                             const nextFiltersStr = validSelected.length > 0 ? JSON.stringify(validSelected) : null;
                             updateAlbumSelectedPrefixOptionsDb(albumId, nextFiltersStr);
+
+                            // Sync albumsRef
+                            if (albumsRef.current[albumId]) {
+                                albumsRef.current[albumId] = {
+                                    ...albumsRef.current[albumId],
+                                    selectedPrefixOptions: nextFiltersStr ?? undefined,
+                                };
+                            }
 
                             const nextState = { ...selectedVideoPrefixFiltersRef.current };
                             if (validSelected.length > 0) {
@@ -189,7 +221,7 @@ export const useMediaPrefixFilter = (
 
             return options;
         },
-        [applyFiltersToVideos, getUnfilteredVideosForAlbum, setAllAlbumsVideos],
+        [albumsRef, applyFiltersToVideos, getUnfilteredVideosForAlbum, setAllAlbumsVideos],
     );
 
     return {

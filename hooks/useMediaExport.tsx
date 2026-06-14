@@ -1,11 +1,11 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { AppState, AppStateStatus } from "react-native";
-import { Directory } from "expo-file-system";
-import * as FileSystem from "expo-file-system/legacy";
 import { requireNativeModule } from "expo-modules-core";
 import ExpoFFmpeg from "@/modules/expo-ffmpeg/src/index";
 import { ExportOptions, SessionClip, VideoMedia } from "@/types/useMedia";
-import { normalizeClipDestination } from "@/utils/clipDestination";
+import { useManageExternalStorageToast } from "@/hooks/useManageExternalStorageToast";
+import { resolveAndPersistDestination, alertIfDestinationInvalid } from "@/utils/mediaDestination";
+import { sanitizeFilename } from "@/utils/fileNaming";
 import {
     ensureNotifeeChannels,
     showProgressNotification,
@@ -44,6 +44,7 @@ export type ExportDependencies = Pick<
 
 export function useMediaExport(deps: ExportDependencies) {
     const { settingsRef, updateSettings } = useSettings();
+    const { showPermissionToast } = useManageExternalStorageToast();
 
     const [exportQueue, setExportQueue] = useState<ExportQueueItem[]>([]);
     const isExportingRef = useRef(false);
@@ -88,6 +89,7 @@ export function useMediaExport(deps: ExportDependencies) {
         const { inputUri, segments, options, labels, onSuccess } = item;
         const { setLoadingTask, fetchAlbums, registerSessionClip, allAlbumsVideos, addPendingClipAssignment } = depsRef.current;
         const clipDestination = settingsRef.current.clipDestination;
+        let directoryName = "";
 
         const queuePosPrefix = queueInfo.total === 1 ? "" : `(${queueInfo.current} of ${queueInfo.total}) `;
 
@@ -105,58 +107,26 @@ export function useMediaExport(deps: ExportDependencies) {
         });
 
         try {
-            let resolvedDest = normalizeClipDestination(clipDestination || "");
+            const resolvedDest = await resolveAndPersistDestination({
+                currentDestination: clipDestination,
+                settingsKey: "clipDestination",
+                updateSettings,
+                labelPrefix: "Clip",
+                setLoadingTask,
+            });
+
             if (!resolvedDest) {
-                try {
-                    const directory = await Directory.pickDirectoryAsync();
-                    if (!directory?.uri) {
-                        setLoadingTask({
-                            label: "Config Error",
-                            detail: "Clip destination is not valid, change in settings.",
-                            importance: "SHOW_POPUP",
-                            dismissAfter: 4000,
-                        });
-
-                        return false;
-                    }
-                    resolvedDest = normalizeClipDestination(directory.uri);
-                    if (!resolvedDest) {
-                        setLoadingTask({
-                            label: "Config Error",
-                            detail: "Clip destination is not valid, change in settings.",
-                            importance: "SHOW_POPUP",
-                            dismissAfter: 4000,
-                        });
-
-                        return false;
-                    }
-                    await updateSettings({ clipDestination: resolvedDest });
-                } catch (pickerError) {
-                    console.warn("[useMediaExport] Failed to pick clip destination", pickerError);
-                    setLoadingTask({
-                        label: "Config Error",
-                        detail: "Clip destination is not valid, change in settings.",
-                        importance: "SHOW_POPUP",
-                        dismissAfter: 4000,
-                    });
-                    return false;
-                }
+                return false;
             }
 
             const destDir = resolvedDest.replace(/\/+$/, "");
+            directoryName = destDir.split("/").pop() || destDir;
             const ext = options.format;
-            const sanitizedName = options.name.replace(/[<>:"/\\|?*]/g, "_").trim();
+            const sanitizedName = sanitizeFilename(options.name) || "Clip";
             const outPathStr = `${destDir}/${sanitizedName}.${ext}`;
             const outPathStrDisplay = outPathStr.split("/0/")[1];
 
-            const destInfo = await FileSystem.getInfoAsync(`file://${destDir}`);
-            if (!destInfo.exists || !destInfo.isDirectory) {
-                setLoadingTask({
-                    label: "File Error",
-                    detail: "Clip destination is not valid, change in settings.",
-                    importance: "SHOW_POPUP",
-                    dismissAfter: 4000,
-                });
+            if (!(await alertIfDestinationInvalid({ destDir, labelPrefix: "Clip", setLoadingTask }))) {
                 return false;
             }
 
@@ -296,13 +266,22 @@ export function useMediaExport(deps: ExportDependencies) {
             console.error("[useMediaExport] Export error:", e);
             await cancelProgressNotification();
             notifPostedRef.current = false;
-            setLoadingTask({
-                label: "Critical Error",
-                detail: "An unexpected error occurred during export.",
-                importance: "SHOW_POPUP",
-                dismissAfter: 5000,
-                status: "error",
-            });
+
+            const isStorageError =
+                e?.message?.includes("NEEDS_MANAGE_EXTERNAL_STORAGE") ||
+                e?.message?.includes("Failed to write screenshot") ||
+                e?.message?.includes("Please grant All Files Access");
+            if (isStorageError) {
+                showPermissionToast(directoryName);
+            } else {
+                setLoadingTask({
+                    label: "Critical Error",
+                    detail: "An unexpected error occurred during export.",
+                    importance: "SHOW_POPUP",
+                    dismissAfter: 5000,
+                    status: "error",
+                });
+            }
             return false;
         }
     };

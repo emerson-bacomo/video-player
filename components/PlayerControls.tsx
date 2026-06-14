@@ -1,8 +1,8 @@
 import { cn } from "@/lib/utils";
 import Slider from "@react-native-community/slider";
 import { LinearGradient } from "expo-linear-gradient";
-import * as ScreenOrientation from "expo-screen-orientation";
 import {
+    Camera,
     ChevronLeft,
     ChevronRight,
     Eye,
@@ -18,97 +18,64 @@ import {
     Trash2,
 } from "lucide-react-native";
 import React, { useEffect, useState } from "react";
-import { LayoutChangeEvent, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
+import { LayoutChangeEvent, Text, TouchableOpacity, View } from "react-native";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Marker, MarkerPair } from "@/types/useMedia";
 import { useSettings } from "@/hooks/useSettings";
+import { useOrientationLayout } from "@/hooks/useOrientationLayout";
+import { useStableSafeAreaInsets } from "@/hooks/useStableSafeAreaInsets";
 import { ClippingOverlay } from "./ClippingOverlay";
+import { ScreenshotOverlay } from "./ScreenshotOverlay";
+import { MarkerPair } from "@/types/useMedia";
+import { usePlayerControls } from "@/hooks/usePlayerControls";
+import { usePlayerContext } from "@/context/PlayerContext";
 
-interface PlayerControlsProps {
-    isPlaying: boolean;
-    onTogglePlay: () => void;
-    onSeek: (value: number) => void;
-    onSkipNext: () => void;
-    onSkipPrevious: () => void;
-    currentDisplayTime: number;
-    duration: number;
-    orientation?: ScreenOrientation.OrientationLock;
-    // Clipping Props
-    isClipMode: boolean;
-    onToggleClipMode: () => void;
-    markers: Marker[];
-    markerPairs: MarkerPair[];
-    previewActive: boolean;
-    onTogglePreview: () => void;
-    onAddMarker: () => void;
-    onRemoveMarker: (id: string) => void;
-    onAdjustCurrentMarker: () => void;
-    onSaveClip: () => Promise<void>;
-    onSelectMarker: (id: string) => void;
-    onUpdateMarkerTime: (id: string, time: number) => void;
-    activeMarkerId: string | null;
-    onDragStart?: () => void;
-    onDragEnd?: () => void;
-    onDoublePressMarker?: (markerTime: number) => void;
-    isEnded: boolean;
-    onRestart: () => void;
-    hasNext: boolean;
-    hasPrevious: boolean;
-    onSeekToPrevMarker: () => void;
-    onSeekToNextMarker: () => void;
-    hasPrevMarker: boolean;
-    hasNextMarker: boolean;
-    isReadyForDisplay: boolean;
-    setSeekingLock: (locked: boolean) => void;
-}
+export const PlayerControls: React.FC = () => {
+    const { setSeekingLock, currentDisplayTime, duration, screenshotState } = usePlayerContext();
+    const { onScreenshot, screenshotOverlayVisible, screenshotUri, screenshotFilepath, dismissScreenshot } = screenshotState;
+    const {
+        isPlaying,
+        isClipMode,
+        isEnded,
+        hasNext,
+        hasPrevious,
+        onTogglePlay,
+        onSeek,
+        onSkipNext,
+        onSkipPrevious,
+        onRestart,
+        onToggleClipMode,
+        markers,
+        markerPairs,
+        previewActive,
+        onTogglePreview,
+        onAddMarker,
+        onSaveClip,
+        onRemoveMarker,
+        onAdjustCurrentMarker,
+        onSeekToPrevMarker,
+        onSeekToNextMarker,
+        hasPrevMarker,
+        hasNextMarker,
+        onSelectMarker,
+        onUpdateMarkerTime,
+        activeMarkerId,
+        onDragStart,
+        onDragEnd,
+        onDoublePressMarker,
+    } = usePlayerControls();
 
-export const PlayerControls: React.FC<PlayerControlsProps> = ({
-    isPlaying,
-    onTogglePlay,
-    onSeek,
-    onSkipNext,
-    onSkipPrevious,
-    currentDisplayTime,
-    duration,
-    isClipMode,
-    onToggleClipMode,
-    markers,
-    markerPairs,
-    previewActive,
-    onTogglePreview,
-    onAddMarker,
-    onRemoveMarker,
-    onAdjustCurrentMarker,
-    onSaveClip,
-    onSelectMarker,
-    onUpdateMarkerTime,
-    activeMarkerId,
-    onDragStart,
-    onDragEnd,
-    onDoublePressMarker,
-    isEnded,
-    onRestart,
-    hasNext,
-    hasPrevious,
-    onSeekToPrevMarker,
-    onSeekToNextMarker,
-    hasPrevMarker,
-    hasNextMarker,
-    setSeekingLock,
-}) => {
-    const { width: screenWidth, height: screenHeight } = useWindowDimensions();
-    const isLandscape = screenWidth > screenHeight;
+    const { isLandscape, width: screenWidth } = useOrientationLayout();
+    const insets = useStableSafeAreaInsets(isLandscape);
 
     const { settings, updateSettings } = useSettings();
-    const [sliderWidth, setSliderWidth] = useState(screenWidth - 32); // Better initial estimate
+    const [sliderWidth, setSliderWidth] = useState(screenWidth - 32);
     const [localIsPlaying, setLocalIsPlaying] = useState(isPlaying);
 
     const expansion = useSharedValue(isClipMode ? 1 : 0);
 
     useEffect(() => {
         expansion.value = withTiming(isClipMode ? 1 : 0, { duration: 300 });
-    }, [isClipMode]);
+    }, [isClipMode, expansion]);
 
     const animatedBarStyle = useAnimatedStyle(() => {
         return {
@@ -124,7 +91,6 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         };
     });
 
-    // Sync with prop when it changes (e.g. video finishes or external toggle)
     React.useEffect(() => {
         setLocalIsPlaying(isPlaying);
     }, [isPlaying]);
@@ -140,8 +106,6 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         setSliderWidth(e.nativeEvent.layout.width);
     };
 
-    const insets = useSafeAreaInsets();
-
     return (
         <View className="absolute bottom-0 left-0 right-0 z-50">
             <LinearGradient
@@ -149,6 +113,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                 className={cn("pt-4", isLandscape ? "pb-10" : "pb-14")}
                 style={{ paddingLeft: Math.max(insets.left, 16), paddingRight: Math.max(insets.right, 16) }}
             >
+                {/* Top action bar — clip toolbar on the left, screenshot button on the right */}
                 <View className={cn("flex-row justify-between items-center", isLandscape ? "mb-1" : "mb-4")}>
                     {/* Action Bar Container */}
                     <Animated.View
@@ -160,12 +125,10 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                             style={[{ flexDirection: "row", alignItems: "center", overflow: "hidden" }, animatedTuckStyle]}
                         >
                             <View className="flex-row items-center pl-1 gap-1">
-                                {/* Add Marker */}
                                 <TouchableOpacity onPress={onAddMarker} className="p-2.5 active:bg-white/20 rounded-full">
                                     <Plus size={20} color="white" />
                                 </TouchableOpacity>
 
-                                {/* Delete Selected Marker */}
                                 <TouchableOpacity
                                     onPress={() => activeMarkerId && onRemoveMarker(activeMarkerId)}
                                     disabled={!activeMarkerId}
@@ -174,7 +137,6 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                                     <Trash2 size={20} color={activeMarkerId ? "#f56565" : "white"} />
                                 </TouchableOpacity>
 
-                                {/* Adjust Current Marker */}
                                 <TouchableOpacity
                                     onPress={() => activeMarkerId && onAdjustCurrentMarker()}
                                     disabled={!activeMarkerId}
@@ -183,7 +145,6 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                                     <SeparatorVertical size={20} color="white" />
                                 </TouchableOpacity>
 
-                                {/* Navigate Markers */}
                                 <TouchableOpacity
                                     onPress={onSeekToPrevMarker}
                                     disabled={!hasPrevMarker}
@@ -200,13 +161,12 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                                     <ChevronRight size={20} color="white" />
                                 </TouchableOpacity>
 
-                                {/* Toggle Preview */}
                                 <TouchableOpacity
                                     onPress={onTogglePreview}
-                                    disabled={!markerPairs.some((p) => p.id !== "pair-realtime")}
+                                    disabled={!markerPairs.some((p: MarkerPair) => p.id !== "pair-realtime")}
                                     className={cn(
                                         "p-2.5 rounded-full",
-                                        !markerPairs.some((p) => p.id !== "pair-realtime")
+                                        !markerPairs.some((p: MarkerPair) => p.id !== "pair-realtime")
                                             ? "opacity-30"
                                             : previewActive
                                               ? "bg-white/20"
@@ -216,7 +176,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                                     <Eye
                                         size={20}
                                         color={
-                                            markerPairs.some((p) => p.id !== "pair-realtime")
+                                            markerPairs.some((p: MarkerPair) => p.id !== "pair-realtime")
                                                 ? previewActive
                                                     ? "#3b82f6"
                                                     : "white"
@@ -225,26 +185,26 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                                     />
                                 </TouchableOpacity>
 
-                                {/* Save */}
                                 <TouchableOpacity
                                     onPress={onSaveClip}
-                                    disabled={!markerPairs.some((p) => p.id !== "pair-realtime")}
+                                    disabled={!markerPairs.some((p: MarkerPair) => p.id !== "pair-realtime")}
                                     className={cn(
                                         "p-2.5 rounded-full",
-                                        !markerPairs.some((p) => p.id !== "pair-realtime")
+                                        !markerPairs.some((p: MarkerPair) => p.id !== "pair-realtime")
                                             ? "opacity-30"
                                             : "active:bg-emerald-500/10",
                                     )}
                                 >
                                     <Save
                                         size={20}
-                                        color={markerPairs.some((p) => p.id !== "pair-realtime") ? "#5cdab0ff" : "white"}
+                                        color={
+                                            markerPairs.some((p: MarkerPair) => p.id !== "pair-realtime") ? "#5cdab0ff" : "white"
+                                        }
                                     />
                                 </TouchableOpacity>
                             </View>
                         </Animated.View>
 
-                        {/* Clip Mode Toggle (Expand/Collapse) */}
                         <TouchableOpacity
                             onPress={onToggleClipMode}
                             style={{
@@ -264,9 +224,16 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                             )}
                         </TouchableOpacity>
                     </Animated.View>
+
+                    {/* Screenshot button — lives on the right, flex-between separates it from the clip toolbar */}
+                    <TouchableOpacity
+                        onPress={onScreenshot}
+                        className="w-11 h-11 items-center justify-center bg-black/40 rounded-full"
+                    >
+                        <Camera size={18} color="white" />
+                    </TouchableOpacity>
                 </View>
 
-                {/* Scrubber Container */}
                 <View className={cn("relative", isLandscape ? "mb-1" : "mb-4")} onLayout={onSliderLayout}>
                     {isClipMode && (
                         <ClippingOverlay
@@ -322,7 +289,6 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                     )}
                 </View>
 
-                {/* Playback Controls (Play/Pause, Skip) */}
                 <View className={cn("flex-row items-center justify-center", isLandscape ? "gap-12" : "gap-14")}>
                     <TouchableOpacity
                         onPress={onSkipPrevious}
@@ -333,7 +299,6 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                         <SkipBack size={isLandscape ? 24 : 28} color="white" fill="white" />
                     </TouchableOpacity>
 
-                    {/* Play/Pause */}
                     <TouchableOpacity
                         onPress={() => {
                             if (isEnded) {
@@ -364,6 +329,14 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
                     </TouchableOpacity>
                 </View>
             </LinearGradient>
+
+            {/* Screenshot saved overlay */}
+            <ScreenshotOverlay
+                visible={screenshotOverlayVisible}
+                imageUri={screenshotUri}
+                filepath={screenshotFilepath}
+                onDismiss={dismissScreenshot}
+            />
         </View>
     );
 };

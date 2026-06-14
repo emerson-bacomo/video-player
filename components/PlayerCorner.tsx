@@ -8,78 +8,62 @@ import Animated from "react-native-reanimated";
 import { CornerPosition, PlayerOperation } from "@/constants/defaults";
 import { useSettings } from "@/hooks/useSettings";
 import { cn } from "@/lib/utils";
-import { AppModal } from "./AppModal";
-import { CorePlayerRef } from "./CorePlayer";
 import { Icon } from "./Icon";
 import { SelectDropdown } from "./SelectDropdown";
 
+import { usePlayerCorner } from "@/hooks/usePlayerCorner";
+import { usePlayerContext } from "@/context/PlayerContext";
+import { Modal } from "./Modal";
+
 let copiedOperator: Partial<PlayerOperation> | null = null;
 
-const IconItem = React.memo(
-    ({
-        name,
-        isSelected,
-        itemSize,
-        onPress,
-    }: {
-        name: string;
-        isSelected: boolean;
-        itemSize: number;
-        onPress: (name: string) => void;
-    }) => {
-        const IconComp = (Icons as any)[name];
-        if (!IconComp) return null;
+const IconItem = React.memo(function IconName({
+    name,
+    isSelected,
+    itemSize,
+    onPress,
+}: {
+    name: string;
+    isSelected: boolean;
+    itemSize: number;
+    onPress: (name: string) => void;
+}) {
+    const IconComp = (Icons as any)[name];
+    if (!IconComp) return null;
 
-        return (
-            <TouchableOpacity
-                onPress={() => onPress(name)}
-                style={{ width: itemSize, height: itemSize }}
-                className={cn(
-                    "items-center justify-center rounded-lg",
-                    isSelected ? "bg-blue-600" : "bg-white/5",
-                )}
-            >
-                <Icon icon={IconComp} size={20} color={isSelected ? "white" : "#aaa"} />
-            </TouchableOpacity>
-        );
-    },
-);
+    return (
+        <TouchableOpacity
+            onPress={() => onPress(name)}
+            style={{ width: itemSize, height: itemSize }}
+            className={cn("items-center justify-center rounded-lg", isSelected ? "bg-blue-600" : "bg-white/5")}
+        >
+            <Icon icon={IconComp} size={20} color={isSelected ? "white" : "#aaa"} />
+        </TouchableOpacity>
+    );
+});
 
 interface PlayerCornerProps {
     position: CornerPosition;
     hasPermission: boolean;
-    showPieMenu: boolean;
     sensitivity?: number;
-    playerRef: React.RefObject<CorePlayerRef>;
-    duration: number;
-    onDoubleTap: () => void;
-    onSingleTap: () => void;
-    onBrightnessChange: (val: number) => void;
-    onSkipNext: () => void;
-    onSkipPrev: () => void;
-    hasNext: boolean;
-    hasPrev: boolean;
-    onSetCentralIndicator: (indicator: any) => void;
-    onModalChange?: (isOpen: boolean) => void;
 }
 
-export const PlayerCorner: React.FC<PlayerCornerProps> = ({
-    position,
-    hasPermission,
-    showPieMenu,
-    sensitivity = 0.3,
-    playerRef,
-    duration,
-    onDoubleTap,
-    onSingleTap,
-    onBrightnessChange,
-    onSkipNext,
-    onSkipPrev,
-    hasNext,
-    hasPrev,
-    onSetCentralIndicator,
-    onModalChange,
-}) => {
+export const PlayerCorner: React.FC<PlayerCornerProps> = ({ position, hasPermission, sensitivity = 0.3 }) => {
+    const {
+        showPieMenu: globalShowPieMenu,
+        handleCornerModalChange,
+        handleCornerDoubleTap,
+        handleBrightnessChange,
+        handleSingleTap,
+        handleSkipNext,
+        handleSkipPrevious,
+        setCentralIndicator,
+    } = usePlayerCorner();
+
+    const { playerRef, duration, hasNext, hasPrevious: hasPrev, showControls } = usePlayerContext();
+
+    const showPieMenu = globalShowPieMenu && !showControls;
+
     const { settings, updateSettings } = useSettings();
     const isTop = position.startsWith("top");
     const isLeft = position.endsWith("left");
@@ -107,7 +91,6 @@ export const PlayerCorner: React.FC<PlayerCornerProps> = ({
         if (hasPermission) {
             Brightness.getSystemBrightnessAsync()
                 .then((b) => {
-                    // Convert raw system value to perceptual (roughly cubic on Android)
                     const perceptual = Math.pow(b, 1 / 3);
                     dragBaseline.current = perceptual;
                 })
@@ -123,7 +106,6 @@ export const PlayerCorner: React.FC<PlayerCornerProps> = ({
             syncTranslation.current = 0;
             Brightness.getSystemBrightnessAsync()
                 .then((realBrightness) => {
-                    // Sync baseline with current perceptual value
                     dragBaseline.current = Math.pow(realBrightness, 1 / 3);
                     syncTranslation.current = activeTranslation.current;
                 })
@@ -133,15 +115,12 @@ export const PlayerCorner: React.FC<PlayerCornerProps> = ({
             if (!hasPermission) return;
             activeTranslation.current = event.translationY;
             const screenHeight = dimensions.height;
-            // Formula works on perceptual scale (0 to 1)
             const deltaP = (event.translationY - syncTranslation.current) / (screenHeight / (sensitivity * 5));
             let newP = dragBaseline.current - deltaP;
             newP = Math.max(0, Math.min(1, newP));
 
-            // Output perceptual for UI indicator
-            onBrightnessChange(newP);
+            handleBrightnessChange(newP);
 
-            // Convert perceptual back to raw for system (P^3)
             const raw = Math.pow(newP, 3);
             Brightness.setSystemBrightnessAsync(raw).catch(() => {});
         });
@@ -150,14 +129,14 @@ export const PlayerCorner: React.FC<PlayerCornerProps> = ({
         .numberOfTaps(2)
         .runOnJS(true)
         .onEnd(() => {
-            onDoubleTap();
+            handleCornerDoubleTap();
         });
 
     const singleTapGesture = Gesture.Tap()
         .numberOfTaps(1)
         .runOnJS(true)
         .onEnd(() => {
-            if (!showPieMenu) onSingleTap();
+            if (!showPieMenu) handleSingleTap();
         });
 
     const composed = Gesture.Exclusive(doubleTapGesture, panGesture, singleTapGesture);
@@ -175,7 +154,7 @@ export const PlayerCorner: React.FC<PlayerCornerProps> = ({
 
     // Notify parent when any modal opens/closes so it can hide the controls layer
     useEffect(() => {
-        onModalChange?.(!!configModal || iconPickerOpen);
+        handleCornerModalChange(!!configModal || iconPickerOpen);
 
         if (iconPickerOpen) {
             if (editOp.iconName) {
@@ -189,7 +168,7 @@ export const PlayerCorner: React.FC<PlayerCornerProps> = ({
             setIconHistory([]);
             setHistoryIndex(-1);
         }
-    }, [configModal, iconPickerOpen]);
+    }, [configModal, iconPickerOpen, handleCornerModalChange, editOp.iconName]);
 
     const skipTimeout = useRef<any>(null);
     const handleExecuteOperation = useCallback(
@@ -201,59 +180,63 @@ export const PlayerCorner: React.FC<PlayerCornerProps> = ({
                 playerRef.current?.seek(newTime);
 
                 const iconName = op.value >= 0 ? "skip-fwd" : "skip-back";
-                onSetCentralIndicator({
+                setCentralIndicator({
                     icon: iconName as any,
                     label: op.label || `${op.value > 0 ? "+" : ""}${op.value}s`,
                 });
 
                 if (skipTimeout.current) clearTimeout(skipTimeout.current);
-                skipTimeout.current = setTimeout(() => onSetCentralIndicator(null), 800);
+                skipTimeout.current = setTimeout(() => setCentralIndicator(null), 800);
             } else if (op.type === "play-next") {
-                if (hasNext) onSkipNext();
+                if (hasNext) handleSkipNext();
             } else if (op.type === "play-prev") {
-                if (hasPrev) onSkipPrev();
+                if (hasPrev) handleSkipPrevious();
             } else if (op.type === "double-tap-seek-left") {
                 const currentPos = playerRef.current?.currentTime || 0;
                 const amount = settings.doubleTapSeekAmount;
                 const newTime = Math.max(0, currentPos - amount);
                 playerRef.current?.seek(newTime);
 
-                onSetCentralIndicator({
+                setCentralIndicator({
                     icon: "skip-back",
                     label: `-${amount}s`,
                 });
                 if (skipTimeout.current) clearTimeout(skipTimeout.current);
-                skipTimeout.current = setTimeout(() => onSetCentralIndicator(null), 800);
+                skipTimeout.current = setTimeout(() => setCentralIndicator(null), 800);
             } else if (op.type === "double-tap-seek-right") {
                 const currentPos = playerRef.current?.currentTime || 0;
                 const amount = settings.doubleTapSeekAmount;
                 const newTime = Math.min(duration, currentPos + amount);
                 playerRef.current?.seek(newTime);
 
-                onSetCentralIndicator({
+                setCentralIndicator({
                     icon: "skip-fwd",
                     label: `+${amount}s`,
                 });
                 if (skipTimeout.current) clearTimeout(skipTimeout.current);
-                skipTimeout.current = setTimeout(() => onSetCentralIndicator(null), 800);
+                skipTimeout.current = setTimeout(() => setCentralIndicator(null), 800);
             }
         },
-        [duration, onSkipNext, onSkipPrev, hasNext, hasPrev, onSetCentralIndicator, settings.doubleTapSeekAmount, playerRef],
+        [
+            duration,
+            handleSkipNext,
+            handleSkipPrevious,
+            hasNext,
+            hasPrev,
+            setCentralIndicator,
+            settings.doubleTapSeekAmount,
+            playerRef,
+        ],
     );
 
     const allIconNames = useMemo(
         () =>
             Object.keys(Icons)
                 .filter((k) => {
-                    // Skip non-component exports
                     if (k === "default" || k === "Icon") return false;
-                    // Skip *Icon aliases (e.g. PlayIcon) — keep only base names (e.g. Play)
                     if (k.endsWith("Icon")) return false;
-                    // Skip Lucide-prefixed aliases (e.g. LucideFastForward duplicates FastForward)
                     if (k.startsWith("Lucide")) return false;
-                    // Must start with uppercase
                     if (k[0] !== k[0].toUpperCase()) return false;
-                    // Must be a non-null object or function (forwardRef components)
                     const val = (Icons as any)[k];
                     return val != null;
                 })
@@ -403,7 +386,7 @@ export const PlayerCorner: React.FC<PlayerCornerProps> = ({
                 </Animated.View>
             </GestureDetector>
 
-            <AppModal visible={!!configModal} onClose={() => setConfigModal(null)}>
+            <Modal visible={!!configModal} onClose={() => setConfigModal(null)}>
                 <View className="px-6 pt-6 pb-2 flex-col justify-between" style={{ height: modalHeight }}>
                     <View className="flex-1">
                         <View className="flex-row justify-between items-center mb-4">
@@ -510,17 +493,15 @@ export const PlayerCorner: React.FC<PlayerCornerProps> = ({
                         </TouchableOpacity>
                     </View>
                 </View>
-            </AppModal>
+            </Modal>
 
             {/* Icon Picker — second modal stacked on top of config modal */}
-            <AppModal
+            <Modal
                 visible={iconPickerOpen}
                 onClose={() => {
                     setIconPickerOpen(false);
                     setSearchQuery("");
                 }}
-                dimmed={false}
-                className="max-w-sm"
             >
                 <View style={{ height: modalHeight }} className="flex-col">
                     {/* Sticky search bar */}
@@ -596,7 +577,6 @@ export const PlayerCorner: React.FC<PlayerCornerProps> = ({
                         removeClippedSubviews={true}
                         onLayout={(e) => {
                             setPickerWidth(e.nativeEvent.layout.width);
-                            // Once the list is laid out, scroll to the selected icon if one exists
                             if (editOp.iconName && !searchQuery) {
                                 const idx = filteredIcons.indexOf(editOp.iconName);
                                 if (idx > 0) {
@@ -605,7 +585,6 @@ export const PlayerCorner: React.FC<PlayerCornerProps> = ({
                             }
                         }}
                         onScrollToIndexFailed={(info) => {
-                            // Fallback: wait for render then retry
                             setTimeout(() => {
                                 flatListRef.current?.scrollToIndex({ index: info.index, animated: false, viewPosition: 0.4 });
                             }, 100);
@@ -613,7 +592,7 @@ export const PlayerCorner: React.FC<PlayerCornerProps> = ({
                         renderItem={renderIconItem}
                     />
                 </View>
-            </AppModal>
+            </Modal>
         </>
     );
 };
@@ -631,96 +610,83 @@ interface PieButtonsProps {
     hasPrev: boolean;
 }
 
-const PieButtons = React.memo<PieButtonsProps>(
-    ({ ops, isLeft, isTop, pieRadius, piePadding, labelRadius, onExecuteOperation, onSetConfigModal, hasNext, hasPrev }) => {
-        const angles = [0, 30, 60, 90];
+const PieButtons = React.memo<PieButtonsProps>(function PieButtons({
+    ops,
+    isLeft,
+    isTop,
+    pieRadius,
+    piePadding,
+    labelRadius,
+    onExecuteOperation,
+    onSetConfigModal,
+    hasNext,
+    hasPrev,
+}) {
+    const angles = [0, 30, 60, 90];
 
-        return (
-            <>
-                {/* <TouchableOpacity
-                    disabled
-                    className="absolute w-12 h-12 rounded-full items-center justify-center border border-white/10 bg-black/40 shadow-lg"
-                    style={{
-                        left: isLeft ? 0 : undefined,
-                        right: !isLeft ? 0 : undefined,
-                        top: isTop ? 0 : undefined,
-                        bottom: !isTop ? 0 : undefined,
-                        transform: [
-                            { translateX: isLeft ? piePadding : -piePadding },
-                            { translateY: isTop ? piePadding : -piePadding },
-                        ],
-                    }}
-                >
-                    <Icon icon={Icons.Plus} size={20} color="rgba(255,255,255,0.4)" />
-                </TouchableOpacity> */}
+    return (
+        <>
+            {angles.map((angle, index) => {
+                const rad = (angle * Math.PI) / 180;
+                const x = pieRadius * Math.cos(rad);
+                const y = pieRadius * Math.sin(rad);
+                const lx = labelRadius * Math.cos(rad);
+                const ly = labelRadius * Math.sin(rad);
 
-                {angles.map((angle, index) => {
-                    const rad = (angle * Math.PI) / 180;
-                    const x = pieRadius * Math.cos(rad);
-                    const y = pieRadius * Math.sin(rad);
-                    const lx = labelRadius * Math.cos(rad);
-                    const ly = labelRadius * Math.sin(rad);
+                const translateX = isLeft ? x + piePadding : -(x + piePadding);
+                const translateY = isTop ? y + piePadding : -(y + piePadding);
+                const lTranslateX = isLeft ? lx + piePadding : -(lx + piePadding);
+                const lTranslateY = isTop ? ly + piePadding : -(ly + piePadding);
 
-                    const translateX = isLeft ? x + piePadding : -(x + piePadding);
-                    const translateY = isTop ? y + piePadding : -(y + piePadding);
-                    const lTranslateX = isLeft ? lx + piePadding : -(lx + piePadding);
-                    const lTranslateY = isTop ? ly + piePadding : -(ly + piePadding);
+                const op = ops[index];
+                const isDisabled = op && ((op.type === "play-next" && !hasNext) || (op.type === "play-prev" && !hasPrev));
+                const IconComp = op ? (Icons as any)[op.iconName] || Icons.HelpCircle : Icons.Plus;
 
-                    const op = ops[index];
-                    const isDisabled = op && (
-                        (op.type === "play-next" && !hasNext) ||
-                        (op.type === "play-prev" && !hasPrev)
-                    );
-                    const IconComp = op ? (Icons as any)[op.iconName] || Icons.HelpCircle : Icons.Plus;
-
-                    return (
-                        <React.Fragment key={index}>
-                            <TouchableOpacity
-                                onPress={() => (op ? (!isDisabled && onExecuteOperation(op)) : onSetConfigModal({ slotIndex: index, op: null }))}
-                                onLongPress={() => op && onSetConfigModal({ slotIndex: index, op })}
-                                className={cn(
-                                    "absolute w-12 h-12 rounded-full items-center justify-center border border-white/20 bg-black/80 shadow-lg",
-                                    !op && "bg-black/25",
-                                    isDisabled && "opacity-30",
-                                )}
+                return (
+                    <React.Fragment key={index}>
+                        <TouchableOpacity
+                            onPress={() =>
+                                op ? !isDisabled && onExecuteOperation(op) : onSetConfigModal({ slotIndex: index, op: null })
+                            }
+                            onLongPress={() => op && onSetConfigModal({ slotIndex: index, op })}
+                            className={cn(
+                                "absolute w-12 h-12 rounded-full items-center justify-center border border-white/20 bg-black/80 shadow-lg",
+                                !op && "bg-black/25",
+                                isDisabled && "opacity-30",
+                            )}
+                            style={{
+                                left: isLeft ? 0 : undefined,
+                                right: !isLeft ? 0 : undefined,
+                                top: isTop ? 0 : undefined,
+                                bottom: !isTop ? 0 : undefined,
+                                transform: [{ translateX }, { translateY }],
+                            }}
+                        >
+                            <Icon icon={IconComp} size={24} color={op ? "white" : "rgba(255,255,255,0.4)"} />
+                        </TouchableOpacity>
+                        {op && op.label && (
+                            <View
+                                className="absolute flex-row items-center"
                                 style={{
                                     left: isLeft ? 0 : undefined,
                                     right: !isLeft ? 0 : undefined,
                                     top: isTop ? 0 : undefined,
                                     bottom: !isTop ? 0 : undefined,
-                                    transform: [{ translateX }, { translateY }],
+                                    height: 48,
+                                    transform: [{ translateX: lTranslateX }, { translateY: lTranslateY }],
+                                    justifyContent: isLeft ? "flex-start" : "flex-end",
                                 }}
                             >
-                                <Icon icon={IconComp} size={24} color={op ? "white" : "rgba(255,255,255,0.4)"} />
-                            </TouchableOpacity>
-                            {op && op.label && (
-                                <View
-                                    className="absolute flex-row items-center"
-                                    style={{
-                                        left: isLeft ? 0 : undefined,
-                                        right: !isLeft ? 0 : undefined,
-                                        top: isTop ? 0 : undefined,
-                                        bottom: !isTop ? 0 : undefined,
-                                        height: 48, // Match button height for vertical centering
-                                        transform: [
-                                            { translateX: lTranslateX },
-                                            { translateY: lTranslateY }, // Aligned with button top
-                                        ],
-                                        // On most systems, the text will be naturally right-aligned if right: 0
-                                        justifyContent: isLeft ? "flex-start" : "flex-end",
-                                    }}
-                                >
-                                    <View className="px-2 py-0.5 rounded bg-black/80 border border-white/10">
-                                        <Text className="text-white text-[10px]" numberOfLines={1}>
-                                            {op.label}
-                                        </Text>
-                                    </View>
+                                <View className="px-2 py-0.5 rounded bg-black/80 border border-white/10">
+                                    <Text className="text-white text-[10px]" numberOfLines={1}>
+                                        {op.label}
+                                    </Text>
                                 </View>
-                            )}
-                        </React.Fragment>
-                    );
-                })}
-            </>
-        );
-    },
-);
+                            </View>
+                        )}
+                    </React.Fragment>
+                );
+            })}
+        </>
+    );
+});

@@ -6,6 +6,7 @@ export default function VideosLayout() {
             <Stack.Screen name="index" />
             <Stack.Screen name="[id]" />
             <Stack.Screen name="recently-played" />
+            <Stack.Screen name="screenshots" />
         </Stack>
     );
 }

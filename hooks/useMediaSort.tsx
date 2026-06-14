@@ -80,7 +80,15 @@ export const useMediaSort = (
             if (prefixComp !== 0) {
                 comp = prefixComp;
             } else {
-                comp = (a.episode ?? 0) - (b.episode ?? 0);
+                // Sort season first (no season → treat as season 0 so untagged files group first)
+                const seasonA = (a.season ?? -1) < 0 ? 0 : (a.season ?? 0);
+                const seasonB = (b.season ?? -1) < 0 ? 0 : (b.season ?? 0);
+                const seasonComp = seasonA - seasonB;
+                if (seasonComp !== 0) {
+                    comp = seasonComp;
+                } else {
+                    comp = (a.episode ?? 0) - (b.episode ?? 0);
+                }
             }
         } else if (vSort.by === "name") {
             comp = a.title.localeCompare(b.title);
