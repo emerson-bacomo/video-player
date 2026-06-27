@@ -100,6 +100,8 @@ export interface MediaContextType {
     selectedIds: Set<string>;
     toggleSelection: (id: string) => void;
     clearSelection: () => void;
+    hideSelectionBar: () => void;
+    resumeSelectionIfNeeded: () => void;
     selectAll: (items?: { id: string }[]) => void;
     togglePrefixSelection: (prefix: string, albumId: string) => void;
     selectPrefixesOfSelected: (albumId: string) => void;
@@ -117,6 +119,7 @@ export interface MediaContextType {
     getVideoById: (videoId: string) => VideoMedia | null;
     deleteMultipleVideos: (videoIds: string[]) => Promise<boolean>;
     deleteMultipleAlbums: (albumIds: string[]) => Promise<boolean>;
+    deleteMultipleImages: (imageIds: string[]) => Promise<boolean>;
 
     permissionResponse: MediaLibrary.PermissionResponse | null;
     setVideoSortSettingScope: (albumId: string, scope: "global" | "local") => void;
@@ -321,6 +324,8 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
         selectedIds,
         toggleSelection,
         clearSelection,
+        hideSelectionBar,
+        resumeSelectionIfNeeded,
         selectAll,
         togglePrefixSelection,
         selectPrefixesOfSelected,
@@ -618,7 +623,10 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
     const performSmartSync = useCallback(
         async (signal?: AbortSignal) => {
             console.log("[Media] Smart Sync called...");
-            if (isSyncingRef.current || signal?.aborted) return;
+            if (isSyncingRef.current || signal?.aborted) {
+                setLoadingTask(null, TASK_IDS.LIBRARY_LOAD);
+                return;
+            }
 
             // Guard: Disable sync if no permissions granted
             const permissionState = await checkPermission();
@@ -626,6 +634,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                 if (permissionState === "blocked") {
                     setError("Media permission is blocked. Enable video/audio access in system settings.");
                 }
+                setLoadingTask(null, TASK_IDS.LIBRARY_LOAD);
                 return;
             }
 
@@ -925,6 +934,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
                 if (!hasActiveThumbnailWork()) {
                     setLoadingTask(null, TASK_IDS.MEDIA_SYNC);
                 }
+                setLoadingTask(null, TASK_IDS.LIBRARY_LOAD);
             }
         },
         [
@@ -1021,7 +1031,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
         [allAlbumsVideos],
     );
 
-    const { deleteMultipleVideos, deleteMultipleAlbums } = useMediaDelete(performSmartSync);
+    const { deleteMultipleVideos, deleteMultipleAlbums, deleteMultipleImages } = useMediaDelete(performSmartSync);
 
     const getVideoById = useCallback(
         (videoId: string) => {
@@ -1131,6 +1141,8 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             selectedIds,
             toggleSelection,
             clearSelection,
+            hideSelectionBar,
+            resumeSelectionIfNeeded,
             selectAll,
             togglePrefixSelection,
             selectPrefixesOfSelected,
@@ -1140,6 +1152,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             hideMultipleAlbums,
             deleteMultipleVideos,
             deleteMultipleAlbums,
+            deleteMultipleImages,
             unhideVideo,
             unhideAlbum,
             unhideMultipleVideos,
@@ -1210,6 +1223,8 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             selectedIds,
             toggleSelection,
             clearSelection,
+            hideSelectionBar,
+            resumeSelectionIfNeeded,
             selectAll,
             togglePrefixSelection,
             selectPrefixesOfSelected,
@@ -1219,6 +1234,7 @@ export const MediaProvider = ({ children }: { children: React.ReactNode }) => {
             hideMultipleAlbums,
             deleteMultipleVideos,
             deleteMultipleAlbums,
+            deleteMultipleImages,
             unhideVideo,
             unhideAlbum,
             unhideMultipleVideos,

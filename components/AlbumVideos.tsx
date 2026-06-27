@@ -1,4 +1,5 @@
 import { AlbumItemDetailsModal } from "@/components/AlbumItemDetailsModal";
+import { AlbumItemMenu, AlbumItemAction } from "@/components/AlbumItemMenu";
 import { Header } from "@/components/Header";
 import { Icon } from "@/components/Icon";
 import { LoadingStatus } from "@/components/LoadingStatus";
@@ -6,16 +7,16 @@ import { PrefixFilterMenu } from "@/components/PrefixFilterMenu";
 import { RenameModal } from "@/components/RenameModal";
 import { SortMenu, SortMode } from "@/components/SortMenu";
 import { ThemedView } from "@/components/Themed";
-import { ThemedBottomSheet, ThemedBottomSheetScrollView } from "@/components/ThemedBottomSheet";
 import { VideoItem, VideoItemSkeleton } from "@/components/VideoItem";
 import { VideoItemDetailsModal } from "@/components/VideoItemDetailsModal";
 import { useTheme } from "@/context/ThemeContext";
 import { useMedia, VideoSortConfig } from "@/hooks/useMedia";
+import { useDeleteHandler } from "@/hooks/useDeleteHandler";
 import { useSafeNavigation } from "@/hooks/useSafeNavigation";
 import { Album, VideoMedia } from "@/types/useMedia";
 import { getAlbumPrefixOptionsDb } from "@/utils/db";
-import { router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import { useFocusEffect } from "expo-router";
 import {
     Calendar,
     CheckCircle,
@@ -31,8 +32,8 @@ import {
     SortAsc,
     Trash2,
 } from "lucide-react-native";
-import React, { useDeferredValue, useEffect, useMemo } from "react";
-import { BackHandler, FlatList, Image, RefreshControl, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
+import React, { useCallback, useDeferredValue, useEffect, useState, useMemo } from "react";
+import { BackHandler, FlatList, RefreshControl, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export const AlbumVideos = ({
@@ -52,6 +53,8 @@ export const AlbumVideos = ({
     activeVideoSort: VideoSortConfig | null;
     videoSortMode: SortMode | null;
 }) => {
+    if (!album) return null;
+
     const id = album.id;
     const {
         loadingTask,
@@ -61,6 +64,8 @@ export const AlbumVideos = ({
         isSelectionMode,
         toggleSelection,
         clearSelection,
+        hideSelectionBar,
+        resumeSelectionIfNeeded,
         renameVideo,
         setVideoSortSettingScope,
         updateVideoProgress,
@@ -77,13 +82,10 @@ export const AlbumVideos = ({
         regenerateVideoThumbnails,
     } = useMedia();
 
-    const albumInfo = useMemo(
-        () => album || { title: "Album", assetCount: 0 },
-        [album],
-    );
+    const albumInfo = useMemo(() => album || { title: "Album", assetCount: 0 }, [album]);
     const { colors } = useTheme();
     const insets = useSafeAreaInsets();
-    const { safeBack } = useSafeNavigation();
+    const { safeBack, safePush } = useSafeNavigation();
 
     useEffect(() => {
         const backAction = () => {
@@ -104,23 +106,61 @@ export const AlbumVideos = ({
         return () => setThumbnailPriorityAlbum(null);
     }, [id, setThumbnailPriorityAlbum]);
 
+    // When returning focus (e.g. after cancelling from delete-preview), prune any
+    // selected video IDs that no longer exist. This handles the case where deletion
+    // succeeded and the user somehow navigates back, or partial deletion occurred.
+    useFocusEffect(
+        useCallback(() => {
+            // Restore the selection bar when returning (e.g. user cancelled delete-preview)
+            resumeSelectionIfNeeded();
+
+            // Prune any selected video IDs that no longer exist (e.g. after deletion).
+            if (!videos || selectedIds.size === 0) return;
+            const existingIds = new Set(videos.map((v) => v.id));
+            const allStillExist = Array.from(selectedIds).every((id) => existingIds.has(id));
+            if (!allStillExist) {
+                clearSelection();
+            }
+        }, [videos, selectedIds, clearSelection, resumeSelectionIfNeeded]),
+    );
+
     // Filtering State (Persisted)
     const selectedPrefixes = selectedVideoPrefixFilters[id] || [];
 
-    const [selectedVideoId, setSelectedVideoId] = React.useState<string | null>(null);
-    const [showAlbumInfo, setShowAlbumInfo] = React.useState(false);
-    const [renamingVideo, setRenamingVideo] = React.useState<VideoMedia | null>(null);
-    const [menuVideo, setMenuVideo] = React.useState<VideoMedia | null>(null);
+    const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
+    const [showAlbumInfo, setShowAlbumInfo] = useState(false);
+    const [renamingVideo, setRenamingVideo] = useState<VideoMedia | null>(null);
+    const [menuVideo, setMenuVideo] = useState<VideoMedia | null>(null);
+
+    // Single-item delete from context menu — skips the preview page and deletes immediately.
+    const { handleDelete: handleSingleVideoDelete } = useDeleteHandler({
+        type: "video",
+        idList: menuVideo ? [menuVideo.id] : [],
+        itemCount: 1,
+        onSuccess: () => {
+            // Stay on the album page — the video will disappear reactively from the list
+        },
+    });
+
+    // Selection mode delete — if only 1 item is selected, skip the preview page.
+    const { handleDelete: handleSelectionVideoDelete } = useDeleteHandler({
+        type: "video",
+        idList: Array.from(selectedIds),
+        itemCount: selectedIds.size,
+        onSuccess: () => {
+            // Stay on the album page — clearSelection is called inside useDeleteHandler
+        },
+    });
     const { width: windowWidth } = useWindowDimensions();
-    const [listWidth, setListWidth] = React.useState(windowWidth);
+    const [listWidth, setListWidth] = useState(windowWidth);
     const numColumns = Math.max(2, Math.floor(listWidth / 180));
     const itemWidth = (listWidth - 16) / numColumns;
 
-    const [prefixOptions, setPrefixOptions] = React.useState<{ value: string; label: string; count: number }[]>([]);
+    const [prefixOptions, setPrefixOptions] = useState<{ value: string; label: string; count: number }[]>([]);
 
     const isThumbnailGenerating = loadingTask?.id === "thumbnail-gen";
 
-    React.useEffect(() => {
+    useEffect(() => {
         const loadPrefixOptions = async () => {
             const dbOptionsStr = getAlbumPrefixOptionsDb(id);
             if (dbOptionsStr) {
@@ -158,10 +198,7 @@ export const AlbumVideos = ({
         loadPrefixOptions();
     }, [id, videos]);
 
-    const skeletonData = React.useMemo(
-        () => Array.from({ length: 10 }).map((_, i) => ({ id: `skel-${i}`, isPlaceholder: true })),
-        [],
-    );
+    const skeletonData = useMemo(() => Array.from({ length: 10 }).map((_, i) => ({ id: `skel-${i}`, isPlaceholder: true })), []);
 
     const currentAlbumData = useMemo(() => {
         return {
@@ -302,11 +339,19 @@ export const AlbumVideos = ({
                 label: "Delete",
                 icon: Trash2,
                 destructive: true,
-                onPress: (ids: Set<string>) => {
-                    router.push({
-                        pathname: "/delete-preview",
-                        params: { ids: Array.from(ids).join(","), type: "video" },
-                    });
+                onPress: () => {
+                    if (selectedIds.size === 1) {
+                        hideSelectionBar();
+                        handleSelectionVideoDelete();
+                    } else {
+                        // selectedIds is the source of truth. hideSelectionBar() sets isSelectionMode=false
+                        // immediately, unmounting the Menu Portal so navigation won't cause a native crash.
+                        hideSelectionBar();
+                        safePush({
+                            pathname: "/delete-preview",
+                            params: { type: "video" },
+                        });
+                    }
                 },
             },
             {
@@ -341,9 +386,116 @@ export const AlbumVideos = ({
             selectPrefixesOfSelected,
             id,
             hideMultipleVideos,
+            selectedIds.size,
+            hideSelectionBar,
+            handleSelectionVideoDelete,
+            safePush,
             videos,
             regenerateVideoThumbnails,
             updatePrefixFilter,
+        ],
+    );
+
+    const menuActions = useMemo<AlbumItemAction[]>(
+        () => [
+            {
+                label: "Info",
+                icon: Info,
+                onPress: (close) => {
+                    close();
+                    setSelectedVideoId(menuVideo!.id);
+                },
+            },
+            {
+                label: "Rename",
+                icon: Edit2,
+                onPress: (close) => {
+                    close();
+                    setRenamingVideo(menuVideo);
+                },
+            },
+            {
+                label: "Move",
+                icon: FolderInput,
+                onPress: (close) => {
+                    close();
+                    console.log("Move file", menuVideo!.id);
+                },
+            },
+            {
+                label: menuVideo && menuVideo.lastPlayedSec >= 0 ? "Mark as Unwatched" : "Mark as Watched",
+                icon: menuVideo && menuVideo.lastPlayedSec >= 0 ? Circle : CheckCircle,
+                onPress: (close) => {
+                    close();
+                    const isWatched = menuVideo!.lastPlayedSec >= 0;
+                    updateVideoProgress(menuVideo!.id, isWatched ? -1 : Infinity);
+                },
+            },
+            ...(menuVideo?.rawPrefix
+                ? [
+                      {
+                          label: "Select same prefix",
+                          icon: Film,
+                          onPress: (close: () => void) => {
+                              close();
+                              togglePrefixSelection(menuVideo!.rawPrefix!, id);
+                          },
+                      } as AlbumItemAction,
+                  ]
+                : []),
+            {
+                label: "Hide",
+                icon: EyeOff,
+                onPress: (close) => {
+                    close();
+                    hideVideo(menuVideo!.id);
+                },
+            },
+            {
+                label: "Regenerate thumbnail",
+                icon: Film,
+                onPress: (close) => {
+                    const videoToRegen = menuVideo;
+                    close();
+                    regenerateVideoThumbnails([videoToRegen!]);
+                },
+            },
+            ...(menuVideo?.prefix && prefixOptions.some((o) => o.value === menuVideo.prefix)
+                ? [
+                      {
+                          label: "Add to prefix filter",
+                          icon: Hash,
+                          onPress: (close: () => void) => {
+                              const prefix = menuVideo!.prefix!;
+                              close();
+                              updatePrefixFilter(id, prefix, true);
+                          },
+                      } as AlbumItemAction,
+                  ]
+                : []),
+            {
+                label: "Delete",
+                icon: Trash2,
+                destructive: true,
+                onPress: (close) => {
+                    close();
+                    // Single item — no need for the confirmation page, delete immediately.
+                    handleSingleVideoDelete();
+                },
+            },
+        ],
+        [
+            menuVideo,
+            setSelectedVideoId,
+            setRenamingVideo,
+            updateVideoProgress,
+            togglePrefixSelection,
+            id,
+            hideVideo,
+            regenerateVideoThumbnails,
+            prefixOptions,
+            updatePrefixFilter,
+            handleSingleVideoDelete,
         ],
     );
 
@@ -448,146 +600,13 @@ export const AlbumVideos = ({
                 title="Rename Video"
             />
 
-            <ThemedBottomSheet isVisible={!!menuVideo} onClose={() => setMenuVideo(null)}>
-                {menuVideo && (
-                    <ThemedBottomSheetScrollView contentContainerStyle={{ paddingBottom: 24, paddingHorizontal: 8 }}>
-                        <View className="px-4 py-4 mb-2 flex-row items-center gap-4">
-                            <View className="w-16 h-10 rounded-lg bg-card overflow-hidden border border-border">
-                                {menuVideo.thumbnail ? (
-                                    <Image source={{ uri: menuVideo.thumbnail }} className="w-full h-full object-cover" />
-                                ) : (
-                                    <View className="w-full h-full justify-center items-center">
-                                        <Icon icon={Film} size={20} className="text-secondary" />
-                                    </View>
-                                )}
-                            </View>
-                            <View className="flex-1">
-                                <Text className="text-text font-bold text-lg" numberOfLines={1}>
-                                    {menuVideo.title}
-                                </Text>
-                                <Text className="text-secondary text-xs uppercase tracking-widest mt-0.5">Video Options</Text>
-                            </View>
-                        </View>
-
-                        <TouchableOpacity
-                            className="flex-row items-center px-4 py-4 gap-4"
-                            onPress={() => {
-                                setMenuVideo(null);
-                                setSelectedVideoId(menuVideo.id);
-                            }}
-                        >
-                            <Icon icon={Info} size={22} className="text-secondary" />
-                            <Text className="text-text text-base font-medium">Info</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                            className="flex-row items-center px-4 py-4 gap-4"
-                            onPress={() => {
-                                setMenuVideo(null);
-                                setRenamingVideo(menuVideo);
-                            }}
-                        >
-                            <Icon icon={Edit2} size={22} className="text-secondary" />
-                            <Text className="text-text text-base font-medium">Rename</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                            className="flex-row items-center px-4 py-4 gap-4"
-                            onPress={() => {
-                                setMenuVideo(null);
-                                console.log("Move file", menuVideo.id);
-                            }}
-                        >
-                            <Icon icon={FolderInput} size={22} className="text-secondary" />
-                            <Text className="text-text text-base font-medium">Move</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                            className="flex-row items-center px-4 py-4 gap-4"
-                            onPress={() => {
-                                setMenuVideo(null);
-                                const isWatched = menuVideo.lastPlayedSec >= 0;
-                                updateVideoProgress(menuVideo.id, isWatched ? -1 : Infinity);
-                            }}
-                        >
-                            <Icon
-                                icon={menuVideo.lastPlayedSec >= 0 ? Circle : CheckCircle}
-                                size={22}
-                                className="text-secondary"
-                            />
-                            <Text className="text-text text-base font-medium">
-                                {menuVideo.lastPlayedSec >= 0 ? "Mark as Unwatched" : "Mark as Watched"}
-                            </Text>
-                        </TouchableOpacity>
-
-                        {menuVideo.rawPrefix && (
-                            <TouchableOpacity
-                                className="flex-row items-center px-4 py-4 gap-4"
-                                onPress={() => {
-                                    setMenuVideo(null);
-                                    togglePrefixSelection(menuVideo.rawPrefix!, id);
-                                }}
-                            >
-                                <Icon icon={Film} size={22} className="text-secondary" />
-                                <Text className="text-text text-base font-medium">Select same prefix</Text>
-                            </TouchableOpacity>
-                        )}
-
-                        <TouchableOpacity
-                            className="flex-row items-center px-4 py-4 gap-4"
-                            onPress={() => {
-                                setMenuVideo(null);
-                                hideVideo(menuVideo.id);
-                            }}
-                        >
-                            <Icon icon={EyeOff} size={22} className="text-secondary" />
-                            <Text className="text-text text-base font-medium">Hide</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                            className="flex-row items-center px-4 py-4 gap-4"
-                            onPress={() => {
-                                const videoToRegen = menuVideo;
-                                setMenuVideo(null);
-                                regenerateVideoThumbnails([videoToRegen]);
-                            }}
-                        >
-                            <Icon icon={Film} size={22} className="text-secondary" />
-                            <Text className="text-text text-base font-medium">Regenerate thumbnail</Text>
-                        </TouchableOpacity>
-
-                        {menuVideo.prefix && prefixOptions.some((o) => o.value === menuVideo.prefix) && (
-                            <TouchableOpacity
-                                className="flex-row items-center px-4 py-4 gap-4"
-                                onPress={() => {
-                                    const prefix = menuVideo.prefix!;
-                                    setMenuVideo(null);
-                                    updatePrefixFilter(id, prefix, true);
-                                }}
-                            >
-                                <Icon icon={Hash} size={22} className="text-secondary" />
-                                <Text className="text-text text-base font-medium">Add to prefix filter</Text>
-                            </TouchableOpacity>
-                        )}
-
-                        <View className="h-[1px] bg-border/50 my-2 mx-4" />
-
-                        <TouchableOpacity
-                            className="flex-row items-center px-4 py-4 gap-4"
-                            onPress={() => {
-                                setMenuVideo(null);
-                                router.push({
-                                    pathname: "/delete-preview",
-                                    params: { ids: menuVideo.id, type: "video" },
-                                });
-                            }}
-                        >
-                            <Icon icon={Trash2} size={22} className="text-error" />
-                            <Text className="text-error text-base font-medium">Delete</Text>
-                        </TouchableOpacity>
-                    </ThemedBottomSheetScrollView>
-                )}
-            </ThemedBottomSheet>
+            <AlbumItemMenu
+                visible={!!menuVideo}
+                title={menuVideo?.title || ""}
+                imageUri={menuVideo?.thumbnail}
+                onClose={() => setMenuVideo(null)}
+                actions={menuActions}
+            />
         </ThemedView>
     );
 };

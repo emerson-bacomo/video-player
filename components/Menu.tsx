@@ -11,7 +11,6 @@ import {
     View,
 } from "react-native";
 import { Modal, ModalRef } from "./Modal";
-import Animated, { useAnimatedStyle, useSharedValue, withTiming, Easing } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type MenuVariant = "POPUP" | "MODAL";
@@ -248,16 +247,18 @@ const Trigger = ({ children, data, ...props }: TouchableOpacityProps & { data?: 
     );
 };
 
-const Item = ({ children, onPress, ...props }: TouchableOpacityProps) => {
+const Item = ({ children, onPress, closeOnPress = true, ...props }: TouchableOpacityProps & { closeOnPress?: boolean }) => {
     const context = useContext(MenuContext);
-    if (!context) throw new Error("Item must be used within Menu");
+    console.log("[MenuItem] context is null?", context === null, "closeMenu?", context?.closeMenu);
 
     return (
         <TouchableOpacity
             {...props}
             onPress={(e) => {
+                if (closeOnPress && context) {
+                    context.closeMenu();
+                }
                 onPress?.(e);
-                context.closeMenu();
             }}
         >
             {children}
@@ -296,32 +297,34 @@ const Content = ({
     const { width: screenWidth, height: screenHeight } = useWindowDimensions();
     const [contentHeight, setContentHeight] = useState(0);
     const [contentWidth, setContentWidth] = useState(0);
+    const [layoutReady, setLayoutReady] = useState(false);
 
-    // Box-only animation — Modal handles the backdrop
-    const opacity = useSharedValue(0);
     const modalRef = useRef<ModalRef>(null);
 
+    const [fadeIn, setFadeIn] = useState(false);
+
     useEffect(() => {
-        const showDur = modalRef.current?.showDuration ?? 100;
-        const hideDur = modalRef.current?.hideDuration ?? 80;
-
-        if (visible) {
-            opacity.value = withTiming(1, { duration: showDur, easing: Easing.out(Easing.quad) });
-        } else {
-            opacity.value = withTiming(0, { duration: hideDur, easing: Easing.in(Easing.quad) });
+        if (visible && layoutReady) {
+            setFadeIn(true);
+        } else if (!visible) {
+            setFadeIn(false);
         }
-    }, [opacity, visible]);
+    }, [visible, layoutReady]);
 
-    const contentAnimatedStyle = useAnimatedStyle(() => ({
-        opacity: opacity.value,
-    }));
+    // Safety: show after 300ms even if onLayout never fires
+    useEffect(() => {
+        if (!visible) return;
+        const id = setTimeout(() => setLayoutReady(true), 300);
+        return () => clearTimeout(id);
+    }, [visible]);
 
     // Auto-flip: If it would overflow the bottom, show it above the trigger
     const spaceBelow = screenHeight - (menuLayout.triggerY + menuLayout.triggerHeight) - insets.bottom - BOTTOM_PADDING;
     const spaceAbove = menuLayout.triggerY - insets.top - BOTTOM_PADDING;
 
-    // Use a more realistic estimate (350px) if we haven't measured yet to prevent initial misplacement
+    // Use estimates if we haven't measured yet to prevent initial misplacement
     const estimatedHeight = contentHeight || 350;
+    const estimatedWidth = contentWidth || 250;
     const vh60 = screenHeight * 0.6;
 
     // Flip logic:
@@ -349,13 +352,12 @@ const Content = ({
             onRequestClose={() => setVisible(false)}
         >
             {menuLayout.top > 0 && variant === "POPUP" && (
-                <>
+                <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, opacity: fadeIn ? 1 : 0 }} pointerEvents="box-none">
                     {/* Duplication Layer: Duplicates either the 'Raise' card or the 'Trigger' button above the backdrop */}
                     {raisedElement && raisedLayout ? (
                         <View
-                            pointerEvents="none"
+                            className="absolute pointer-events-none"
                             style={{
-                                position: "absolute",
                                 top: raisedLayout.y,
                                 left: raisedLayout.x,
                                 width: raisedLayout.width,
@@ -385,6 +387,7 @@ const Content = ({
                         </View>
                     )}
 
+                    {/* Arrow — inside the animated wrapper so it fades in/out with the content */}
                     <View
                         pointerEvents="none"
                         style={{
@@ -406,34 +409,31 @@ const Content = ({
                         />
                     </View>
 
-                    <Animated.View
-                        style={[
-                            {
-                                position: "absolute",
-                                top: finalTop,
-                                ...(horizontalScreenFill
-                                    ? { left: 16, right: 16 }
-                                    : anchorHorizontal === "left"
-                                      ? { left: Math.max(16, menuLayout.triggerX) }
-                                      : anchorHorizontal === "right"
-                                        ? {
-                                              right: Math.max(16, screenWidth - (menuLayout.triggerX + menuLayout.triggerWidth)),
-                                          }
-                                        : {
-                                              left: Math.max(
-                                                  16,
-                                                  Math.min(
-                                                      menuLayout.triggerX + menuLayout.triggerWidth / 2 - contentWidth / 2,
-                                                      screenWidth - 16 - contentWidth,
-                                                  ),
+                    {/* Content popup */}
+                    <View
+                        style={{
+                            position: "absolute",
+                            top: finalTop,
+                            ...(horizontalScreenFill
+                                ? { left: 16, right: 16 }
+                                : anchorHorizontal === "left"
+                                  ? { left: Math.max(16, menuLayout.triggerX) }
+                                  : anchorHorizontal === "right"
+                                    ? {
+                                          right: Math.max(16, screenWidth - (menuLayout.triggerX + menuLayout.triggerWidth)),
+                                      }
+                                    : {
+                                          left: Math.max(
+                                              16,
+                                              Math.min(
+                                                  menuLayout.triggerX + menuLayout.triggerWidth / 2 - estimatedWidth / 2,
+                                                  screenWidth - 16 - estimatedWidth,
                                               ),
-                                          }),
-                            },
-                            contentAnimatedStyle,
-                        ]}
+                                          ),
+                                      }),
+                        }}
                     >
                         <View
-                            onLayout={(e) => setContentWidth(e.nativeEvent.layout.width)}
                             className={cn("rounded-xl shadow-2xl border bg-menu border-border flex-shrink", className)}
                             style={[
                                 {
@@ -447,7 +447,10 @@ const Content = ({
                                 onLayout={(e) => {
                                     const { width: layoutWidth, height: layoutHeight } = e.nativeEvent.layout;
                                     if (layoutHeight > 0) setContentHeight(layoutHeight);
-                                    if (layoutWidth > 0) setContentWidth(layoutWidth);
+                                    if (layoutWidth > 0) {
+                                        setContentWidth(layoutWidth);
+                                        setLayoutReady(true);
+                                    }
                                 }}
                                 className="rounded-2xl overflow-hidden flex-shrink"
                             >
@@ -474,8 +477,8 @@ const Content = ({
                                 })()}
                             </View>
                         </View>
-                    </Animated.View>
-                </>
+                    </View>
+                </View>
             )}
         </Modal>
     );

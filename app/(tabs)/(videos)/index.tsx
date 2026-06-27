@@ -11,12 +11,25 @@ import { SortMenu } from "@/components/SortMenu";
 import { ThemedSafeAreaView } from "@/components/Themed";
 import { ThemedBottomSheet, ThemedBottomSheetScrollView } from "@/components/ThemedBottomSheet";
 import { useTheme } from "@/context/ThemeContext";
+import { useDeleteHandler } from "@/hooks/useDeleteHandler";
 import { useMedia } from "@/hooks/useMedia";
 import { useSafeNavigation } from "@/hooks/useSafeNavigation";
 import { Album } from "@/types/useMedia";
 import { router, useFocusEffect } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { Calendar, CheckCircle, Circle, Clock, Edit2, EyeOff, Folder, FolderInput, Info, SortAsc, Trash2 } from "lucide-react-native";
+import {
+    Calendar,
+    CheckCircle,
+    Circle,
+    Clock,
+    Edit2,
+    EyeOff,
+    Folder,
+    FolderInput,
+    Info,
+    SortAsc,
+    Trash2,
+} from "lucide-react-native";
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { BackHandler, FlatList, Image, RefreshControl, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
 
@@ -33,11 +46,12 @@ const AlbumListScreen = () => {
         selectedIds,
         toggleSelection,
         renameAlbum,
+        hideSelectionBar,
+        resumeSelectionIfNeeded,
         clearSelection,
         compareByAlbumSort,
         hideAlbum,
         hideMultipleAlbums,
-        resetToAlbums,
         recentlyPlayedCount,
         recentlyPlayedVideos,
         allAlbumsVideos,
@@ -67,8 +81,16 @@ const AlbumListScreen = () => {
 
     useFocusEffect(
         useCallback(() => {
-            resetToAlbums();
-        }, [resetToAlbums]),
+            // Restore the selection bar if there are still pending selections (e.g. user pressed Cancel on delete-preview)
+            resumeSelectionIfNeeded();
+
+            // Prune any selected album IDs that no longer exist (e.g. after deletion).
+            const existingIds = new Set(albums.map((a) => a.id));
+            const stillValid = Array.from(selectedIds).filter((id) => existingIds.has(id));
+            if (stillValid.length !== selectedIds.size) {
+                clearSelection();
+            }
+        }, [albums, selectedIds, clearSelection, resumeSelectionIfNeeded]),
     );
 
     useEffect(() => {
@@ -91,6 +113,27 @@ const AlbumListScreen = () => {
         { label: "Name", value: "name", icon: SortAsc },
         { label: "Asset Count", value: "count", icon: Clock },
     ];
+
+    // Single-item delete from context menu — skips the preview page and deletes immediately.
+    const { handleDelete: handleSingleAlbumDelete } = useDeleteHandler({
+        type: "album",
+        idList: menuAlbum ? [menuAlbum.id] : [],
+        itemCount: 1,
+        onSuccess: () => {
+            // Stay on the home screen — the album will disappear reactively from the list
+            setMenuAlbum(null);
+        },
+    });
+
+    // Selection mode delete — if only 1 item is selected, skip the preview page.
+    const { handleDelete: handleSelectionAlbumDelete } = useDeleteHandler({
+        type: "album",
+        idList: Array.from(selectedIds),
+        itemCount: selectedIds.size,
+        onSuccess: () => {
+            // Stay on the home screen — clearSelection is called inside useDeleteHandler
+        },
+    });
 
     const onRefresh = useCallback(async () => {
         fetchAlbums();
@@ -156,7 +199,17 @@ const AlbumListScreen = () => {
             });
         }
         return sorted;
-    }, [loadingTask, albums, skeletonData, deferredAlbumSort, compareByAlbumSort, recentlyPlayedCount, recentlyPlayedVideos, screenshotsCount, screenshots]);
+    }, [
+        loadingTask,
+        albums,
+        skeletonData,
+        deferredAlbumSort,
+        compareByAlbumSort,
+        recentlyPlayedCount,
+        recentlyPlayedVideos,
+        screenshotsCount,
+        screenshots,
+    ]);
 
     const selectionActions = useMemo(
         () => [
@@ -193,11 +246,19 @@ const AlbumListScreen = () => {
                 label: "Delete",
                 icon: Trash2,
                 destructive: true,
-                onPress: (ids: Set<string>) => {
-                    router.push({
-                        pathname: "/delete-preview",
-                        params: { ids: Array.from(ids).join(","), type: "album" },
-                    });
+                onPress: () => {
+                    if (selectedIds.size === 1) {
+                        hideSelectionBar();
+                        handleSelectionAlbumDelete();
+                    } else {
+                        // selectedIds is the source of truth. hideSelectionBar() sets isSelectionMode=false
+                        // immediately, unmounting the Menu Portal so navigation won't cause a native crash.
+                        hideSelectionBar();
+                        router.push({
+                            pathname: "/delete-preview",
+                            params: { type: "album" },
+                        });
+                    }
                 },
             },
         ],
@@ -329,11 +390,7 @@ const AlbumListScreen = () => {
                         <TouchableOpacity
                             className="flex-row items-center px-4 py-4 gap-4"
                             onPress={() => {
-                                setMenuAlbum(null);
-                                router.push({
-                                    pathname: "/delete-preview",
-                                    params: { ids: menuAlbum.id, type: "album" },
-                                });
+                                handleSingleAlbumDelete();
                             }}
                         >
                             <Icon icon={Trash2} size={22} className="text-error" />

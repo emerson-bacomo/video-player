@@ -2,13 +2,13 @@ import { AlertCircle, CheckCircle2, ChevronDown, ChevronLeft, Database, Film, In
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, LayoutAnimation, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
-import { Portal } from "react-native-portalize";
 import { useIsFocused } from "@react-navigation/native";
 import { useMedia } from "../hooks/useMedia";
 import { useStableSafeAreaInsets } from "@/hooks/useStableSafeAreaInsets";
 
 import { cn } from "../lib/utils";
 import { Icon } from "./Icon";
+import { Portal } from "react-native-portalize";
 
 export interface LoadingTask {
     id?: string;
@@ -47,7 +47,7 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "botto
     const [canExpand, setCanExpand] = useState(false);
     const [iconX, setIconX] = useState<number>(screenWidth - 60);
     const [iconWidth, setIconWidth] = useState<number>(32);
-    const [iconY, setIconY] = useState<number>(0);
+    const [iconLocalY, setIconLocalY] = useState<number>(0);
     const [iconHeight, setIconHeight] = useState<number>(32);
     const [etaSeconds, setEtaSeconds] = useState<number | null>(null);
     const etaSnapshotRef = useRef<{ progress: number; time: number; id: string } | null>(null);
@@ -55,8 +55,6 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "botto
     const ignoreCountRef = useRef(0);
     const lastReportedEtaRef = useRef<number | null>(null);
     const indicatorRef = useRef<View>(null);
-    const popupRef = useRef<View>(null);
-    const [popupMeasuredCorrection, setPopupMeasuredCorrection] = useState(0);
     const fadeAnim = useSharedValue(0);
 
     const isFocused = useIsFocused();
@@ -72,7 +70,7 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "botto
         if (screenWidth !== prevScreenWidth.current) {
             setIconX(screenWidth - 60);
             setIconWidth(32);
-            setIconY(0);
+            setIconLocalY(0);
             setIconHeight(32);
             prevScreenWidth.current = screenWidth;
         }
@@ -95,10 +93,9 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "botto
 
     // left: 0 aligns the popup with the indicator; start centered from there,
     // then shift only enough to keep the popup inside the screen padding.
-    const plannedLocalLeftOffset = centeredLeftOffset - rightOverflow + leftOverflow;
-    const localLeftOffset = plannedLocalLeftOffset + popupMeasuredCorrection;
-    const popupScreenLeft = iconX + localLeftOffset;
-    const popupScreenTop = iconY + iconHeight + POPUP_GAP;
+    const popupLeftOffset = centeredLeftOffset - rightOverflow + leftOverflow;
+    const popupScreenLeft = iconX + popupLeftOffset;
+    const popupTop = iconLocalY + iconHeight + POPUP_GAP;
     const arrowLeft = clamp(indicatorCenter - popupScreenLeft - ARROW_WIDTH / 2, ARROW_WIDTH, tooltipWidth - ARROW_WIDTH * 2);
 
     // "left" mode: popup sits immediately to the left of the indicator
@@ -218,14 +215,23 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "botto
         };
     }, [taskToDisplay?.id]);
 
+    // Re-measure indicator screen x when popup is about to show,
+    // so overflow calculations are fresh.
+    useEffect(() => {
+        if (effectivelyVisible) {
+            indicatorRef.current?.measure((_x, _y, width, _height, pageX) => {
+                if (pageX !== 0 && (Math.abs(pageX - iconX) > 1 || width !== iconWidth)) {
+                    setIconX(pageX);
+                    setIconWidth(width);
+                }
+            });
+        }
+    }, [effectivelyVisible]);
+
     // Animate when user manually toggles visibility
     useEffect(() => {
         fadeAnim.value = withTiming(effectivelyVisible && !!taskToDisplay ? 1 : 0, { duration: 120 });
     }, [effectivelyVisible, taskToDisplay, fadeAnim]);
-
-    useEffect(() => {
-        setPopupMeasuredCorrection(0);
-    }, [effectivelyVisible, screenWidth]);
 
     const toggleVisible = () => setLoadingPopupVisible((prev) => !prev);
     const toggleExpanded = () => {
@@ -235,24 +241,13 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "botto
 
     const handleLayout = () => {
         indicatorRef.current?.measure((_x, _y, width, height, pageX, pageY) => {
-            setIconX(pageX);
-            setIconY(pageY);
-            setIconWidth(width);
-            setIconHeight(height);
-        });
-    };
-
-    const handlePopupLayout = () => {
-        if (popupSide !== "bottom") return;
-
-        popupRef.current?.measureInWindow((x, _y, width, _height) => {
-            const maxRight = screenWidth - rightMargin;
-            const rightCorrection = Math.min(0, maxRight - (x + width));
-            const leftCorrection = Math.max(0, leftMargin - (x + rightCorrection));
-            const nextCorrection = rightCorrection + leftCorrection;
-
-            if (Math.abs(nextCorrection - popupMeasuredCorrection) > 0.5) {
-                setPopupMeasuredCorrection(nextCorrection);
+            if (pageX !== 0) {
+                setIconX(pageX);
+                setIconWidth(width);
+            }
+            if (pageY !== 0) {
+                setIconLocalY(pageY);
+                setIconHeight(height);
             }
         });
     };
@@ -374,7 +369,7 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "botto
                                     {
                                         left: iconX - leftSideWidth - LEFT_GAP,
                                         width: leftSideWidth,
-                                        top: iconY - 24,
+                                        top: iconLocalY - 24,
                                     },
                                 ]}
                                 pointerEvents="box-none"
@@ -403,9 +398,7 @@ export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "botto
                     ) : (
                         <Portal>
                             <Animated.View
-                                ref={popupRef}
-                                onLayout={handlePopupLayout}
-                                style={[animatedStyle, { left: popupScreenLeft, width: tooltipWidth, top: popupScreenTop }]}
+                                style={[animatedStyle, { left: popupScreenLeft, width: tooltipWidth, top: popupTop }]}
                                 pointerEvents="box-none"
                             >
                                 <View

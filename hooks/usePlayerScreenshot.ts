@@ -79,16 +79,21 @@ export const usePlayerScreenshot = ({ activeVideo, currentDisplayTime, setLoadin
                 return;
             }
 
+            // The native module returns the final path (with frame number appended)
+            // Strip file:// prefix for scanning and display
+            const finalPath = resultUri.startsWith("file://") ? resultUri.replace("file://", "") : resultUri;
+            const finalDisplayPath = finalPath.split("/0/")[1] || finalPath.split("/").pop() || finalPath;
+
             // Scan into the media library (same as clip post-processing)
             try {
-                await ExpoFFmpeg.scanFile(outPath);
+                await ExpoFFmpeg.scanFile(finalPath);
             } catch (scanErr) {
                 console.warn("[usePlayerScreenshot] Media scan failed (non-fatal)", scanErr);
             }
 
             // Show the animated overlay with the saved image
-            setScreenshotUri(`file://${outPath}`);
-            setScreenshotFilepath(displayPath);
+            setScreenshotUri(resultUri);
+            setScreenshotFilepath(finalDisplayPath);
             setScreenshotOverlayVisible(true);
 
             // Fetch screenshots to update albums list in real-time

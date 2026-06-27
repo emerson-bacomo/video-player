@@ -2,7 +2,6 @@ import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } f
 import { TouchableWithoutFeedback, View, ViewStyle } from "react-native";
 import { Portal } from "react-native-portalize";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming, Easing } from "react-native-reanimated";
-import { scheduleOnRN } from "react-native-worklets";
 
 export interface ModalRef {
     show: () => void;
@@ -24,7 +23,7 @@ interface ModalProps {
     onRequestClose?: () => void;
     closeOnBackdropPress?: boolean;
     /** "none" animates only the backdrop; children handle their own animation. */
-    animationType?: "fade" | "scale" | "slide" | "none";
+    animationType?: "fade" | "scale" | "none";
     backdropOpacity?: number;
     children?: React.ReactNode;
     style?: ViewStyle;
@@ -72,7 +71,7 @@ export const Modal = forwardRef<ModalRef, ModalProps>(
         const backdropOpacityVal = useSharedValue(0);
         const opacity = useSharedValue(0);
         const scale = useSharedValue(animationType === "scale" ? 0.96 : 1.0);
-        const translateY = useSharedValue(animationType === "scale" ? 8 : animationType === "slide" ? 50 : 0);
+        const translateY = useSharedValue(animationType === "scale" ? 8 : 0);
 
         useImperativeHandle(ref, () => ({
             show: () => {
@@ -101,27 +100,17 @@ export const Modal = forwardRef<ModalRef, ModalProps>(
                     if (animationType === "scale") {
                         scale.value = withTiming(1, { duration: showDuration, easing: Easing.out(Easing.quad) });
                         translateY.value = withTiming(0, { duration: showDuration, easing: Easing.out(Easing.quad) });
-                    } else if (animationType === "slide") {
-                        translateY.value = withTiming(0, { duration: showDuration * 1.5, easing: Easing.out(Easing.quad) });
                     }
                 }
             } else {
                 if (prevVisible.current) {
                     // The modal was previously visible and is now closing.
-                    // Run the hide animation and call onClose when finished.
-                    const onAnimationComplete = (finished?: boolean) => {
-                        if (finished) {
-                            scheduleOnRN(() => {
-                                setShouldRender(false);
-                                if (onCloseRef.current) onCloseRef.current();
-                            });
-                        }
-                    };
+                    // Run the hide animations. Cleanup is done via setTimeout
+                    // instead of scheduleOnRN to avoid JSI host-function crashes.
 
                     backdropOpacityVal.value = withTiming(
                         0,
                         { duration: hideDuration, easing: Easing.in(Easing.quad) },
-                        onAnimationComplete,
                     );
 
                     if (animationType !== "none") {
@@ -129,10 +118,13 @@ export const Modal = forwardRef<ModalRef, ModalProps>(
                         if (animationType === "scale") {
                             scale.value = withTiming(0.96, { duration: hideDuration, easing: Easing.in(Easing.quad) });
                             translateY.value = withTiming(8, { duration: hideDuration, easing: Easing.in(Easing.quad) });
-                        } else if (animationType === "slide") {
-                            translateY.value = withTiming(50, { duration: hideDuration * 1.25, easing: Easing.in(Easing.quad) });
                         }
                     }
+
+                    setTimeout(() => {
+                        setShouldRender(false);
+                        onCloseRef.current?.();
+                    }, hideDuration);
                 } else {
                     // The modal was already closed (e.g. on initial mount).
                     // Skip the hide animation and onClose callback to prevent unexpected side effects.
@@ -152,8 +144,6 @@ export const Modal = forwardRef<ModalRef, ModalProps>(
             const transforms: any[] = [];
             if (animationType === "scale") {
                 transforms.push({ scale: scale.value });
-                transforms.push({ translateY: translateY.value });
-            } else if (animationType === "slide") {
                 transforms.push({ translateY: translateY.value });
             }
 

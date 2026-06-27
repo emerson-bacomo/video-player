@@ -80,7 +80,7 @@ export const SortMenu = <T extends string = SortBy>({
                     </View>
                 )}
 
-                <View className="px-4 py-2.5 border-b border-white/5 flex-row justify-between items-center">
+                <View className="px-4 pl-5 py-2.5 border-b border-white/5 flex-row justify-between items-center">
                     <Text className="text-secondary font-bold text-[10px] uppercase tracking-widest">{mode} Sort</Text>
                     <TouchableOpacity
                         onPress={() => onSortChange({ ...currentSort, order: currentSort.order === "asc" ? "desc" : "asc" })}

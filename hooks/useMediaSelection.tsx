@@ -24,6 +24,22 @@ export const useMediaSelection = () => {
         setSelectedIds(new Set());
     }, []);
 
+    // Hides the selection bar without clearing selectedIds.
+    // Used before navigating away so the Portal/Menu unmounts immediately (prevents native crash),
+    // while keeping the selection alive for when the user returns.
+    const hideSelectionBar = useCallback(() => {
+        setIsSelectionMode(false);
+    }, []);
+
+    // Re-shows the selection bar if there are still selected IDs.
+    // Call this in useFocusEffect when returning to a page that may have pending selection.
+    const resumeSelectionIfNeeded = useCallback(() => {
+        setSelectedIds((prev) => {
+            if (prev.size > 0) setIsSelectionMode(true);
+            return prev;
+        });
+    }, []);
+
     const selectAll = useCallback(
         (items?: { id: string }[]) => {
             if (items) {
@@ -88,6 +104,8 @@ export const useMediaSelection = () => {
         selectedIds,
         toggleSelection,
         clearSelection,
+        hideSelectionBar,
+        resumeSelectionIfNeeded,
         selectAll,
         togglePrefixSelection,
         selectPrefixesOfSelected,

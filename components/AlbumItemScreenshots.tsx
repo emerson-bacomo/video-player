@@ -8,14 +8,14 @@ interface ScreenshotsAlbumProps {
     width?: number;
 }
 
-export const ScreenshotsAlbum = React.memo(({ item, width }: ScreenshotsAlbumProps) => {
+export const ScreenshotsAlbum = React.memo(function ScreenshotsAlbum({ item, width }: ScreenshotsAlbumProps) {
     const { safePush } = useSafeNavigation();
 
     const handlePress = useCallback(() => {
         safePush({
             pathname: "/(tabs)/(videos)/screenshots" as any,
         });
-    }, []);
+    }, [safePush]);
 
     return <AlbumItem item={item} onPress={handlePress} width={width} />;
 });

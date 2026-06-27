@@ -7,3 +7,4 @@
 - Logging
     adb logcat -s "keywords like ExpoFFmpeg"
     adb logcat -s "ExpoFFmpeg"
+    adb logcat *:E (for errors that doesn't show up in console)

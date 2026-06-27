@@ -46,7 +46,11 @@ Java_expo_modules_ffmpeg_ExpoFFmpegModule_nativeTakeScreenshot(
     av_seek_frame(fmt, -1, target_ts, AVSEEK_FLAG_BACKWARD);
     avcodec_flush_buffers(ctx);
 
+    // Target in stream time base
+    int64_t target_pts = av_rescale_q(target_ts, AV_TIME_BASE_Q, vs->time_base);
+
     AVFrame *frame = av_frame_alloc();
+    AVFrame *best_frame = av_frame_alloc();
     AVPacket pkt;
     jintArray result = nullptr;
 
@@ -62,39 +66,67 @@ Java_expo_modules_ffmpeg_ExpoFFmpegModule_nativeTakeScreenshot(
     AVFrame *rgba = av_frame_alloc();
     av_image_fill_arrays(rgba->data, rgba->linesize, rgbaBuf, AV_PIX_FMT_RGBA, outW, outH, 1);
 
+    // Walk frames to find the one closest to target timestamp
+    int64_t best_diff = INT64_MAX;
+    bool found = false;
+
     while (av_read_frame(fmt, &pkt) >= 0) {
         if (pkt.stream_index == vstream) {
             if (avcodec_send_packet(ctx, &pkt) == 0) {
-                if (avcodec_receive_frame(ctx, frame) == 0) {
-                    sws_scale(sws, frame->data, frame->linesize, 0, ctx->height, rgba->data, rgba->linesize);
-
-                    // Create jintArray for the pixels (ARGB_8888 for Bitmap)
-                    int pixelCount = outW * outH;
-                    result = env->NewIntArray(pixelCount + 2); // First two elements are width and height
-                    jint *elements = env->GetIntArrayElements(result, nullptr);
-                    elements[0] = outW;
-                    elements[1] = outH;
-                    
-                    // Copy RGBA to ARGB
-                    for (int i = 0; i < pixelCount; i++) {
-                        uint8_t r = rgbaBuf[i * 4 + 0];
-                        uint8_t g = rgbaBuf[i * 4 + 1];
-                        uint8_t b = rgbaBuf[i * 4 + 2];
-                        uint8_t a = rgbaBuf[i * 4 + 3];
-                        elements[i + 2] = (a << 24) | (r << 16) | (g << 8) | b;
+                while (avcodec_receive_frame(ctx, frame) == 0) {
+                    int64_t diff = llabs(frame->pts - target_pts);
+                    if (diff < best_diff) {
+                        best_diff = diff;
+                        av_frame_unref(best_frame);
+                        av_frame_ref(best_frame, frame);
+                        found = true;
                     }
-
-                    env->ReleaseIntArrayElements(result, elements, 0);
-                    break;
+                    if (frame->pts >= target_pts) break;
                 }
             }
         }
         av_packet_unref(&pkt);
+        if (found && best_frame->pts >= target_pts) break;
+    }
+
+    if (found) {
+        sws_scale(sws, best_frame->data, best_frame->linesize, 0, ctx->height, rgba->data, rgba->linesize);
+
+        // Calculate frame number from PTS and frame rate
+        double fps = av_q2d(vs->avg_frame_rate);
+        if (fps <= 0) {
+            fps = av_q2d(vs->r_frame_rate);
+        }
+        if (fps <= 0) {
+            fps = 30.0;
+        }
+        double pts_sec = best_frame->pts * av_q2d(vs->time_base);
+        int frame_number = static_cast<int>(round(pts_sec * fps));
+
+        // Create jintArray: [width, height, frameNumber, pixel_data...]
+        int pixelCount = outW * outH;
+        result = env->NewIntArray(pixelCount + 3);
+        jint *elements = env->GetIntArrayElements(result, nullptr);
+        elements[0] = outW;
+        elements[1] = outH;
+        elements[2] = frame_number;
+
+        // Copy RGBA to ARGB
+        for (int i = 0; i < pixelCount; i++) {
+            uint8_t r = rgbaBuf[i * 4 + 0];
+            uint8_t g = rgbaBuf[i * 4 + 1];
+            uint8_t b = rgbaBuf[i * 4 + 2];
+            uint8_t a = rgbaBuf[i * 4 + 3];
+            elements[i + 3] = (a << 24) | (r << 16) | (g << 8) | b;
+        }
+
+        env->ReleaseIntArrayElements(result, elements, 0);
     }
 
     avformat_close_input(&fmt);
     avcodec_free_context(&ctx);
     av_frame_free(&frame);
+    av_frame_free(&best_frame);
     av_frame_free(&rgba);
     av_free(rgbaBuf);
     sws_freeContext(sws);

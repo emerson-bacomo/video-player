@@ -1,5 +1,4 @@
 import { useSafeNavigation } from "@/hooks/useSafeNavigation";
-import { router } from "expo-router";
 import React, { useCallback } from "react";
 import { Album } from "../types/useMedia";
 import { AlbumItem } from "./AlbumItem";
@@ -9,14 +8,14 @@ interface RecentlyPlayedAlbumProps {
     width?: number;
 }
 
-export const RecentlyPlayedAlbum = React.memo(({ item, width }: RecentlyPlayedAlbumProps) => {
+export const RecentlyPlayedAlbum = React.memo(function RecentlyPlayedAlbum({ item, width }: RecentlyPlayedAlbumProps) {
     const { safePush } = useSafeNavigation();
 
     const handlePress = useCallback(() => {
         safePush({
             pathname: "/(tabs)/(videos)/recently-played",
         });
-    }, [router]);
+    }, [safePush]);
 
     return <AlbumItem item={item} onPress={handlePress} width={width} />;
 });

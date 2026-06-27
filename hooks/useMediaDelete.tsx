@@ -56,8 +56,31 @@ export const useMediaDelete = (performSmartSync: (signal?: AbortSignal) => Promi
         [performSmartSync],
     );
 
+    const deleteMultipleImages = useCallback(
+        async (imageUris: string[]) => {
+            try {
+                addLogDb("INFO", "Delete Media", `Attempting to delete ${imageUris.length} images`);
+                for (const uri of imageUris) {
+                    try {
+                        await FileSystem.deleteAsync(uri, { idempotent: true });
+                    } catch (e) {
+                        console.error(`[DeleteMedia] Failed to delete image ${uri}:`, e);
+                    }
+                }
+                addLogDb("INFO", "Delete Media", `Successfully deleted ${imageUris.length} images`);
+                await performSmartSync();
+                return true;
+            } catch (e) {
+                addLogDb("ERROR", "Delete Media", "Failed to delete images", e);
+            }
+            return false;
+        },
+        [performSmartSync],
+    );
+
     return {
         deleteMultipleVideos,
         deleteMultipleAlbums,
+        deleteMultipleImages,
     };
 };

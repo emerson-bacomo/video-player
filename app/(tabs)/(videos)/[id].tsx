@@ -1,7 +1,7 @@
 import { AlbumVideos } from "@/components/AlbumVideos";
 import { useMedia } from "@/hooks/useMedia";
 import { DEFAULT_SORT_SCOPE } from "@/constants/defaults";
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect } from "react";
 
 const AlbumVideosScreen = () => {
@@ -10,27 +10,29 @@ const AlbumVideosScreen = () => {
     const [isSyncing, setIsSyncing] = React.useState(false);
     const [isLoading, setIsLoading] = React.useState(true);
 
-
     const album = allAlbum[id] || null;
     const videos = allAlbumsVideos[id] || null;
 
     const activeVideoSort = getActiveVideoSort(album);
     const videoSortMode = album?.videoSortSettingScope || DEFAULT_SORT_SCOPE;
 
-    const startSyncCachedData = useCallback((isManual: boolean = false) => {
-        if (!id) return;
-        const controller = new AbortController();
-        if (isManual) {
-            setIsSyncing(true);
-        }
-        performSmartSync(controller.signal).finally(() => {
-            if (!controller.signal.aborted) {
-                setIsLoading(false);
-                setIsSyncing(false);
+    const startSyncCachedData = useCallback(
+        (isManual: boolean = false) => {
+            if (!id) return;
+            const controller = new AbortController();
+            if (isManual) {
+                setIsSyncing(true);
             }
-        });
-        return controller;
-    }, [id, performSmartSync]);
+            performSmartSync(controller.signal).finally(() => {
+                if (!controller.signal.aborted) {
+                    setIsLoading(false);
+                    setIsSyncing(false);
+                }
+            });
+            return controller;
+        },
+        [id, performSmartSync],
+    );
 
     const handleRefresh = () => {
         startSyncCachedData(true);
@@ -41,6 +43,15 @@ const AlbumVideosScreen = () => {
         return () => controller?.abort();
     }, [startSyncCachedData]);
 
+    useEffect(() => {
+        if (!isLoading && !album) {
+            if (router.canGoBack()) {
+                router.back();
+            } else {
+                router.replace("/(tabs)/(videos)");
+            }
+        }
+    }, [album, isLoading]);
 
     return (
         <AlbumVideos

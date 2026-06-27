@@ -73,26 +73,31 @@ class ExpoFFmpegModule : Module() {
             promise.reject("SCREENSHOT_FAILED", "takeScreenshot: nativeTakeScreenshot returned null for path=$resolvedPath timestamp=$timestamp", null)
             return@Thread
           }
-          if (pixels.size < 3) {
+          if (pixels.size < 4) {
             promise.reject("SCREENSHOT_FAILED", "takeScreenshot: pixel array too small, size=${pixels.size} for path=$resolvedPath", null)
             return@Thread
           }
 
           val width = pixels[0]
           val height = pixels[1]
-          val bitmap = android.graphics.Bitmap.createBitmap(pixels, 2, width, width, height, android.graphics.Bitmap.Config.ARGB_8888)
+          val frameNumber = pixels[2]
+          val bitmap = android.graphics.Bitmap.createBitmap(pixels, 3, width, width, height, android.graphics.Bitmap.Config.ARGB_8888)
 
           val resolvedOutPath = if (outPath.startsWith("file://")) {
             java.net.URI(outPath).path
           } else {
             outPath
           }
-          val filename = java.io.File(resolvedOutPath).name
 
-          var resultUri = "file://$resolvedOutPath"
+          // Insert frame number into filename before extension
+          val frameStr = String.format("%06d", frameNumber)
+          val finalOutPath = resolvedOutPath.substringBeforeLast(".") + "_" + frameStr + ".jpg"
+          val filename = java.io.File(finalOutPath).name
+
+          var resultUri = "file://$finalOutPath"
 
           try {
-            val outFile = java.io.File(resolvedOutPath)
+            val outFile = java.io.File(finalOutPath)
             outFile.parentFile?.mkdirs()
             outFile.outputStream().use { out ->
               bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 100, out)
@@ -101,8 +106,8 @@ class ExpoFFmpegModule : Module() {
             android.util.Log.e("ExpoFFmpeg", "Direct write failed, trying MediaStore: ${e.message}")
             try {
               val storageRoot = android.os.Environment.getExternalStorageDirectory().absolutePath
-              val relativePath = if (resolvedOutPath.startsWith(storageRoot)) {
-                val rel = resolvedOutPath.removePrefix(storageRoot).trimStart('/')
+              val relativePath = if (finalOutPath.startsWith(storageRoot)) {
+                val rel = finalOutPath.removePrefix(storageRoot).trimStart('/')
                 rel.substringBeforeLast('/', "").ifEmpty { "Pictures" }
               } else {
                 android.os.Environment.DIRECTORY_PICTURES
