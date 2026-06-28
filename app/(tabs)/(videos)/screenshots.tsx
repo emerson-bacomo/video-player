@@ -5,16 +5,20 @@ import { ScreenshotItem, ScreenshotItemSkeleton } from "@/components/ScreenshotI
 import { ScreenshotItemDetailsModal } from "@/components/ScreenshotItemDetailsModal";
 import { ThemedView } from "@/components/Themed";
 import { ThemedBottomSheet, ThemedBottomSheetScrollView } from "@/components/ThemedBottomSheet";
-import { useMedia } from "@/hooks/useMedia";
+import { Screenshot } from "@/hooks/domain/Screenshot";
+import { useMediaStore } from "@/hooks/MediaStoreBridge/MediaStoreProvider";
+import { useMediaStoreScreenshots } from "@/hooks/MediaStoreBridge/useMediaStoreScreenshots";
 import { useSafeNavigation } from "@/hooks/useSafeNavigation";
 import { StatusBar } from "expo-status-bar";
 import { Edit2, FolderInput, Image as ImageIcon, Info, Trash2 } from "lucide-react-native";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, FlatList, RefreshControl, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const ScreenshotsScreen = () => {
-    const { screenshots, screenshotsCount, fetchScreenshots, deleteMultipleImages } = useMedia();
+    const store = useMediaStore();
+    const screenshots = useMediaStoreScreenshots();
+    const screenshotsCount = screenshots.length;
     const insets = useSafeAreaInsets();
     const { safeBack } = useSafeNavigation();
     const { width: windowWidth } = useWindowDimensions();
@@ -27,8 +31,12 @@ const ScreenshotsScreen = () => {
     const [renamingScreenshot, setRenamingScreenshot] = useState<{ id: string; uri: string; filename: string } | null>(null);
 
     useEffect(() => {
-        fetchScreenshots();
-    }, [fetchScreenshots]);
+        Screenshot.scan(store);
+    }, [store]);
+
+    const refreshScreenshots = useCallback(() => {
+        Screenshot.scan(store, true);
+    }, [store]);
 
     const handleDelete = (screenshot: { id: string; uri: string }) => {
         setMenuScreenshot(null);
@@ -42,12 +50,11 @@ const ScreenshotsScreen = () => {
                     style: "destructive",
                     onPress: async () => {
                         try {
-                            const success = await deleteMultipleImages([screenshot.uri]);
-                            if (!success) {
-                                Alert.alert("Error", "Could not delete screenshot file.");
+                            const domainScreenshot = store.getScreenshot(screenshot.id);
+                            if (domainScreenshot) {
+                                await domainScreenshot.delete();
                             }
                             setSelectedScreenshot(null);
-                            await fetchScreenshots();
                         } catch (err) {
                             console.error("[ScreenshotsScreen] Failed to delete screenshot", err);
                             Alert.alert("Error", "Could not delete screenshot file.");
@@ -61,15 +68,12 @@ const ScreenshotsScreen = () => {
 
     const handleRename = async (newName: string) => {
         if (!renamingScreenshot) return;
-        const oldUri = renamingScreenshot.uri;
-        const basePath = oldUri.substring(0, oldUri.lastIndexOf("/"));
-        const ext = renamingScreenshot.filename.includes(".") ? renamingScreenshot.filename.split(".").pop() : "";
-        const newUri = `${basePath}/${newName}${ext ? `.${ext}` : ""}`;
-
         try {
-            await FileSystem.moveAsync({ from: oldUri, to: newUri });
+            const domainScreenshot = store.getScreenshot(renamingScreenshot.id);
+            if (domainScreenshot) {
+                await domainScreenshot.rename(newName);
+            }
             setRenamingScreenshot(null);
-            await fetchScreenshots();
         } catch (err) {
             console.error("[ScreenshotsScreen] Failed to rename screenshot", err);
             Alert.alert("Error", "Could not rename screenshot file.");
@@ -109,7 +113,7 @@ const ScreenshotsScreen = () => {
                 removeClippedSubviews={true}
                 renderItem={renderItem}
                 refreshControl={
-                    <RefreshControl refreshing={false} onRefresh={fetchScreenshots} tintColor="#fff" colors={["#6366f1"]} />
+                    <RefreshControl refreshing={false} onRefresh={refreshScreenshots} tintColor="#fff" colors={["#6366f1"]} />
                 }
                 ListEmptyComponent={
                     !isEmpty ? null : (

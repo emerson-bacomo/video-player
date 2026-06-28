@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import type { FC } from "react";
 import { StyleProp, StyleSheet, View, ViewStyle } from "react-native";
 import Animated, {
     Easing,
@@ -20,7 +21,7 @@ export interface SuccessBadgeProps {
     style?: StyleProp<ViewStyle>;
 }
 
-export const SuccessBadge: React.FC<SuccessBadgeProps> = ({ onVisible, duration = 1000, style }) => {
+export const SuccessBadge: FC<SuccessBadgeProps> = ({ onVisible, duration = 1000, style }) => {
     const progress = useSharedValue(0);
     const translateX = useSharedValue(100);
     const scaleX = useSharedValue(1);

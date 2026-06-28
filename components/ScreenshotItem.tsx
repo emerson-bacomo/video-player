@@ -1,5 +1,5 @@
 import { Image as ImageIcon, MoreVertical } from "lucide-react-native";
-import React from "react";
+import React, { memo, useState } from "react";
 import { Image, Pressable, Text, TouchableOpacity, View } from "react-native";
 import { Icon } from "./Icon";
 import { Skeleton } from "./Skeleton";
@@ -11,7 +11,7 @@ interface ScreenshotItemProps {
     onMenuPress?: (item: { id: string; uri: string; filename: string }) => void;
 }
 
-export const ScreenshotItemSkeleton = React.memo(({ width }: { width?: number }) => (
+export const ScreenshotItemSkeleton = memo(({ width }: { width?: number }) => (
     <View className="px-2 mb-6" style={width ? { width } : { flex: 1 }}>
         <View className="w-full aspect-square bg-card rounded-xl overflow-hidden border border-border/50 shadow-md mb-2">
             <Skeleton className="w-full h-full" />
@@ -24,9 +24,9 @@ export const ScreenshotItemSkeleton = React.memo(({ width }: { width?: number })
 
 ScreenshotItemSkeleton.displayName = "ScreenshotItemSkeleton";
 
-export const ScreenshotItem = React.memo(
+export const ScreenshotItem = memo(
     ({ item, width, onPress, onMenuPress }: ScreenshotItemProps) => {
-        const [imageError, setImageError] = React.useState(false);
+        const [imageError, setImageError] = useState(false);
 
         return (
             <View className="px-2 mb-6" style={width ? { width } : { flex: 1 }}>

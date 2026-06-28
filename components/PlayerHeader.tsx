@@ -3,9 +3,10 @@ import { router } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { ChevronLeft, MoreVertical, Settings as SettingsIcon, ExternalLink, Scissors } from "lucide-react-native";
 import React, { useEffect, useState } from "react";
+import type { FC, ReactNode } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
-import { VideoMedia, SessionClip } from "../types/useMedia";
+import { SessionClip } from "../types/useMedia";
 import { LoadingStatus } from "./LoadingStatus";
 import { Menu } from "./Menu";
 import { PlayerOrientationButton } from "./PlayerOrientationButton";
@@ -13,6 +14,7 @@ import { VideoBadges } from "./VideoBadges";
 import { VideoItemDetailsModal } from "./VideoItemDetailsModal";
 import { SessionClipsBottomSheet } from "./SessionClipsBottomSheet";
 import { useMedia } from "@/hooks/useMedia";
+import { useMediaStore } from "@/hooks/MediaStoreBridge/MediaStoreProvider";
 import { ClipExportModal } from "./ClipExportModal";
 import { useSafeNavigation } from "@/hooks/useSafeNavigation";
 import { usePlayerContext } from "@/context/PlayerContext";
@@ -20,12 +22,12 @@ import { useOrientationLayout } from "@/hooks/useOrientationLayout";
 import { useStableSafeAreaInsets } from "@/hooks/useStableSafeAreaInsets";
 
 interface BasePlayerHeaderProps {
-    children?: React.ReactNode;
-    rightSection?: React.ReactNode;
+    children?: ReactNode;
+    rightSection?: ReactNode;
     onLayout?: (event: any) => void;
 }
 
-export const BasePlayerHeader: React.FC<BasePlayerHeaderProps> = ({ children, rightSection, onLayout }) => {
+export const BasePlayerHeader: FC<BasePlayerHeaderProps> = ({ children, rightSection, onLayout }) => {
     const { isLandscape } = useOrientationLayout();
     const insets = useStableSafeAreaInsets(isLandscape);
     const isPortrait = !isLandscape;
@@ -76,9 +78,9 @@ export const BasePlayerHeader: React.FC<BasePlayerHeaderProps> = ({ children, ri
     );
 };
 
-export const PlayerHeader: React.FC<{ onSuccessAction?: () => void }> = ({ onSuccessAction }) => {
+export const PlayerHeader: FC<{ onSuccessAction?: () => void }> = ({ onSuccessAction }) => {
     const { activeVideo: video, setPaused, setHeaderLayout, isMenuOpen, resetControlsTimer, showControls } = usePlayerContext();
-    const [isInfoModalVisible, setIsInfoModalVisible] = React.useState(false);
+    const [isInfoModalVisible, setIsInfoModalVisible] = useState(false);
     const { isLandscape } = useOrientationLayout();
     const isPortrait = !isLandscape;
     const displayTitle = video?.title || "Video Player";
@@ -88,12 +90,13 @@ export const PlayerHeader: React.FC<{ onSuccessAction?: () => void }> = ({ onSuc
         router.push("/player-settings");
     };
 
-    const { sessionClips, allAlbumsVideos, clearVideoClipSourceUri, hasNewClips, markClipsAsViewed, executeReexport } =
+    const store = useMediaStore();
+    const { sessionClips, allAlbumsVideos, hasNewClips, markClipsAsViewed, executeReexport } =
         useMedia();
     const { safePush } = useSafeNavigation();
-    const [isBottomSheetVisible, setIsBottomSheetVisible] = React.useState(false);
-    const [bottomSheetView, setBottomSheetView] = React.useState<"clips" | "export">("clips");
-    const [clipToReexport, setClipToReexport] = React.useState<SessionClip | null>(null);
+    const [isBottomSheetVisible, setIsBottomSheetVisible] = useState(false);
+    const [bottomSheetView, setBottomSheetView] = useState<"clips" | "export">("clips");
+    const [clipToReexport, setClipToReexport] = useState<SessionClip | null>(null);
     const [isSourceValid, setIsSourceValid] = useState(false);
 
     useEffect(() => {
@@ -103,15 +106,15 @@ export const PlayerHeader: React.FC<{ onSuccessAction?: () => void }> = ({ onSuc
                     setIsSourceValid(true);
                 } else {
                     setIsSourceValid(false);
-                    clearVideoClipSourceUri(video.id);
+                    video?.clearClipSourceUri();
                 }
             });
         } else {
             setIsSourceValid(false);
         }
-    }, [video?.id, video?.clipSourceUri, clearVideoClipSourceUri]);
+    }, [video?.id, video?.clipSourceUri, store]);
 
-    const handleClipPress = async (clip: VideoMedia) => {
+    const handleClipPress = async (clip: SessionClip) => {
         setIsBottomSheetVisible(false);
         safePush({
             pathname: "/player",

@@ -1,4 +1,5 @@
 import React from "react";
+import type { FC } from "react";
 import { Text, View } from "react-native";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
@@ -54,7 +55,7 @@ interface ConfirmationModalProps extends VariantProps<typeof modalIconBgVariants
     hideCancel?: boolean;
 }
 
-export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
+export const ConfirmationModal: FC<ConfirmationModalProps> = ({
     visible,
     onClose,
     onConfirm,

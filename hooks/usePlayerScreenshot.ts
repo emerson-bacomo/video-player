@@ -1,21 +1,22 @@
 import { useState, useRef } from "react";
 import ExpoFFmpeg from "@/modules/expo-ffmpeg/src/index";
+import { Screenshot } from "@/hooks/domain/Screenshot";
 import { resolveAndPersistDestination, alertIfDestinationInvalid } from "@/utils/mediaDestination";
 import { buildScreenshotName } from "@/utils/fileNaming";
+import { useMediaStore } from "@/hooks/MediaStoreBridge/MediaStoreProvider";
 import { useSettings } from "@/hooks/useSettings";
-import { VideoMedia } from "@/types/useMedia";
-import { useMedia } from "@/hooks/useMedia";
+import type { Video } from "@/hooks/domain/Video";
 import { useManageExternalStorageToast } from "@/hooks/useManageExternalStorageToast";
 
 interface UsePlayerScreenshotProps {
-    activeVideo: VideoMedia | null;
+    activeVideo: Video | null;
     currentDisplayTime: number;
     setLoadingTask: (task: any) => void;
 }
 
 export const usePlayerScreenshot = ({ activeVideo, currentDisplayTime, setLoadingTask }: UsePlayerScreenshotProps) => {
+    const store = useMediaStore();
     const { settingsRef, updateSettings } = useSettings();
-    const { fetchScreenshots } = useMedia();
     const { showPermissionToast } = useManageExternalStorageToast();
 
     const isTakingRef = useRef(false);
@@ -96,8 +97,8 @@ export const usePlayerScreenshot = ({ activeVideo, currentDisplayTime, setLoadin
             setScreenshotFilepath(finalDisplayPath);
             setScreenshotOverlayVisible(true);
 
-            // Fetch screenshots to update albums list in real-time
-            fetchScreenshots().catch(() => {});
+            // Scan screenshots to update the list in real-time
+            Screenshot.scan(store).catch(() => {});
         } catch (e: any) {
             console.error("[usePlayerScreenshot] Error:", e);
             const isStorageError = e?.message?.includes("Failed to write screenshot");

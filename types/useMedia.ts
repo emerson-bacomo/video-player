@@ -25,13 +25,7 @@ export interface ExportOptions {
     transitionStyle: TransitionStyle;
 }
 
-export type SessionClip = VideoMedia & {
-    segments: { start: number; end: number }[];
-    exportOptions: ExportOptions;
-    sessionCreatedAt?: number;
-};
-
-export interface VideoMedia {
+export interface VideoData {
     id: string;
     filename: string;
     title: string;
@@ -50,13 +44,13 @@ export interface VideoMedia {
     size?: number;
     isPlaceholder?: boolean;
     albumId: string;
-    markers?: { time: number; markerId: string }[];
+    markers?: Marker[];
     lastOpenedTime?: number;
     clipSourceUri?: string;
     isNewOverride?: boolean;
 }
 
-export interface Album {
+export interface AlbumData {
     id: string;
     title: string;
     albumName: string;
@@ -69,4 +63,54 @@ export interface Album {
     prefixOptions?: string;
     selectedPrefixOptions?: string;
     isHidden?: number;
+}
+
+export interface ScreenshotData {
+    id: string;
+    uri: string;
+    filename: string;
+    videoTitle?: string;
+    videoId?: string;
+    albumId?: string;
+    captureTimestamp?: number;
+    createdAt: number;
+    width?: number;
+    height?: number;
+    fileSize?: number;
+    thumbnail?: string;
+}
+
+// ── Sort types ────────────────────────────────────────────────────────
+
+export type SortBy = "name" | "date" | "duration" | "episode";
+export type AlbumSortBy = "name" | "date" | "count";
+export type SortOrder = "asc" | "desc";
+
+export interface VideoSortConfig {
+    by: SortBy;
+    order: SortOrder;
+}
+
+export interface AlbumSortConfig {
+    by: AlbumSortBy;
+    order: SortOrder;
+}
+
+export interface SessionClip {
+    id: string;
+    filename: string;
+    title: string;
+    uri: string;
+    duration: number;
+    width: number;
+    height: number;
+    thumbnail?: string;
+    baseThumbnailUri: string;
+    lastPlayedSec: number;
+    albumId: string;
+    markers?: Marker[];
+    clipSourceUri?: string;
+    segments: { start: number; end: number }[];
+    exportOptions: ExportOptions;
+    sessionCreatedAt?: number;
 }

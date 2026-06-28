@@ -2,6 +2,7 @@ import defaultTheme from "@/constants/theme.json";
 import { getThemePresetsDb, saveThemePresetDb, setActiveThemePresetDb, updateThemePresetDb } from "@/utils/db";
 import { vars } from "nativewind";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 
 export interface ThemeColors {
     background: string;
@@ -47,7 +48,7 @@ const normalizeTheme = (colors: Partial<ThemeColors>): ThemeColors => ({
     playerBackground: colors.playerBackground || "#000000",
 });
 
-export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
+export const ThemeProvider = ({ children }: { children: ReactNode }) => {
     const [colors, setColorsState] = useState<ThemeColors>(normalizeTheme(defaultTheme.colors));
     const [activePresetId, setActivePresetId] = useState<number | null>(null);
     const [presets, setPresets] = useState<any[]>([]);

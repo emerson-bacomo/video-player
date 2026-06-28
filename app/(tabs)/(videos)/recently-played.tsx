@@ -1,12 +1,15 @@
 import { AlbumVideos } from "@/components/AlbumVideos";
 import { useMedia } from "@/hooks/useMedia";
-import { Album } from "@/types/useMedia";
+import { useMediaStoreRecentlyPlayed } from "@/hooks/MediaStoreBridge/useMediaStoreRecentlyPlayed";
+import { useLoadingTask } from "@/context/LoadingTaskContext";
 import React, { useMemo } from "react";
 
 const RecentlyPlayedScreen = () => {
-    const { recentlyPlayedVideos, recentlyPlayedCount, fetchAlbums, isSyncing, loadingTask } = useMedia();
+    const { recentlyPlayedVideos, recentlyPlayedCount } = useMediaStoreRecentlyPlayed();
+    const { fetchAlbums, isSyncing } = useMedia();
+    const { loadingTask } = useLoadingTask();
 
-    const recentlyPlayedAlbum = useMemo<Album>(
+    const recentlyPlayedAlbum = useMemo(
         () => ({
             id: "recently-played",
             title: "Recently Played",
@@ -23,8 +26,8 @@ const RecentlyPlayedScreen = () => {
 
     return (
         <AlbumVideos
-            album={recentlyPlayedAlbum}
-            videos={recentlyPlayedVideos}
+            album={recentlyPlayedAlbum as any}
+            videos={recentlyPlayedVideos as any}
             onRefresh={handleRefresh}
             isSyncing={isSyncing}
             isLoading={recentlyPlayedCount === 0 && !!loadingTask}

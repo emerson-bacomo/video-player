@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import type { FC, ReactNode } from "react";
 import { getSettingDb, saveSettingDb } from "../utils/db";
 
 export interface LastPlayedVideo {
@@ -22,7 +23,7 @@ const FloatingPlayerContext = createContext<FloatingPlayerContextType>({
 
 export const useFloatingPlayer = () => useContext(FloatingPlayerContext);
 
-export const FloatingPlayerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const FloatingPlayerProvider: FC<{ children: ReactNode }> = ({ children }) => {
     const [lastPlayed, setLastPlayed] = useState<LastPlayedVideo | null>(null);
     const [showFloater, setShowFloater] = useState(false);
 
@@ -36,6 +37,7 @@ export const FloatingPlayerProvider: React.FC<{ children: React.ReactNode }> = (
             }
         } catch {}
     }, []);
+
     const saveLastPlayed = useCallback((v: LastPlayedVideo) => {
         setLastPlayed(v);
         setShowFloater(true);

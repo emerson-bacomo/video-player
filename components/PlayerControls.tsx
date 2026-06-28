@@ -18,6 +18,7 @@ import {
     Trash2,
 } from "lucide-react-native";
 import React, { useEffect, useState } from "react";
+import type { FC } from "react";
 import { LayoutChangeEvent, Text, TouchableOpacity, View } from "react-native";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { useSettings } from "@/hooks/useSettings";
@@ -29,7 +30,7 @@ import { MarkerPair } from "@/types/useMedia";
 import { usePlayerControls } from "@/hooks/usePlayerControls";
 import { usePlayerContext } from "@/context/PlayerContext";
 
-export const PlayerControls: React.FC = () => {
+export const PlayerControls: FC = () => {
     const { setSeekingLock, currentDisplayTime, duration, screenshotState } = usePlayerContext();
     const { onScreenshot, screenshotOverlayVisible, screenshotUri, screenshotFilepath, dismissScreenshot } = screenshotState;
     const {
@@ -91,7 +92,7 @@ export const PlayerControls: React.FC = () => {
         };
     });
 
-    React.useEffect(() => {
+    useEffect(() => {
         setLocalIsPlaying(isPlaying);
     }, [isPlaying]);
 

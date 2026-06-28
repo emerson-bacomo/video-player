@@ -1,7 +1,7 @@
 import { Header } from "@/components/Header";
 import { ThemedSafeAreaView } from "@/components/Themed";
 import { VpcPreview } from "@/components/VpcPreview";
-import { useMedia } from "@/hooks/useMedia";
+import { useMediaStoreLoadData } from "@/hooks/MediaStoreBridge/useMediaStoreLoadData";
 import { useSettings } from "@/hooks/useSettings";
 
 import { applyConfigData, getPendingImportData, setPendingImportData } from "@/utils/configManager";
@@ -13,7 +13,7 @@ import { toast } from "sonner-native";
 
 export default function ImportVpcPreviewScreen() {
     const { updateSettings } = useSettings();
-    const { loadDataFromDB } = useMedia();
+    const { loadDataFromDB } = useMediaStoreLoadData();
     const [importing, setImporting] = useState(false);
     const [configData] = useState(getPendingImportData());
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());

@@ -1,6 +1,6 @@
 import { useSafeNavigation } from "@/hooks/useSafeNavigation";
-import React, { useCallback } from "react";
-import { Album } from "../types/useMedia";
+import React, { memo, useCallback } from "react";
+import type { Album } from "@/hooks/domain/Album";
 import { AlbumItem } from "./AlbumItem";
 
 interface ScreenshotsAlbumProps {
@@ -8,7 +8,7 @@ interface ScreenshotsAlbumProps {
     width?: number;
 }
 
-export const ScreenshotsAlbum = React.memo(function ScreenshotsAlbum({ item, width }: ScreenshotsAlbumProps) {
+export const ScreenshotsAlbum = memo(function ScreenshotsAlbum({ item, width }: ScreenshotsAlbumProps) {
     const { safePush } = useSafeNavigation();
 
     const handlePress = useCallback(() => {

@@ -1,11 +1,12 @@
-import React, { useMemo, useRef } from "react";
+import React, { useCallback, useMemo, useRef } from "react";
+import type { ReactNode } from "react";
 import { Dimensions } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useSettings } from "../hooks/useSettings";
 import { usePlayerContext } from "@/context/PlayerContext";
 
 export interface PlayerGestureDetectorProps {
-    children: React.ReactNode;
+    children: ReactNode;
 }
 
 /**
@@ -46,7 +47,7 @@ export function PlayerGestureDetector({ children }: PlayerGestureDetectorProps) 
     const isSpeedHolding = useRef(false);
     const isPanValidated = useRef(false);
 
-    const handleSnowballTap = React.useCallback(
+    const handleSnowballTap = useCallback(
         (side: "back" | "fwd") => {
             const now = Date.now();
             const isWithinSnowball = now - lastTapHandledAt.current < 1000;

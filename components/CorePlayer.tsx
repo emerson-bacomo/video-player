@@ -1,13 +1,14 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from "react";
+import type { RefObject } from "react";
 import { StyleProp, ViewStyle } from "react-native";
-import Video, { OnLoadData, OnProgressData, VideoRef } from "react-native-video";
+import VideoR, { OnLoadData, OnProgressData, VideoRef } from "react-native-video";
 import { useFloatingPlayer } from "../context/FloatingPlayerContext";
-import { useMedia } from "../hooks/useMedia";
-import { VideoMedia } from "../types/useMedia";
+import { useMediaStore } from "../hooks/MediaStoreBridge/MediaStoreProvider";
+import type { Video } from "@/hooks/domain/Video";
 import { savePlaybackDataDb } from "../utils/db";
 
 export interface CorePlayerProps {
-    video: VideoMedia;
+    video: Video;
     paused?: boolean;
     rate?: number;
     resizeMode?: "contain" | "cover" | "stretch";
@@ -20,7 +21,7 @@ export interface CorePlayerProps {
     isFloating?: boolean;
     initialTime?: number;
     onSeek?: (time: number) => void;
-    isLockedRef?: React.RefObject<boolean>;
+    isLockedRef?: RefObject<boolean>;
 }
 
 export interface CorePlayerRef {
@@ -51,7 +52,7 @@ export const CorePlayer = forwardRef<CorePlayerRef, CorePlayerProps>((props, ref
 
     const videoRef = useRef<VideoRef>(null);
     const { saveLastPlayed } = useFloatingPlayer();
-    const { updateVideoProgress, updateVideoLastOpenedTime } = useMedia();
+    const store = useMediaStore();
 
     const durationRef = useRef(0);
     const lastSaveSecRef = useRef(0);
@@ -73,7 +74,7 @@ export const CorePlayer = forwardRef<CorePlayerRef, CorePlayerProps>((props, ref
                 // Scrubbing/Panning sets isLockedRef to true, so we skip DB writes there.
                 if (id && !isLockedRef?.current) {
                     savePlaybackDataDb(id, time);
-                    updateVideoProgress(id, time);
+                    store.getVideo(id)?.updateProgress(time);
                     lastSaveSecRef.current = time;
                 }
 
@@ -121,7 +122,7 @@ export const CorePlayer = forwardRef<CorePlayerRef, CorePlayerProps>((props, ref
                     const finalPos = currentTimeRef.current;
                     if (finalPos > 0) {
                         savePlaybackDataDb(id, finalPos);
-                        updateVideoProgress(id, finalPos);
+                        store.getVideo(id)?.updateProgress(finalPos);
                     }
                 }
             }
@@ -143,7 +144,7 @@ export const CorePlayer = forwardRef<CorePlayerRef, CorePlayerProps>((props, ref
                 lastSaveSecRef.current = startPos;
             }
             if (video.id) {
-                updateVideoLastOpenedTime(video.id);
+                video.setLastOpenedTime(Date.now());
                 if (!isFloating) {
                     saveLastPlayed({ id: video.id, albumId: video.albumId });
                 }
@@ -175,17 +176,17 @@ export const CorePlayer = forwardRef<CorePlayerRef, CorePlayerProps>((props, ref
             if (id && !isLockedRef?.current) {
                 if (Math.abs(pos - lastSaveSecRef.current) >= saveInterval / 1000) {
                     savePlaybackDataDb(id, pos);
-                    updateVideoProgress(id, pos);
+                    store.getVideo(id)?.updateProgress(pos);
                     lastSaveSecRef.current = pos;
                 }
             }
             onProgress?.(data);
         },
-        [id, saveInterval, onProgress, updateVideoProgress],
+        [id, saveInterval, onProgress, store],
     );
 
     return (
-        <Video
+        <VideoR
             ref={videoRef}
             source={{ uri }}
             style={style}

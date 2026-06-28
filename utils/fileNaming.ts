@@ -31,5 +31,5 @@ export const buildScreenshotName = (videoTitle: string, timestampSeconds: number
     const baseName = videoTitle.replace(VIDEO_EXTENSION_RE, "");
     const cleanName = sanitizeDefaultName(baseName) || "Screenshot";
 
-    return `${cleanName}_${secondsToFileStamp(timestampSeconds)}.jpg`;
+    return `${cleanName}_${secondsToFileStamp(timestampSeconds)}.vpss.jpg`;
 };

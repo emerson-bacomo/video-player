@@ -13,8 +13,13 @@ import { ThemedBottomSheet, ThemedBottomSheetScrollView } from "@/components/The
 import { useTheme } from "@/context/ThemeContext";
 import { useDeleteHandler } from "@/hooks/useDeleteHandler";
 import { useMedia } from "@/hooks/useMedia";
+import { useMediaStoreRecentlyPlayed } from "@/hooks/MediaStoreBridge/useMediaStoreRecentlyPlayed";
+import { useMediaStoreScreenshots } from "@/hooks/MediaStoreBridge/useMediaStoreScreenshots";
+import { useMediaStore } from "@/hooks/MediaStoreBridge/MediaStoreProvider";
+import { useRawAlbums } from "@/hooks/MediaStoreBridge/useMediaStoreRawAlbums";
+import { useSelection } from "@/context/SelectionContext";
+import { useLoadingTask } from "@/context/LoadingTaskContext";
 import { useSafeNavigation } from "@/hooks/useSafeNavigation";
-import { Album } from "@/types/useMedia";
 import { router, useFocusEffect } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import {
@@ -34,37 +39,28 @@ import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } fr
 import { BackHandler, FlatList, Image, RefreshControl, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
 
 const AlbumListScreen = () => {
+    const store = useMediaStore();
+    const albums = useRawAlbums();
     const {
-        albums,
-        loadingTask,
         albumSort,
         setAlbumSort,
         fetchAlbums,
         requestPermissionAndFetch,
         permissionResponse,
-        isSelectionMode,
-        selectedIds,
-        toggleSelection,
-        renameAlbum,
-        hideSelectionBar,
-        resumeSelectionIfNeeded,
-        clearSelection,
         compareByAlbumSort,
-        hideAlbum,
-        hideMultipleAlbums,
-        recentlyPlayedCount,
-        recentlyPlayedVideos,
         allAlbumsVideos,
-        updateMultipleVideoProgress,
-        screenshots,
-        screenshotsCount,
     } = useMedia();
+    const { recentlyPlayedVideos, recentlyPlayedCount } = useMediaStoreRecentlyPlayed();
+    const screenshots = useMediaStoreScreenshots();
+    const screenshotsCount = screenshots.length;
+    const { isSelectionMode, selectedIds, toggleSelection, resumeSelectionIfNeeded, clearSelection } = useSelection();
+    const { loadingTask } = useLoadingTask();
     const { colors } = useTheme();
     const deferredAlbumSort = useDeferredValue(albumSort);
     const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
     const selectedAlbum = useMemo(() => albums.find((a) => a.id === selectedAlbumId), [albums, selectedAlbumId]);
-    const [renamingAlbum, setRenamingAlbum] = useState<Album | null>(null);
-    const [menuAlbum, setMenuAlbum] = useState<Album | null>(null);
+    const [renamingAlbum, setRenamingAlbum] = useState<any>(null);
+    const [menuAlbum, setMenuAlbum] = useState<any>(null);
 
     const { width: windowWidth } = useWindowDimensions();
     const [listWidth, setListWidth] = useState(windowWidth);
@@ -161,14 +157,14 @@ const AlbumListScreen = () => {
                 }}
                 onLongPress={(v: any) => toggleSelection(v.id)}
                 onInfoPress={(v: any) => setSelectedAlbumId(v.id)}
-                onMenuPress={setMenuAlbum}
+                onMenuPress={(v: any) => setMenuAlbum(v)}
             />
         );
     };
 
     const handleRenameAlbum = (newName: string) => {
         if (renamingAlbum) {
-            renameAlbum(renamingAlbum.id, newName);
+            store.renameAlbum(renamingAlbum.id, newName);
             setRenamingAlbum(null);
         }
     };
@@ -224,13 +220,11 @@ const AlbumListScreen = () => {
                 label: isSelectionWatched ? "Mark as Unwatched" : "Mark as Watched",
                 icon: isSelectionWatched ? Circle : CheckCircle,
                 onPress: (ids: Set<string>) => {
-                    const allSelectedVideoIds: string[] = [];
+                    const newProgress = isSelectionWatched ? -1 : Infinity;
                     ids.forEach((albumId) => {
                         const vids = allAlbumsVideos[albumId] || [];
-                        vids.forEach((v) => allSelectedVideoIds.push(v.id));
+                        vids.forEach((v) => store.getVideo(v.id)?.updateProgress(newProgress));
                     });
-                    const newProgress = isSelectionWatched ? -1 : Infinity;
-                    updateMultipleVideoProgress(allSelectedVideoIds, newProgress);
                     clearSelection();
                 },
             },
@@ -238,7 +232,9 @@ const AlbumListScreen = () => {
                 label: "Hide",
                 icon: EyeOff,
                 onPress: (ids: Set<string>) => {
-                    hideMultipleAlbums(Array.from(ids));
+                    for (const id of Array.from(ids)) {
+                        store.getAlbum(id)?.hide();
+                    }
                     clearSelection();
                 },
             },
@@ -248,12 +244,11 @@ const AlbumListScreen = () => {
                 destructive: true,
                 onPress: () => {
                     if (selectedIds.size === 1) {
-                        hideSelectionBar();
+                        clearSelection();
                         handleSelectionAlbumDelete();
                     } else {
-                        // selectedIds is the source of truth. hideSelectionBar() sets isSelectionMode=false
-                        // immediately, unmounting the Menu Portal so navigation won't cause a native crash.
-                        hideSelectionBar();
+                        // Clear selection immediately to unmount Menu Portal and prevent native crash
+                        clearSelection();
                         router.push({
                             pathname: "/delete-preview",
                             params: { type: "album" },
@@ -262,7 +257,7 @@ const AlbumListScreen = () => {
                 },
             },
         ],
-        [isSelectionWatched, allAlbumsVideos, hideMultipleAlbums, clearSelection, updateMultipleVideoProgress],
+        [isSelectionWatched, clearSelection, allAlbumsVideos, store, selectedIds.size, handleSelectionAlbumDelete],
     );
 
     return (
@@ -378,7 +373,7 @@ const AlbumListScreen = () => {
                             className="flex-row items-center px-4 py-4 gap-4"
                             onPress={() => {
                                 setMenuAlbum(null);
-                                hideAlbum(menuAlbum.id);
+                                if (menuAlbum) store.getAlbum(menuAlbum.id)?.hide();
                             }}
                         >
                             <Icon icon={EyeOff} size={22} className="text-secondary" />

@@ -1,8 +1,9 @@
-import { VideoMedia } from "@/types/useMedia";
+import type { Video } from "@/hooks/domain/Video";
 import { breakPath } from "@/utils/textUtils";
 import { router } from "expo-router";
 import { Calendar, Clock, FileVideo, HardDrive, Info } from "lucide-react-native";
 import React from "react";
+import type { FC } from "react";
 import { Image, Text, View } from "react-native";
 import { Icon } from "./Icon";
 import { ThemedButton } from "./Themed";
@@ -10,12 +11,12 @@ import { ThemedBottomSheet, ThemedBottomSheetScrollView } from "./ThemedBottomSh
 
 interface VideoInfoModalProps {
     visible: boolean;
-    video: VideoMedia | null;
+    video: Video | null;
     onClose: () => void;
     hidePlayAction?: boolean;
 }
 
-export const VideoItemDetailsModal: React.FC<VideoInfoModalProps> = ({ visible, video, onClose, hidePlayAction }) => {
+export const VideoItemDetailsModal: FC<VideoInfoModalProps> = ({ visible, video, onClose, hidePlayAction }) => {
     if (!video) return null;
 
     const formatSize = (size?: number) => {

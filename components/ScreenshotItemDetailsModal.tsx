@@ -2,6 +2,7 @@ import { breakPath } from "@/utils/textUtils";
 import * as FileSystem from "expo-file-system/legacy";
 import { Calendar, HardDrive, Image, MapPin } from "lucide-react-native";
 import React, { useEffect, useState } from "react";
+import type { FC } from "react";
 import { Image as RNImage, Text, View } from "react-native";
 import { Icon } from "./Icon";
 import { ThemedBottomSheet, ThemedBottomSheetScrollView } from "./ThemedBottomSheet";
@@ -12,7 +13,7 @@ interface ScreenshotItemDetailsModalProps {
     onClose: () => void;
 }
 
-export const ScreenshotItemDetailsModal: React.FC<ScreenshotItemDetailsModalProps> = ({
+export const ScreenshotItemDetailsModal: FC<ScreenshotItemDetailsModalProps> = ({
     visible,
     screenshot,
     onClose,

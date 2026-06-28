@@ -1,7 +1,7 @@
 import { ConfirmationModal } from "@/components/ConfirmationModal";
 import { Header } from "@/components/Header";
 import { ThemedSafeAreaView } from "@/components/Themed";
-import { useMedia } from "@/hooks/useMedia";
+import { useMediaStoreLoadData } from "@/hooks/MediaStoreBridge/useMediaStoreLoadData";
 import { useSettings } from "@/hooks/useSettings";
 import { applyConfigData } from "@/utils/configManager";
 import { deleteVpcExportDb, getVpcExportsDb, VpcExport } from "@/utils/db";
@@ -31,7 +31,7 @@ export default function ExportViewerScreen() {
         message: "",
         onConfirm: () => {},
     });
-    const { loadDataFromDB } = useMedia();
+    const { loadDataFromDB } = useMediaStoreLoadData();
     const { updateSettings } = useSettings();
 
     const loadExports = useCallback(async () => {

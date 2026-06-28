@@ -11,9 +11,13 @@ import { VideoItem, VideoItemSkeleton } from "@/components/VideoItem";
 import { VideoItemDetailsModal } from "@/components/VideoItemDetailsModal";
 import { useTheme } from "@/context/ThemeContext";
 import { useMedia, VideoSortConfig } from "@/hooks/useMedia";
+import { useMediaStore } from "@/hooks/MediaStoreBridge/MediaStoreProvider";
+import { useSelection } from "@/context/SelectionContext";
+import { useLoadingTask } from "@/context/LoadingTaskContext";
 import { useDeleteHandler } from "@/hooks/useDeleteHandler";
 import { useSafeNavigation } from "@/hooks/useSafeNavigation";
-import { Album, VideoMedia } from "@/types/useMedia";
+import type { Album } from "@/hooks/domain/Album";
+import type { Video } from "@/hooks/domain/Video";
 import { getAlbumPrefixOptionsDb } from "@/utils/db";
 import { StatusBar } from "expo-status-bar";
 import { useFocusEffect } from "expo-router";
@@ -46,41 +50,34 @@ export const AlbumVideos = ({
     videoSortMode,
 }: {
     album: Album;
-    videos: VideoMedia[] | null;
+    videos: Video[] | null;
     onRefresh?: () => void;
     isSyncing?: boolean;
     isLoading?: boolean;
     activeVideoSort: VideoSortConfig | null;
     videoSortMode: SortMode | null;
 }) => {
-    if (!album) return null;
-
     const id = album.id;
+    const store = useMediaStore();
     const {
-        loadingTask,
         updateVideoSort,
         selectedVideoPrefixFilters,
         permissionResponse,
+        setVideoSortSettingScope,
+        updatePrefixFilter,
+        clearPrefixFilters,
+        setThumbnailPriorityAlbum,
+    } = useMedia();
+    const {
         isSelectionMode,
         toggleSelection,
         clearSelection,
-        hideSelectionBar,
         resumeSelectionIfNeeded,
-        renameVideo,
-        setVideoSortSettingScope,
-        updateVideoProgress,
-        updateMultipleVideoProgress,
         togglePrefixSelection,
         selectPrefixesOfSelected,
-        hideVideo,
-        hideMultipleVideos,
         selectedIds,
-        updatePrefixFilter,
-        clearPrefixFilters,
-        setLoadingTask,
-        setThumbnailPriorityAlbum,
-        regenerateVideoThumbnails,
-    } = useMedia();
+    } = useSelection();
+    const { loadingTask, setLoadingTask } = useLoadingTask();
 
     const albumInfo = useMemo(() => album || { title: "Album", assetCount: 0 }, [album]);
     const { colors } = useTheme();
@@ -129,8 +126,8 @@ export const AlbumVideos = ({
 
     const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
     const [showAlbumInfo, setShowAlbumInfo] = useState(false);
-    const [renamingVideo, setRenamingVideo] = useState<VideoMedia | null>(null);
-    const [menuVideo, setMenuVideo] = useState<VideoMedia | null>(null);
+    const [renamingVideo, setRenamingVideo] = useState<Video | null>(null);
+    const [menuVideo, setMenuVideo] = useState<Video | null>(null);
 
     // Single-item delete from context menu — skips the preview page and deletes immediately.
     const { handleDelete: handleSingleVideoDelete } = useDeleteHandler({
@@ -246,7 +243,7 @@ export const AlbumVideos = ({
 
     const handleRenameVideo = (newName: string) => {
         if (renamingVideo) {
-            renameVideo(renamingVideo.id, newName);
+            renamingVideo.rename(newName);
             setRenamingVideo(null);
         }
     };
@@ -290,7 +287,7 @@ export const AlbumVideos = ({
                 item={item}
                 onLongPress={(v) => toggleSelection(v.id)}
                 onInfoPress={(v) => setSelectedVideoId(v.id)}
-                onMenuPress={setMenuVideo}
+                onMenuPress={(v) => setMenuVideo(v)}
             />
         );
     };
@@ -303,8 +300,10 @@ export const AlbumVideos = ({
                 onPress: (ids: Set<string>) => {
                     const idsArray = Array.from(ids);
                     const newProgress = isSelectionWatched ? -1 : Infinity;
-
-                    updateMultipleVideoProgress(idsArray, newProgress);
+                    const videos = idsArray.map((id) => store.getVideo(id)).filter((v): v is NonNullable<typeof v> => v != null);
+                    for (const v of videos) {
+                        v.updateProgress(newProgress);
+                    }
                     clearSelection();
                 },
             },
@@ -331,7 +330,12 @@ export const AlbumVideos = ({
                 label: "Hide Selected",
                 icon: EyeOff,
                 onPress: (ids: Set<string>) => {
-                    hideMultipleVideos(Array.from(ids));
+                    const videos = Array.from(ids)
+                        .map((id) => store.getVideo(id))
+                        .filter((v): v is NonNullable<typeof v> => v != null);
+                    for (const v of videos) {
+                        v.hide();
+                    }
                     clearSelection();
                 },
             },
@@ -341,12 +345,8 @@ export const AlbumVideos = ({
                 destructive: true,
                 onPress: () => {
                     if (selectedIds.size === 1) {
-                        hideSelectionBar();
                         handleSelectionVideoDelete();
                     } else {
-                        // selectedIds is the source of truth. hideSelectionBar() sets isSelectionMode=false
-                        // immediately, unmounting the Menu Portal so navigation won't cause a native crash.
-                        hideSelectionBar();
                         safePush({
                             pathname: "/delete-preview",
                             params: { type: "video" },
@@ -358,8 +358,10 @@ export const AlbumVideos = ({
                 label: "Regenerate Thumbnails",
                 icon: Film,
                 onPress: (ids: Set<string>) => {
-                    const selectedVideos = videos?.filter((v) => ids.has(v.id)) || [];
-                    regenerateVideoThumbnails(selectedVideos);
+                    const selectedVideos = (videos?.filter((v) => ids.has(v.id)) || [])
+                    for (const v of selectedVideos) {
+                        v.regenerateThumbnail();
+                    }
                     clearSelection();
                 },
             },
@@ -381,17 +383,14 @@ export const AlbumVideos = ({
         [
             isSelectionWatched,
             hasSelectionPrefixes,
-            updateMultipleVideoProgress,
             clearSelection,
+            store,
             selectPrefixesOfSelected,
             id,
-            hideMultipleVideos,
             selectedIds.size,
-            hideSelectionBar,
             handleSelectionVideoDelete,
             safePush,
             videos,
-            regenerateVideoThumbnails,
             updatePrefixFilter,
         ],
     );
@@ -428,7 +427,7 @@ export const AlbumVideos = ({
                 onPress: (close) => {
                     close();
                     const isWatched = menuVideo!.lastPlayedSec >= 0;
-                    updateVideoProgress(menuVideo!.id, isWatched ? -1 : Infinity);
+                    menuVideo!.updateProgress(isWatched ? -1 : Infinity);
                 },
             },
             ...(menuVideo?.rawPrefix
@@ -448,16 +447,15 @@ export const AlbumVideos = ({
                 icon: EyeOff,
                 onPress: (close) => {
                     close();
-                    hideVideo(menuVideo!.id);
+                    menuVideo!.hide();
                 },
             },
             {
                 label: "Regenerate thumbnail",
                 icon: Film,
                 onPress: (close) => {
-                    const videoToRegen = menuVideo;
                     close();
-                    regenerateVideoThumbnails([videoToRegen!]);
+                    menuVideo!.regenerateThumbnail();
                 },
             },
             ...(menuVideo?.prefix && prefixOptions.some((o) => o.value === menuVideo.prefix)
@@ -488,11 +486,8 @@ export const AlbumVideos = ({
             menuVideo,
             setSelectedVideoId,
             setRenamingVideo,
-            updateVideoProgress,
             togglePrefixSelection,
             id,
-            hideVideo,
-            regenerateVideoThumbnails,
             prefixOptions,
             updatePrefixFilter,
             handleSingleVideoDelete,

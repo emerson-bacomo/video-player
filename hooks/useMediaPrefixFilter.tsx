@@ -1,4 +1,4 @@
-import type { Album, VideoMedia } from "@/types/useMedia";
+import type { AlbumData, VideoData } from "@/types/useMedia";
 import {
     getAlbumPrefixOptionsDb,
     getAlbumSelectedPrefixOptionsDb,
@@ -6,13 +6,14 @@ import {
     updateAlbumSelectedPrefixOptionsDb,
     updateAlbumThumbnailDb,
 } from "@/utils/db";
-import React, { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import type { Dispatch, SetStateAction, RefObject } from "react";
 
 export const useMediaPrefixFilter = (
-    setAlbums: React.Dispatch<React.SetStateAction<Album[]>>,
-    setAllAlbumsVideos: React.Dispatch<React.SetStateAction<Record<string, VideoMedia[]>>>,
-    albumsRef: React.RefObject<Record<string, Album>>,
-    getUnfilteredVideosForAlbum: (albumId: string) => VideoMedia[],
+    setAlbums: Dispatch<SetStateAction<AlbumData[]>>,
+    setAllAlbumsVideos: Dispatch<SetStateAction<Record<string, VideoData[]>>>,
+    albumsRef: RefObject<Record<string, AlbumData>>,
+    getUnfilteredVideosForAlbum: (albumId: string) => VideoData[],
 ) => {
     const [selectedVideoPrefixFilters, setSelectedVideoPrefixFiltersState] = useState<Record<string, string[]>>({});
     const selectedVideoPrefixFiltersRef = useRef<Record<string, string[]>>({});
@@ -40,7 +41,7 @@ export const useMediaPrefixFilter = (
         selectedVideoPrefixFiltersRef.current = initial;
     }, [albumsRef]);
 
-    const applyFiltersToVideos = useCallback((albumId: string, allVideos: VideoMedia[]) => {
+    const applyFiltersToVideos = useCallback((albumId: string, allVideos: VideoData[]) => {
         const selectedPrefixes = selectedVideoPrefixFiltersRef.current[albumId] || [];
         if (selectedPrefixes.length === 0) return allVideos;
         return allVideos.filter((v) => v.prefix && selectedPrefixes.includes(v.prefix));
@@ -146,7 +147,7 @@ export const useMediaPrefixFilter = (
     );
 
     const recomputePrefixOptions = useCallback(
-        (albumId: string, albumVids: VideoMedia[]) => {
+        (albumId: string, albumVids: VideoData[]) => {
             const prefixCounts: Record<string, number> = {};
             albumVids.forEach((v) => {
                 if (v.prefix) {

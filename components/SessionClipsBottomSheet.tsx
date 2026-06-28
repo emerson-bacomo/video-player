@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import type { FC } from "react";
 import { View, Text, TouchableOpacity, Image } from "react-native";
 import { Scissors, FileVideo, Play, ChevronDown, ChevronUp } from "lucide-react-native";
 import { MediaContextType } from "@/hooks/useMedia";
@@ -44,7 +45,7 @@ const getRelativeTimeStr = (date: Date) => {
 const RealtimeRelativeTime = ({ date }: { date: Date }) => {
     const [timeStr, setTimeStr] = useState(() => getRelativeTimeStr(date));
 
-    React.useEffect(() => {
+    useEffect(() => {
         const interval = setInterval(() => {
             setTimeStr(getRelativeTimeStr(date));
         }, 1000); // Check every second. React bails out of render if the string is exactly the same!
@@ -54,7 +55,7 @@ const RealtimeRelativeTime = ({ date }: { date: Date }) => {
     return <Text className="text-zinc-400 text-xs">{timeStr}</Text>;
 };
 
-export const SessionClipsBottomSheet: React.FC<SessionClipsBottomSheetProps> = ({
+export const SessionClipsBottomSheet: FC<SessionClipsBottomSheetProps> = ({
     isVisible,
     onClose,
     sessionClips,
@@ -66,8 +67,8 @@ export const SessionClipsBottomSheet: React.FC<SessionClipsBottomSheetProps> = (
     const [expandedClipId, setExpandedClipId] = useState<string | null>(null);
 
     const sortedClips = Object.values(sessionClips).sort((a, b) => {
-        const aTime = a.sessionCreatedAt || a.modificationTime || 0;
-        const bTime = b.sessionCreatedAt || b.modificationTime || 0;
+        const aTime = a.sessionCreatedAt || 0;
+        const bTime = b.sessionCreatedAt || 0;
         return bTime - aTime;
     });
 
@@ -87,7 +88,7 @@ export const SessionClipsBottomSheet: React.FC<SessionClipsBottomSheetProps> = (
 
     const renderItem = ({ item: clip }: { item: SessionClip }) => {
         const isExpanded = expandedClipId === clip.id;
-        const createdDate = new Date(clip.sessionCreatedAt || clip.modificationTime || Date.now());
+        const createdDate = new Date(clip.sessionCreatedAt || Date.now());
 
         return (
             <View
@@ -153,12 +154,7 @@ export const SessionClipsBottomSheet: React.FC<SessionClipsBottomSheetProps> = (
                                 {clip.width}x{clip.height}
                             </Text>
                         </View>
-                        <View>
-                            <Text className="text-zinc-500 text-[10px] uppercase font-bold tracking-widest mb-0.5">Size</Text>
-                            <Text className="text-zinc-300 text-xs font-mono">
-                                {clip.size ? (clip.size / (1024 * 1024)).toFixed(1) + " MB" : "Unknown"}
-                            </Text>
-                        </View>
+
                         <View>
                             <Text className="text-zinc-500 text-[10px] uppercase font-bold tracking-widest mb-0.5">Format</Text>
                             <Text className="text-zinc-300 text-xs font-mono">

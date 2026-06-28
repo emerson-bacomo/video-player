@@ -6,36 +6,33 @@ import { Menu } from "@/components/Menu";
 import { ThemedSafeAreaView } from "@/components/Themed";
 import { VideoItem } from "@/components/VideoItem";
 import { VideoItemDetailsModal } from "@/components/VideoItemDetailsModal";
-import { useMedia } from "@/hooks/useMedia";
+import { useMediaStore } from "@/hooks/MediaStoreBridge/MediaStoreProvider";
+import { Video } from "@/hooks/domain/Video";
+import { Album as AlbumDomain } from "@/hooks/domain/Album";
+import { useSelection } from "@/context/SelectionContext";
 import { useSafeNavigation } from "@/hooks/useSafeNavigation";
-import { Album, VideoMedia } from "@/types/useMedia";
+import type { Album } from "@/hooks/domain/Album";
 import { StatusBar } from "expo-status-bar";
 import { Eye, Info } from "lucide-react-native";
 import React, { useEffect, useMemo, useState } from "react";
 import { FlatList, Text, View } from "react-native";
 
 export default function HiddenMediaScreen() {
-    const {
-        fetchHiddenMedia,
-        unhideVideo,
-        unhideAlbum,
-        isSelectionMode,
-        clearSelection,
-        toggleSelection,
-        unhideMultipleAlbums,
-        unhideMultipleVideos,
-    } = useMedia();
+    const store = useMediaStore();
+    const { isSelectionMode, clearSelection, toggleSelection } = useSelection();
     const { safePush, safeBack } = useSafeNavigation();
 
-    const [data, setData] = useState<{ albums: Album[]; videos: VideoMedia[] }>({ albums: [], videos: [] });
+    const [data, setData] = useState<{ albums: Album[]; videos: Video[] }>({ albums: [], videos: [] });
     const [isLoading, setIsLoading] = useState(true);
     const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
     const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
 
     const loadData = async () => {
         setIsLoading(true);
-        const res = await fetchHiddenMedia();
-        setData(res);
+        const albums = await store.repo.getHiddenAlbums();
+        const allVideos = await store.repo.getVideos(undefined, true);
+        const hiddenVideos = allVideos.filter((v) => (v as any).isHidden);
+        setData({ albums: albums.map((a: any) => ({ ...a })), videos: hiddenVideos.map((v: any) => ({ ...v })) });
         setIsLoading(false);
     };
 
@@ -69,11 +66,8 @@ export default function HiddenMediaScreen() {
     );
 
     const handleUnhide = async (item: any) => {
-        if (item.type === "video" || item.uri) {
-            await unhideVideo(item.id);
-        } else {
-            await unhideAlbum(item.id);
-        }
+        const obj = store.getVideo(item.id) ?? store.getAlbum(item.id);
+        await obj?.unhide();
         loadData();
     };
 
@@ -145,8 +139,8 @@ export default function HiddenMediaScreen() {
                                     const albumIds = selectedItems.filter((item) => item.type === "album").map((a) => a.id);
                                     const videoIds = selectedItems.filter((item) => item.type === "video").map((v) => v.id);
 
-                                    if (albumIds.length > 0) unhideMultipleAlbums(albumIds);
-                                    if (videoIds.length > 0) unhideMultipleVideos(videoIds);
+                                    if (albumIds.length > 0) AlbumDomain.unhideMany(albumIds, store);
+                                    if (videoIds.length > 0) Video.unhideMany(videoIds, store);
 
                                     loadData();
                                     clearSelection();

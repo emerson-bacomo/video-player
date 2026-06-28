@@ -1,5 +1,5 @@
 import { AlertTriangle, Database } from "lucide-react-native";
-import React from "react";
+import React, { useState } from "react";
 import { Text, View } from "react-native";
 import { Icon } from "./Icon";
 import { ThemedButton } from "./Themed";
@@ -10,7 +10,7 @@ interface EmptyAlbumStateProps {
 }
 
 export const EmptyAlbumState = ({ loading, onScan }: EmptyAlbumStateProps) => {
-    const [scanError, setScanError] = React.useState<string | null>(null);
+    const [scanError, setScanError] = useState<string | null>(null);
 
     if (loading) return null;
 

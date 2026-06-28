@@ -1,9 +1,10 @@
 import { AlertCircle, CheckCircle2, ChevronDown, ChevronLeft, Database, Film, Info } from "lucide-react-native";
 import React, { useEffect, useRef, useState } from "react";
+import type { FC } from "react";
 import { ActivityIndicator, LayoutAnimation, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { useIsFocused } from "@react-navigation/native";
-import { useMedia } from "../hooks/useMedia";
+import { useLoadingTask } from "@/context/LoadingTaskContext";
 import { useStableSafeAreaInsets } from "@/hooks/useStableSafeAreaInsets";
 
 import { cn } from "../lib/utils";
@@ -35,9 +36,9 @@ export interface LoadingStatusProps {
     forceHidden?: boolean;
 }
 
-export const LoadingStatus: React.FC<LoadingStatusProps> = ({ popupSide = "bottom", onBeforeSet, forceHidden = false }) => {
+export const LoadingStatus: FC<LoadingStatusProps> = ({ popupSide = "bottom", onBeforeSet, forceHidden = false }) => {
     const { loadingTask, isLoadingPopupVisible, setLoadingPopupVisible, isLoadingExpanded, setLoadingExpanded, setOnBeforeSet } =
-        useMedia();
+        useLoadingTask();
     const { width: screenWidth } = useWindowDimensions();
     const ARROW_WIDTH = 12;
     const POPUP_GAP = 8;

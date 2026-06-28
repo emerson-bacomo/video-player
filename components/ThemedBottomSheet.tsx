@@ -6,7 +6,8 @@ import {
     BottomSheetScrollView as GBottomSheetScrollView,
 } from "@gorhom/bottom-sheet";
 import { cssInterop } from "nativewind";
-import React, { useCallback, useEffect } from "react";
+import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import type { ForwardRefExoticComponent, RefAttributes, ReactNode } from "react";
 import { BackHandler, useWindowDimensions } from "react-native";
 
 // 1. Define the interface for our new interop props
@@ -16,8 +17,8 @@ interface StyledBottomSheetModalProps extends BottomSheetModalProps {
 }
 
 // 2. Create a typed version of the component that includes the interop props
-const BottomSheetModal = GBottomSheetModal as React.ForwardRefExoticComponent<
-    StyledBottomSheetModalProps & React.RefAttributes<GBottomSheetModal>
+const BottomSheetModal = GBottomSheetModal as ForwardRefExoticComponent<
+    StyledBottomSheetModalProps & RefAttributes<GBottomSheetModal>
 >;
 
 // 3. Enable Tailwind classes for BottomSheetModal's inner styles at runtime
@@ -44,15 +45,15 @@ cssInterop(ThemedBottomSheetFlatList, {
 
 interface ThemedBottomSheetProps {
     isVisible: boolean;
-    children?: React.ReactNode;
+    children?: ReactNode;
     onClose: () => void;
 }
 
 export const ThemedBottomSheet = ({ isVisible, children, onClose }: ThemedBottomSheetProps) => {
     const { height: screenHeight } = useWindowDimensions();
-    const bottomSheetModalRef = React.useRef<GBottomSheetModal>(null);
+    const bottomSheetModalRef = useRef<GBottomSheetModal>(null);
 
-    React.useEffect(() => {
+    useEffect(() => {
         if (isVisible) {
             bottomSheetModalRef.current?.present();
         } else {
@@ -80,7 +81,7 @@ export const ThemedBottomSheet = ({ isVisible, children, onClose }: ThemedBottom
         [],
     );
 
-    const snapPoints = React.useMemo(() => ["80%"], []);
+    const snapPoints = useMemo(() => ["80%"], []);
 
     return (
         <BottomSheetModal

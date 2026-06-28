@@ -2,13 +2,15 @@ import { LinearGradient } from "expo-linear-gradient";
 import { router, usePathname } from "expo-router";
 import { ChevronLeft, ChevronRight, Maximize2, Play, RotateCcw, X } from "lucide-react-native";
 import React, { useEffect, useRef, useState } from "react";
+import type { FC } from "react";
 import { Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
 import { useFloatingPlayer } from "../context/FloatingPlayerContext";
-import { useMedia } from "../hooks/useMedia";
+import { useMediaStore } from "@/hooks/MediaStoreBridge/MediaStoreProvider";
+import { useVideo } from "@/hooks/MediaStoreBridge/useMediaStoreVideo";
 import { cn } from "../utils/cn";
 import { CorePlayer } from "./CorePlayer";
 
@@ -56,33 +58,29 @@ function getNearestCorner(
     return best;
 }
 
-export const FloatingPlayer: React.FC = () => {
+export const FloatingPlayer: FC = () => {
     const { lastPlayed, showFloater, dismissFloater } = useFloatingPlayer();
-    const { allAlbumsVideos, getVideoById } = useMedia();
+    const store = useMediaStore();
+    const liveVideo = useVideo(lastPlayed?.id);
     const insets = useSafeAreaInsets();
     const pathname = usePathname();
     const { width: screenW, height: screenH } = useWindowDimensions();
     const playerRef = useRef<any>(null);
 
     // ── Live metadata ──────────────────────────────────────────────────────
-    const liveVideo = React.useMemo(() => {
-        if (!lastPlayed?.id || !lastPlayed?.albumId) return null;
-        const albumVids = allAlbumsVideos[lastPlayed.albumId];
-        let video = albumVids?.find((v) => v.id === lastPlayed.id) || null;
-        return video;
-    }, [lastPlayed?.id, lastPlayed?.albumId, allAlbumsVideos, getVideoById]);
+    // liveVideo provided by useVideo() bridge hook
 
     useEffect(() => {
         if (lastPlayed?.id) {
-            // Do not dismiss if allAlbumsVideos is completely empty (still initializing)
-            if (Object.keys(allAlbumsVideos).length === 0) return;
+            // Do not dismiss if store is still initializing
+            if (store.getAlbums().length === 0) return;
 
             if (!liveVideo) {
                 toast.error("Last played video not found.");
                 dismissFloater();
             }
         }
-    }, [lastPlayed?.id, liveVideo, dismissFloater, allAlbumsVideos]);
+    }, [lastPlayed?.id, liveVideo, dismissFloater, store]);
 
     const displayTitle = liveVideo?.title || "Video Player";
 

@@ -1,28 +1,28 @@
 import { useTheme } from "@/context/ThemeContext";
 import { useSafeNavigation } from "@/hooks/useSafeNavigation";
-import { VideoMedia } from "@/types/useMedia";
+import type { Video } from "@/hooks/domain/Video";
 import { renderHighlight } from "@/utils/textUtils";
 import { Film, MoreVertical } from "lucide-react-native";
-import React from "react";
+import React, { memo, useMemo } from "react";
 import { Image, Pressable, Text, TouchableOpacity, View } from "react-native";
-import { useMedia } from "../hooks/useMedia";
+import { useSelection } from "@/context/SelectionContext";
 import { Icon } from "./Icon";
 import { SelectionOverlay } from "./SelectionOverlay";
 import { Skeleton } from "./Skeleton";
 import { VideoBadges } from "./VideoBadges";
 
 interface VideoItemProps {
-    item: VideoMedia;
+    item: Video;
     searchQuery?: string;
     noEllipsis?: boolean;
-    onPress?: (item: VideoMedia) => void;
-    onLongPress?: (item: VideoMedia) => void;
-    onInfoPress?: (item: VideoMedia) => void;
-    onMenuPress?: (item: VideoMedia) => void;
+    onPress?: (item: Video) => void;
+    onLongPress?: (item: Video) => void;
+    onInfoPress?: (item: Video) => void;
+    onMenuPress?: (item: Video) => void;
     width?: number;
 }
 
-export const VideoItemSkeleton = React.memo(({ width }: { width?: number }) => (
+export const VideoItemSkeleton = memo(({ width }: { width?: number }) => (
     <View className="px-2 mb-6" style={width ? { width } : { flex: 1 }}>
         <View className="w-full aspect-[16/10] bg-card rounded-xl overflow-hidden border border-border/50 shadow-md mb-2">
             <Skeleton className="w-full h-full" />
@@ -36,10 +36,10 @@ export const VideoItemSkeleton = React.memo(({ width }: { width?: number }) => (
 
 VideoItemSkeleton.displayName = "VideoItemSkeleton";
 
-export const VideoItem = React.memo(
+export const VideoItem = memo(
     ({ item, searchQuery, noEllipsis, onPress, onLongPress, onInfoPress, onMenuPress, width }: VideoItemProps) => {
         const { colors } = useTheme();
-        const { isSelectionMode, selectedIds, toggleSelection } = useMedia();
+        const { isSelectionMode, selectedIds, toggleSelection } = useSelection();
         const { safePush } = useSafeNavigation();
 
         const thumb = item.thumbnail;
@@ -61,7 +61,7 @@ export const VideoItem = React.memo(
             timeDisplay = `${playedStr} / ${totalTimeStr}`;
         }
 
-        const title = React.useMemo(
+        const title = useMemo(
             () => renderHighlight(item.title, searchQuery, colors.primary, noEllipsis),
             [item.title, searchQuery, colors.primary, noEllipsis],
         );

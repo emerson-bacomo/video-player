@@ -1,5 +1,5 @@
 import { DEFAULT_SORT_SCOPE, DEFAULT_SORT_TYPE } from "@/constants/defaults";
-import { Album, VideoMedia } from "@/types/useMedia";
+import { AlbumData, VideoData } from "@/types/useMedia";
 import * as SQLite from "expo-sqlite";
 
 export const db = SQLite.openDatabaseSync("player.db");
@@ -195,8 +195,8 @@ export const getAllPlaybackDataDb = () => {
 };
 
 // --- Album Functions ---
-export const getHiddenAlbumsDb = (): Album[] => {
-    const results = db.getAllSync<Album>(`
+export const getHiddenAlbumsDb = (): AlbumData[] => {
+    const results = db.getAllSync<AlbumData>(`
         SELECT *, (SELECT COUNT(*) FROM videos WHERE albumId = albums.id AND isHidden = 1) as assetCount 
         FROM albums 
         WHERE isHidden = 1
@@ -224,7 +224,7 @@ export const getHiddenAlbumsDb = (): Album[] => {
     });
 };
 
-export const saveAlbumsDb = (albums: Album[]) => {
+export const saveAlbumsDb = (albums: AlbumData[]) => {
     db.execSync("DELETE FROM albums");
     const stmt = db.prepareSync(
         "INSERT INTO albums (id, title, lastModified, thumbnail, videoSortSettingScope, videoSortType, albumName, uri, isHidden, prefixOptions, selectedPrefixOptions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -248,7 +248,7 @@ export const saveAlbumsDb = (albums: Album[]) => {
 
 // Incremental, non-destructive album persistence for long-running syncs.
 // This avoids losing scanned progress when the app is terminated before final bulk save.
-export const upsertAlbumDb = (album: Album) => {
+export const upsertAlbumDb = (album: AlbumData) => {
     const insertStmt = db.prepareSync(
         "INSERT OR IGNORE INTO albums (id, title, lastModified, thumbnail, videoSortSettingScope, videoSortType, albumName, uri, isHidden, prefixOptions, selectedPrefixOptions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
@@ -284,8 +284,8 @@ export const upsertAlbumDb = (album: Album) => {
     ]);
 };
 
-export const getAlbumsDb = (): Album[] => {
-    const results = db.getAllSync<Album>(`
+export const getAlbumsDb = (): AlbumData[] => {
+    const results = db.getAllSync<AlbumData>(`
         SELECT *, (SELECT COUNT(*) FROM videos WHERE albumId = albums.id AND isHidden = 0) as assetCount 
         FROM albums 
         WHERE isHidden = 0
@@ -365,7 +365,7 @@ export const renameAlbumDb = (albumId: string, title: string) => {
 };
 
 // --- Video Functions ---
-export const addVideosDb = (videos: VideoMedia[]) => {
+export const addVideosDb = (videos: VideoData[]) => {
     if (!videos || videos.length === 0) return;
 
     const stmt = db.prepareSync(`
@@ -409,7 +409,7 @@ export const addVideosDb = (videos: VideoMedia[]) => {
     });
 };
 
-export const saveVideosDb = (albumId: string | null, videos: VideoMedia[]) => {
+export const saveVideosDb = (albumId: string | null, videos: VideoData[]) => {
     if (albumId) {
         db.execSync(`DELETE FROM videos WHERE albumId = '${albumId}'`);
     } else {
@@ -453,7 +453,7 @@ export const getVideosForAlbumDb = (albumId: string) => {
 };
 
 export const getRecentlyPlayedVideosDb = (limit: number = 200) => {
-    return db.getAllSync<VideoMedia>(
+    return db.getAllSync<VideoData>(
         "SELECT * FROM videos WHERE lastOpenedTime > 0 AND isHidden = 0 ORDER BY lastOpenedTime DESC LIMIT ?",
         [limit],
     );

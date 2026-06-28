@@ -1,20 +1,17 @@
 import { AlbumVideos } from "@/components/AlbumVideos";
 import { useMedia } from "@/hooks/useMedia";
-import { DEFAULT_SORT_SCOPE } from "@/constants/defaults";
+import { useAlbum, useAlbumVideos } from "@/hooks/MediaStoreBridge/useMediaStoreAlbums";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useEffect } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 
 const AlbumVideosScreen = () => {
     const { id } = useLocalSearchParams<{ id: string }>();
-    const { allAlbum, allAlbumsVideos, performSmartSync, getActiveVideoSort } = useMedia();
-    const [isSyncing, setIsSyncing] = React.useState(false);
-    const [isLoading, setIsLoading] = React.useState(true);
+    const { performSmartSync } = useMedia();
+    const [isSyncing, setIsSyncing] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
 
-    const album = allAlbum[id] || null;
-    const videos = allAlbumsVideos[id] || null;
-
-    const activeVideoSort = getActiveVideoSort(album);
-    const videoSortMode = album?.videoSortSettingScope || DEFAULT_SORT_SCOPE;
+    const album = useAlbum(id ?? "") ?? null;
+    const videos = useAlbumVideos(id ?? "");
 
     const startSyncCachedData = useCallback(
         (isManual: boolean = false) => {
@@ -53,6 +50,8 @@ const AlbumVideosScreen = () => {
         }
     }, [album, isLoading]);
 
+    if (!album) return null;
+
     return (
         <AlbumVideos
             album={album}
@@ -60,8 +59,8 @@ const AlbumVideosScreen = () => {
             onRefresh={handleRefresh}
             isSyncing={isSyncing}
             isLoading={isLoading}
-            activeVideoSort={activeVideoSort}
-            videoSortMode={videoSortMode}
+            activeVideoSort={album.videoSort}
+            videoSortMode={album.videoSortMode}
         />
     );
 };

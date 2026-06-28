@@ -1,8 +1,9 @@
 import { useTheme } from "@/context/ThemeContext";
-import { useMedia } from "@/hooks/useMedia";
+import { useSelection } from "@/context/SelectionContext";
 import { router } from "expo-router";
 import { CheckSquare, ChevronLeft, MoreVertical, Search, Square, X, type LucideIcon } from "lucide-react-native";
-import React from "react";
+import React, { createContext, useContext, useLayoutEffect, useRef, useState } from "react";
+import type { Dispatch, ReactNode, RefObject, SetStateAction } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import { cn } from "@/utils/cn";
 import { Icon } from "./Icon";
@@ -17,21 +18,21 @@ export interface SelectionAction {
 
 interface SelectionActionsContextType {
     actions: SelectionAction[] | null;
-    setActions: React.Dispatch<React.SetStateAction<SelectionAction[] | null>>;
+    setActions: Dispatch<SetStateAction<SelectionAction[] | null>>;
     totalItems: number;
-    setTotalItems: React.Dispatch<React.SetStateAction<number>>;
-    dataRef: React.RefObject<any[] | null>;
+    setTotalItems: Dispatch<SetStateAction<number>>;
+    dataRef: RefObject<any[] | null>;
 }
 
 interface HeaderProps {
-    children: React.ReactNode;
+    children: ReactNode;
     disableSelectionMode?: boolean;
 }
 
 const Header = ({ children, disableSelectionMode }: HeaderProps) => {
-    const [customActions, setCustomActions] = React.useState<SelectionAction[] | null>(null);
-    const [totalItems, setTotalItems] = React.useState(0);
-    const dataRef = React.useRef<any[] | null>(null);
+    const [customActions, setCustomActions] = useState<SelectionAction[] | null>(null);
+    const [totalItems, setTotalItems] = useState(0);
+    const dataRef = useRef<any[] | null>(null);
 
     return (
         <SelectionActionsContext.Provider
@@ -79,7 +80,7 @@ const Title = ({ title, subtitle }: TitleProps) => {
     );
 };
 
-const Actions = ({ children }: { children: React.ReactNode }) => {
+const Actions = ({ children }: {     children: ReactNode }) => {
     return <View className="flex-row items-center gap-2">{children}</View>;
 };
 
@@ -91,11 +92,11 @@ const SearchAction = () => {
     );
 };
 
-const SelectionActionsContext = React.createContext<SelectionActionsContextType | null>(null);
+const SelectionActionsContext = createContext<SelectionActionsContextType | null>(null);
 
 const SelectionMode = () => {
-    const selectionActions = React.useContext(SelectionActionsContext);
-    const { selectedIds, isSelectionMode, clearSelection, selectAll } = useMedia();
+    const selectionActions = useContext(SelectionActionsContext);
+    const { selectedIds, isSelectionMode, clearSelection, selectAll } = useSelection();
     const { colors } = useTheme();
 
     if (!isSelectionMode) return null;
@@ -164,22 +165,22 @@ const HeaderNamespace = Object.assign(Header, {
     Actions,
     SearchAction,
     SelectionActions: ({ actions, data }: { actions: SelectionAction[]; data?: any[] }) => {
-        const context = React.useContext(SelectionActionsContext);
+        const context = useContext(SelectionActionsContext);
 
         // Store setter refs so the layout effect doesn't depend on `context`
         // (which is a new object every Header render — causes the effect to re-run
         // and its cleanup to reset actions to null)
-        type SetActions = React.Dispatch<React.SetStateAction<SelectionAction[] | null>>;
-        type SetTotalItems = React.Dispatch<React.SetStateAction<number>>;
-        const setActionsRef = React.useRef<SetActions | null>(null);
-        const setTotalItemsRef = React.useRef<SetTotalItems | null>(null);
+        type SetActions = Dispatch<SetStateAction<SelectionAction[] | null>>;
+        type SetTotalItems = Dispatch<SetStateAction<number>>;
+        const setActionsRef = useRef<SetActions | null>(null);
+        const setTotalItemsRef = useRef<SetTotalItems | null>(null);
         if (context) {
             setActionsRef.current = context.setActions;
             setTotalItemsRef.current = context.setTotalItems;
             context.dataRef.current = data || null;
         }
 
-        React.useLayoutEffect(() => {
+        useLayoutEffect(() => {
             const setActions = setActionsRef.current;
             const setTotalItems = setTotalItemsRef.current;
             if (!setActions || !setTotalItems) return;

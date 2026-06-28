@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
 import { Marker, MarkerPair } from "@/types/useMedia";
-import React from "react";
+import React, { memo, useRef } from "react";
+import type { FC } from "react";
 import { View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
@@ -17,7 +18,7 @@ interface MarkerThumbProps {
     isLandscape?: boolean;
 }
 
-const MarkerThumb = React.memo(
+const MarkerThumb = memo(
     ({
         marker,
         duration,
@@ -30,7 +31,7 @@ const MarkerThumb = React.memo(
         onDragEnd,
         isLandscape,
     }: MarkerThumbProps) => {
-        const dragStartTime = React.useRef<number | null>(null);
+        const dragStartTime = useRef<number | null>(null);
         const HORIZONTAL_PADDING = 0;
         const DRAG_DAMPING = 0.85;
 
@@ -139,7 +140,7 @@ interface ClippingOverlayProps {
     isLandscape?: boolean;
 }
 
-export const ClippingOverlay: React.FC<ClippingOverlayProps> = ({
+export const ClippingOverlay: FC<ClippingOverlayProps> = ({
     markers,
     markerPairs,
     duration,

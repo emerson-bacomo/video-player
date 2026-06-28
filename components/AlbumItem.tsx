@@ -1,8 +1,9 @@
 import { Folder, MoreVertical } from "lucide-react-native";
-import React from "react";
+import React, { memo, useMemo } from "react";
 import { Image, Text, TouchableOpacity, View } from "react-native";
-import { useMedia } from "../hooks/useMedia";
-import { Album } from "../types/useMedia";
+import { useSelection } from "@/context/SelectionContext";
+import { useAlbumVideos } from "@/hooks/MediaStoreBridge/useMediaStoreAlbums";
+import type { Album } from "@/hooks/domain/Album";
 import { Icon } from "./Icon";
 import { SelectionOverlay } from "./SelectionOverlay";
 import { Skeleton } from "./Skeleton";
@@ -16,7 +17,7 @@ interface AlbumItemProps {
     width?: number;
 }
 
-export const AlbumItemSkeleton = React.memo(({ width }: { width?: number }) => (
+export const AlbumItemSkeleton = memo(({ width }: { width?: number }) => (
     <View className="px-2 mb-6" style={width ? { width } : { flex: 1 }}>
         <Skeleton className="aspect-square rounded-2xl mb-2 border border-border" />
         <View className="px-1 mt-1 gap-1.5">
@@ -28,17 +29,17 @@ export const AlbumItemSkeleton = React.memo(({ width }: { width?: number }) => (
 
 AlbumItemSkeleton.displayName = "AlbumItemSkeleton";
 
-export const AlbumItem = React.memo(({ item, onPress, onLongPress, onInfoPress, onMenuPress, width }: AlbumItemProps) => {
-    const { isSelectionMode, selectedIds, toggleSelection, allAlbumsVideos } = useMedia();
+export const AlbumItem = memo(({ item, onPress, onLongPress, onInfoPress, onMenuPress, width }: AlbumItemProps) => {
+    const { isSelectionMode, selectedIds, toggleSelection } = useSelection();
+    const albumVideos = useAlbumVideos(item.id);
     const isSelected = selectedIds.has(item.id);
 
-    const hasNew = React.useMemo(() => {
-        const videos = allAlbumsVideos[item.id] || [];
-        for (let i = 0; i < videos.length; i++) {
-            if (videos[i].isNewOverride || videos[i].lastPlayedSec === -1) return true;
+    const hasNew = useMemo(() => {
+        for (let i = 0; i < albumVideos.length; i++) {
+            if (albumVideos[i].isNewOverride || albumVideos[i].lastPlayedSec === -1) return true;
         }
         return false;
-    }, [allAlbumsVideos, item.id]);
+    }, [albumVideos]);
 
     return (
         <View className="px-2 mb-6" style={width ? { width } : { flex: 1 }}>

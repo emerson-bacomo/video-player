@@ -1,4 +1,5 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { TouchableWithoutFeedback, View, ViewStyle } from "react-native";
 import { Portal } from "react-native-portalize";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming, Easing } from "react-native-reanimated";
@@ -25,7 +26,7 @@ interface ModalProps {
     /** "none" animates only the backdrop; children handle their own animation. */
     animationType?: "fade" | "scale" | "none";
     backdropOpacity?: number;
-    children?: React.ReactNode;
+    children?: ReactNode;
     style?: ViewStyle;
     /** When true (default), content is centered. When false, content fills absolute space. */
     center?: boolean;

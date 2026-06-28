@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import type { FC } from "react";
 import { View, Text, Pressable, useWindowDimensions } from "react-native";
 import { Portal } from "react-native-portalize";
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, withDelay, Easing } from "react-native-reanimated";
@@ -11,7 +12,7 @@ interface ScreenshotOverlayProps {
     onDismiss: () => void;
 }
 
-export const ScreenshotOverlay: React.FC<ScreenshotOverlayProps> = ({ visible, imageUri, filepath, onDismiss }) => {
+export const ScreenshotOverlay: FC<ScreenshotOverlayProps> = ({ visible, imageUri, filepath, onDismiss }) => {
     const { width, height } = useWindowDimensions();
     const [renderImage, setRenderImage] = useState(false);
 

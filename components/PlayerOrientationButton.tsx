@@ -1,12 +1,13 @@
 import * as ScreenOrientation from "expo-screen-orientation";
 import { Cpu, Monitor, Smartphone } from "lucide-react-native";
 import React from "react";
+import type { FC } from "react";
 import { TouchableOpacity } from "react-native";
 import { usePlayerContext } from "../context/PlayerContext";
 
 export type OrientationMode = "portrait" | "landscape" | "default";
 
-export const PlayerOrientationButton: React.FC = () => {
+export const PlayerOrientationButton: FC = () => {
     const { orientation, setSessionOrientation } = usePlayerContext();
 
     const toggleOrientation = async () => {

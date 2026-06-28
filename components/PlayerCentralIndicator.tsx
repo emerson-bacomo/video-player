@@ -1,5 +1,6 @@
 import { ChevronsLeft, ChevronsRight, Pause, Play, Sun, Zap } from "lucide-react-native";
 import React from "react";
+import type { FC } from "react";
 import { Text, View } from "react-native";
 import Animated, { FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -20,7 +21,7 @@ export interface PlayerCentralIndicatorProps {
     } | null;
 }
 
-export const PlayerCentralIndicator: React.FC = () => {
+export const PlayerCentralIndicator: FC = () => {
     const { centralIndicator: indicator, panSeekTime, panStartTime, showControls, headerLayout } = usePlayerContext();
     const pillHeight = useSharedValue(0);
     const insets = useSafeAreaInsets();

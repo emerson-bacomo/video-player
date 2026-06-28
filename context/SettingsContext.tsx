@@ -1,7 +1,8 @@
 import { DEFAULT_SETTINGS, Settings } from "@/constants/defaults";
 import { addLogDb } from "@/utils/db";
 import * as FileSystem from "expo-file-system/legacy";
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 
 const SETTINGS_FILE = `${FileSystem.documentDirectory}settings.json`;
 
@@ -14,7 +15,7 @@ interface SettingsContextType {
 
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
 
-export const SettingsProvider = ({ children }: { children: React.ReactNode }) => {
+export const SettingsProvider = ({ children }: { children: ReactNode }) => {
     const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
     const [loading, setLoading] = useState(true);
 
@@ -58,7 +59,7 @@ export const SettingsProvider = ({ children }: { children: React.ReactNode }) =>
         loadSettings();
     }, [loadSettings]);
 
-    const contextValue = React.useMemo(
+    const contextValue = useMemo(
         () => ({
             settings,
             updateSettings,

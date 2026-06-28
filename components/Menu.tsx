@@ -1,5 +1,6 @@
 import { cn } from "@/utils/cn";
-import React, { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { Children, createContext, isValidElement, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { ReactElement, ReactNode, RefObject } from "react";
 import {
     DimensionValue,
     FlatList,
@@ -18,8 +19,8 @@ type MenuVariant = "POPUP" | "MODAL";
 interface MenuContextType {
     visible: boolean;
     setVisible: (v: boolean) => void;
-    triggerRef: React.RefObject<View>;
-    raisedRef: React.RefObject<View>;
+    triggerRef: RefObject<View>;
+    raisedRef: RefObject<View>;
     menuLayout: {
         top: number;
         left: number;
@@ -39,11 +40,11 @@ interface MenuContextType {
     anchorHorizontal?: "left" | "right" | "center";
     horizontalScreenFill: boolean;
     width: DimensionValue | "fit-content";
-    updateLayout: (customTriggerRef?: React.RefObject<View>, customRaisedRef?: React.RefObject<View>) => Promise<void>;
-    triggerElement: React.ReactElement<TouchableOpacityProps> | null;
-    raisedElement: React.ReactNode | null;
-    setRaisedElement: (el: React.ReactNode | null) => void;
-    children: React.ReactNode;
+    updateLayout: (customTriggerRef?: RefObject<View>, customRaisedRef?: RefObject<View>) => Promise<void>;
+    triggerElement: ReactElement<TouchableOpacityProps> | null;
+    raisedElement: ReactNode | null;
+    setRaisedElement: (el: ReactNode | null) => void;
+    children: ReactNode;
     closeMenu: () => void;
     onClose?: () => void;
     activeData: any;
@@ -53,8 +54,8 @@ interface MenuContextType {
 const MenuContext = createContext<MenuContextType | null>(null);
 
 interface RaiseContextType {
-    raisedRef: React.RefObject<View>;
-    children: React.ReactNode;
+    raisedRef: RefObject<View>;
+    children: ReactNode;
 }
 
 const RaiseContext = createContext<RaiseContextType | null>(null);
@@ -72,7 +73,7 @@ export const Menu = ({
     onClose,
     onOpen,
 }: {
-    children: React.ReactNode;
+    children: ReactNode;
     variant?: MenuVariant;
     anchorHorizontal?: "left" | "right" | "center";
     horizontalScreenFill?: boolean;
@@ -92,7 +93,7 @@ export const Menu = ({
         triggerHeight: 0,
     });
     const [raisedLayout, setRaisedLayout] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
-    const [raisedElement, setRaisedElement] = useState<React.ReactNode | null>(null);
+    const [raisedElement, setRaisedElement] = useState<ReactNode | null>(null);
     const [activeData, setInternalActiveData] = useState<any>(null);
 
     const triggerRef = useRef<View>(null);
@@ -120,7 +121,7 @@ export const Menu = ({
         }
     };
 
-    const updateLayout = (customTriggerRef?: React.RefObject<View>, customRaisedRef?: React.RefObject<View>) => {
+    const updateLayout = (customTriggerRef?: RefObject<View>, customRaisedRef?: RefObject<View>) => {
         return new Promise<void>((resolve) => {
             if (customTriggerRef) activeRefs.current.trigger = customTriggerRef;
             if (customRaisedRef) activeRefs.current.raised = customRaisedRef;
@@ -166,17 +167,17 @@ export const Menu = ({
         }
     }, [visible, children, menuLayout.top, activeData]);
 
-    const triggerElement = React.Children.toArray(children).find(
-        (child) => React.isValidElement(child) && child.type === Trigger,
-    ) as React.ReactElement<TouchableOpacityProps> | null;
+    const triggerElement = Children.toArray(children).find(
+        (child) => isValidElement(child) && child.type === Trigger,
+    ) as ReactElement<TouchableOpacityProps> | null;
 
     return (
         <MenuContext.Provider
             value={{
                 visible,
                 setVisible,
-                triggerRef: triggerRef as React.RefObject<View>,
-                raisedRef: raisedRef as React.RefObject<View>,
+                triggerRef: triggerRef as RefObject<View>,
+                raisedRef: raisedRef as RefObject<View>,
                 menuLayout,
                 raisedLayout,
                 variant,
@@ -272,7 +273,7 @@ const Content = ({
     children,
     className,
 }: {
-    children: React.ReactNode | ((data: any) => React.ReactNode);
+    children: ReactNode | ((data: any) => ReactNode);
     className?: string;
 }) => {
     const context = useContext(MenuContext);
@@ -462,12 +463,12 @@ const Content = ({
                                                 : null
                                             : children;
 
-                                    const childrenArray = React.Children.toArray(resolvedChildren);
+                                    const childrenArray = Children.toArray(resolvedChildren);
                                     const items = childrenArray.filter(
-                                        (child) => !React.isValidElement(child) || child.type !== EmptyContent,
+                                        (child) => !isValidElement(child) || child.type !== EmptyContent,
                                     );
                                     const empty = childrenArray.find(
-                                        (child) => React.isValidElement(child) && child.type === EmptyContent,
+                                        (child) => isValidElement(child) && child.type === EmptyContent,
                                     );
 
                                     if (items.length > 0) {
@@ -484,7 +485,7 @@ const Content = ({
     );
 };
 
-const Header = ({ children, className }: { children: React.ReactNode; className?: string }) => {
+const Header = ({ children, className }: { children: ReactNode; className?: string }) => {
     return (
         <View className={cn("flex-row items-center justify-between px-5 h-14 border-b border-border", className)}>
             {children}
@@ -503,11 +504,11 @@ const List = <T,>({ className, ...props }: FlatListProps<T>) => {
     );
 };
 
-const EmptyContent = ({ children }: { children: React.ReactNode }) => {
+const EmptyContent = ({ children }: { children: ReactNode }) => {
     return <>{children}</>;
 };
 
-const Raise = ({ children }: { children: React.ReactNode }) => {
+const Raise = ({ children }: { children: ReactNode }) => {
     const raisedRef = useRef<View>(null);
 
     return (

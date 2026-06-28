@@ -2,6 +2,7 @@ import { Icon } from "@/components/Icon";
 import { ChevronDown, ChevronRight, Folder, Palette, Settings, Video } from "lucide-react-native";
 import * as Icons from "lucide-react-native";
 import React, { useMemo, useState } from "react";
+import type { ReactElement } from "react";
 import { SectionList, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ConfigData } from "@/utils/configManager";
@@ -9,7 +10,7 @@ import { cn } from "@/lib/utils";
 
 interface VpcPreviewProps {
     configData: ConfigData;
-    ListHeaderComponent?: React.ReactElement;
+    ListHeaderComponent?: ReactElement;
     selectedIds: Set<string>;
     onToggleId: (id: string) => void;
 }

@@ -1,7 +1,9 @@
 import React, { createContext, useContext, useRef, useState, useMemo, useCallback, useEffect } from "react";
+import type { RefObject, Dispatch, SetStateAction, FC, ReactNode } from "react";
 import { CorePlayerRef } from "@/components/CorePlayer";
-import { VideoMedia } from "@/types/useMedia";
-import { useMedia } from "@/hooks/useMedia";
+import type { Video } from "@/hooks/domain/Video";
+import { useAlbumVideos } from "@/hooks/MediaStoreBridge/useMediaStoreAlbums";
+import { useLoadingTask } from "@/context/LoadingTaskContext";
 import { useLocalSearchParams } from "expo-router";
 import { DEFAULT_PLAYED_SEC } from "@/constants/defaults";
 import { usePlayerClip } from "@/hooks/usePlayerClip";
@@ -13,52 +15,52 @@ import { PlayerCentralIndicatorProps } from "@/components/PlayerCentralIndicator
 export interface PlayerContextState {
     videoId?: string;
     albumId?: string;
-    activeVideo: VideoMedia | null;
-    playlist: VideoMedia[];
+    activeVideo: Video | null;
+    playlist: Video[];
     currentIndex: number;
     hasNext: boolean;
     hasPrevious: boolean;
 
-    playerRef: React.RefObject<CorePlayerRef>;
+    playerRef: RefObject<CorePlayerRef>;
 
     paused: boolean;
-    setPaused: React.Dispatch<React.SetStateAction<boolean>>;
+    setPaused: Dispatch<SetStateAction<boolean>>;
     duration: number;
-    setDuration: React.Dispatch<React.SetStateAction<number>>;
+    setDuration: Dispatch<SetStateAction<number>>;
     currentDisplayTime: number;
-    setCurrentDisplayTime: React.Dispatch<React.SetStateAction<number>>;
+    setCurrentDisplayTime: Dispatch<SetStateAction<number>>;
     isEnded: boolean;
-    setIsEnded: React.Dispatch<React.SetStateAction<boolean>>;
+    setIsEnded: Dispatch<SetStateAction<boolean>>;
     playbackRate: number;
-    setPlaybackRate: React.Dispatch<React.SetStateAction<number>>;
+    setPlaybackRate: Dispatch<SetStateAction<number>>;
 
     showControls: boolean;
-    setShowControls: React.Dispatch<React.SetStateAction<boolean>>;
+    setShowControls: Dispatch<SetStateAction<boolean>>;
     isReadyForDisplay: boolean;
-    setIsReadyForDisplay: React.Dispatch<React.SetStateAction<boolean>>;
+    setIsReadyForDisplay: Dispatch<SetStateAction<boolean>>;
 
     resetControlsTimer: (showImmediately?: boolean) => void;
-    controlsTimeout: React.RefObject<any>;
+    controlsTimeout: RefObject<any>;
 
-    isSeekingLock: React.RefObject<boolean>;
+    isSeekingLock: RefObject<boolean>;
     setSeekingLock: (locked: boolean) => void;
 
     clipState: ReturnType<typeof usePlayerClip>;
     screenshotState: ReturnType<typeof usePlayerScreenshot>;
-    isDraggingMarker: React.RefObject<boolean>;
-    isCornerModalOpen: React.RefObject<boolean>;
-    isMenuOpen: React.RefObject<boolean>;
+    isDraggingMarker: RefObject<boolean>;
+    isCornerModalOpen: RefObject<boolean>;
+    isMenuOpen: RefObject<boolean>;
 
     centralIndicator: PlayerCentralIndicatorProps["indicator"] | null;
-    setCentralIndicator: React.Dispatch<React.SetStateAction<PlayerCentralIndicatorProps["indicator"] | null>>;
+    setCentralIndicator: Dispatch<SetStateAction<PlayerCentralIndicatorProps["indicator"] | null>>;
     panSeekTime: number | null;
-    setPanSeekTime: React.Dispatch<React.SetStateAction<number | null>>;
-    panStartTime: React.RefObject<number>;
+    setPanSeekTime: Dispatch<SetStateAction<number | null>>;
+    panStartTime: RefObject<number>;
     showPieMenu: boolean;
-    setShowPieMenu: React.Dispatch<React.SetStateAction<boolean>>;
-    wasPlayingBeforePie: React.RefObject<boolean>;
+    setShowPieMenu: Dispatch<SetStateAction<boolean>>;
+    wasPlayingBeforePie: RefObject<boolean>;
     headerLayout: { y: number; height: number } | null;
-    setHeaderLayout: React.Dispatch<React.SetStateAction<{ y: number; height: number } | null>>;
+    setHeaderLayout: Dispatch<SetStateAction<{ y: number; height: number } | null>>;
 
     sessionOrientation: ScreenOrientation.OrientationLock | null;
     setSessionOrientation: (lock: ScreenOrientation.OrientationLock | null) => void;
@@ -75,14 +77,15 @@ export const usePlayerContext = () => {
     return context;
 };
 
-export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const PlayerProvider: FC<{ children: ReactNode }> = ({ children }) => {
     const { videoId, albumId, initialTime } = useLocalSearchParams<{
         videoId?: string;
         albumId?: string;
         initialTime?: string;
     }>();
 
-    const { allAlbumsVideos, setLoadingTask } = useMedia();
+    const albumVideos = useAlbumVideos(albumId ?? "");
+    const { setLoadingTask } = useLoadingTask();
     const { settings } = useSettings();
 
     const [sessionOrientation, setSessionOrientation] = useState<ScreenOrientation.OrientationLock | null>(null);
@@ -99,14 +102,13 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     const activeVideo = useMemo(() => {
         if (!videoId || !albumId) return null;
-        const albumVids = allAlbumsVideos[albumId] || [];
-        return albumVids.find((v) => v.id === videoId) || null;
-    }, [videoId, albumId, allAlbumsVideos]);
+        return albumVideos.find((v) => v.id === videoId) || null;
+    }, [videoId, albumId, albumVideos]);
 
     const playlist = useMemo(() => {
         if (!albumId) return [];
-        return allAlbumsVideos[albumId] || [];
-    }, [albumId, allAlbumsVideos]);
+        return albumVideos;
+    }, [albumId, albumVideos]);
 
     const currentIndex = playlist.findIndex((v) => v.id === videoId);
     const hasNext = currentIndex !== -1 && currentIndex < playlist.length - 1;

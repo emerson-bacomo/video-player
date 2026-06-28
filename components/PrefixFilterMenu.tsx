@@ -1,6 +1,6 @@
-import { useMedia } from "@/hooks/useMedia";
+import { useLoadingTask } from "@/context/LoadingTaskContext";
 import { Check, ListFilter, RotateCcw } from "lucide-react-native";
-import React from "react";
+import React, { useState } from "react";
 import { ActivityIndicator, Text, TouchableOpacity, View } from "react-native";
 import { cn } from "../utils/cn";
 import { Icon } from "./Icon";
@@ -22,9 +22,9 @@ export const PrefixFilterMenu = ({
     isLoading = false,
 }: PrefixFilterMenuProps) => {
     const hasFilters = selectedOptions.length > 0;
-    const { loadingTask } = useMedia();
+    const { loadingTask } = useLoadingTask();
 
-    const [internalSelectedOptions, setInternalSelectedOptions] = React.useState<string[]>(selectedOptions);
+    const [internalSelectedOptions, setInternalSelectedOptions] = useState<string[]>(selectedOptions);
 
     const handleOpen = () => {
         setInternalSelectedOptions(selectedOptions);

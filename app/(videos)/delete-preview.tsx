@@ -3,8 +3,11 @@ import { Icon } from "@/components/Icon";
 import { ThemedSafeAreaView } from "@/components/Themed";
 import { useDeleteHandler } from "@/hooks/useDeleteHandler";
 import { useMedia } from "@/hooks/useMedia";
+import { useMediaStoreScreenshots } from "@/hooks/MediaStoreBridge/useMediaStoreScreenshots";
+import { useRawAlbums } from "@/hooks/MediaStoreBridge/useMediaStoreRawAlbums";
+import { useSelection } from "@/context/SelectionContext";
 import { useSafeNavigation } from "@/hooks/useSafeNavigation";
-import { Album, VideoMedia } from "@/types/useMedia";
+import type { VideoSortConfig } from "@/types/useMedia";
 import { cn } from "@/utils/cn";
 import { useLocalSearchParams } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -14,19 +17,18 @@ import { FlatList, Image, Text, TouchableOpacity, View } from "react-native";
 
 export default function DeletePreviewPage() {
     // Only `type` comes from URL params — the actual IDs come directly from the
-    // shared selectedIds state in useMedia, avoiding any string serialization.
+    // shared selectedIds state in SelectionContext.
     const { type } = useLocalSearchParams<{ type: "video" | "album" | "screenshot" }>();
     const currentType = Array.isArray(type) ? type[0] : type;
 
+    const albums = useRawAlbums();
     const {
         allAlbumsVideos,
-        albums,
-        screenshots,
-        selectedIds,
         compareByVideoSort,
         compareByAlbumSort,
-        getActiveVideoSort,
     } = useMedia();
+    const { selectedIds } = useSelection();
+    const screenshots = useMediaStoreScreenshots();
 
     const { safeBack } = useSafeNavigation();
 
@@ -35,18 +37,20 @@ export default function DeletePreviewPage() {
     const itemsToDelete = useMemo(() => {
         if (currentType === "video") {
             // Collect all videos across albums that are in selectedIds
-            const matched: VideoMedia[] = [];
+            const matched: any[] = [];
             for (const albumId in allAlbumsVideos) {
                 const albumVideos = allAlbumsVideos[albumId] || [];
                 const albumMatches = albumVideos.filter((v) => v?.id && selectedIds.has(v.id));
                 if (albumMatches.length > 0) {
-                    // Sort each album's matches using that album's active sort config
-                    const activeSort = getActiveVideoSort(albums.find((a) => a.id === albumId) ?? null);
+                    const album = albums.find((a) => a.id === albumId) ?? null;
+                    const activeSort: VideoSortConfig = album?.videoSortSettingScope === "local" && album.videoSortType
+                        ? JSON.parse(album.videoSortType)
+                        : { by: "episode", order: "asc" };
                     albumMatches.sort((a, b) => compareByVideoSort(a, b, activeSort));
                     matched.push(...albumMatches);
                 }
             }
-            return matched as VideoMedia[];
+            return matched;
         } else if (currentType === "screenshot") {
             return screenshots.filter((s) => s?.id && selectedIds.has(s.id)) as {
                 id: string;
@@ -57,21 +61,16 @@ export default function DeletePreviewPage() {
             // Albums — sort using the same comparator as the album list page
             return [...albums.filter((a) => a?.id && selectedIds.has(a.id))].sort((a, b) =>
                 compareByAlbumSort(a, b)
-            ) as Album[];
+            );
         }
-    }, [currentType, selectedIds, allAlbumsVideos, albums, screenshots, compareByVideoSort, compareByAlbumSort, getActiveVideoSort]);
+    }, [currentType, selectedIds, allAlbumsVideos, albums, screenshots, compareByVideoSort, compareByAlbumSort]);
 
     const idList = useMemo(() => itemsToDelete.map((i) => i.id), [itemsToDelete]);
-    const itemUris = useMemo(
-        () => itemsToDelete.map((i) => (i as any).uri).filter(Boolean),
-        [itemsToDelete],
-    );
 
     const { handleDelete, isDeleting } = useDeleteHandler({
         type: currentType,
         idList,
         itemCount: itemsToDelete.length,
-        itemUris,
     });
 
     const renderItem = ({ item }: { item: any }) => {

@@ -2,12 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
 
 import { useMedia } from "@/hooks/useMedia";
+import { useMediaStore } from "@/hooks/MediaStoreBridge/MediaStoreProvider";
+import { useLoadingTask } from "@/context/LoadingTaskContext";
 import { CorePlayerRef } from "@/components/CorePlayer";
-import { ExportOptions, VideoMedia, Marker, MarkerPair } from "@/types/useMedia";
+import { ExportOptions, Marker, MarkerPair } from "@/types/useMedia";
+import type { Video } from "@/hooks/domain/Video";
 import { buildClipDefaultName } from "@/utils/fileNaming";
 
 interface UsePlayerClipProps {
-    activeVideo: VideoMedia | null;
+    activeVideo: Video | null;
     videoId: string | undefined;
     duration: number;
     playerRef: RefObject<CorePlayerRef>;
@@ -66,7 +69,9 @@ export const usePlayerClip = ({
     setPaused,
     currentDisplayTime,
 }: UsePlayerClipProps) => {
-    const { updateVideoMarkers, performExport, setLoadingTask } = useMedia();
+    const { performExport } = useMedia();
+    const store = useMediaStore();
+    const { setLoadingTask } = useLoadingTask();
 
     const isSavingRef = useRef(false);
     const [isClipMode, setIsClipMode] = useState((activeVideo?.markers?.length ?? 0) > 0);
@@ -105,8 +110,10 @@ export const usePlayerClip = ({
     }, [markers, currentDisplayTime]);
 
     const onMarkersChange = useCallback(
-        (m: Marker[]) => videoId && updateVideoMarkers(videoId, m),
-        [videoId, updateVideoMarkers],
+        (m: Marker[]) => {
+            if (videoId) store.getVideo(videoId)?.updateMarkers(m);
+        },
+        [videoId, store],
     );
 
     const addMarker = useCallback(

@@ -1,12 +1,16 @@
 import { SetLoadingTask } from "./useMediaLoadingTask";
 import * as FileSystem from "expo-file-system/legacy";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { Dispatch, SetStateAction, RefObject } from "react";
 import { unstable_batchedUpdates } from "react-native";
 import ExpoFFmpeg from "../modules/expo-ffmpeg";
-import { Album, VideoMedia } from "../types/useMedia";
+import type { AlbumData, VideoData } from "@/types/useMedia";
 import { clearAllThumbnailsDb, getAllVideosDb, updateAlbumThumbnailDb, updateVideoThumbnailDb } from "../utils/db";
 import { getThumbnailUri } from "@/utils/videoUtils";
-import { AlbumSortConfig, VideoSortConfig } from "./useMediaSort";
+import type { VideoSortConfig } from "@/types/useMedia";
+import type { MediaStore } from "@/hooks/MediaStore";
+import { Album } from "./domain/Album";
+import { Video } from "./domain/Video";
 
 const MAX_WORKERS = 4;
 const RESULT_BATCH_SIZE = 3;
@@ -20,25 +24,22 @@ const TASK_IDS = {
 } as const;
 
 interface UseMediaThumbnailGenerationProps {
-    setAlbums: React.Dispatch<React.SetStateAction<Album[]>>;
-    setAllAlbumsVideos: React.Dispatch<React.SetStateAction<Record<string, VideoMedia[]>>>;
-    albumsRef: React.RefObject<Record<string, Album>>;
-    globalVideoSortRef: React.RefObject<VideoSortConfig>;
-    albumSortRef: React.RefObject<AlbumSortConfig>;
-    compareByVideoSort: (a: VideoMedia, b: VideoMedia, vSort?: VideoSortConfig) => number;
-    getActiveVideoSort: (album: Album | null) => VideoSortConfig;
+    setAlbums: Dispatch<SetStateAction<AlbumData[]>>;
+    setAllAlbumsVideos: Dispatch<SetStateAction<Record<string, VideoData[]>>>;
+    albumsRef: RefObject<Record<string, AlbumData>>;
+    store: MediaStore;
     setLoadingTask: SetLoadingTask;
-    mapVideoMetadata: (v: any) => VideoMedia;
+    mapVideoMetadata: (v: any) => VideoData;
 }
+
+const compareByVideoSort = (a: VideoData, b: VideoData, vSort?: VideoSortConfig) =>
+    Video.compareBySort(a, b, vSort);
 
 export const useMediaThumbnailGeneration = ({
     setAlbums,
     setAllAlbumsVideos,
     albumsRef,
-    globalVideoSortRef,
-    albumSortRef,
-    compareByVideoSort,
-    getActiveVideoSort,
+    store,
     setLoadingTask,
     mapVideoMetadata,
 }: UseMediaThumbnailGenerationProps) => {
@@ -46,9 +47,9 @@ export const useMediaThumbnailGeneration = ({
     const isRegeneratingThumbnailsRef = useRef(false);
 
     // Refs for background worker state
-    const thumbnailQueue = useRef<VideoMedia[]>([]);
+    const thumbnailQueue = useRef<VideoData[]>([]);
     const activeWorkers = useRef(0);
-    const resultQueue = useRef<(VideoMedia & { thumbUri: string; bustedUri: string })[]>([]);
+    const resultQueue = useRef<(VideoData & { thumbUri: string; bustedUri: string })[]>([]);
     const isDraining = useRef(false);
     const drainTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastLoadingDetailRef = useRef<string | null>(null);
@@ -78,7 +79,7 @@ export const useMediaThumbnailGeneration = ({
         if (albumId) lastSortKeyRef.current = "";
     }, []);
 
-    const updateAlbumRank = useCallback((albums: Album[]) => {
+    const updateAlbumRank = useCallback((albums: AlbumData[]) => {
         albumRankRef.current = new Map(albums.map((a, i) => [a.id, i]));
         lastSortKeyRef.current = ""; // Force workers to re-sort since the rank has changed
     }, []);
@@ -123,7 +124,7 @@ export const useMediaThumbnailGeneration = ({
     const hasActiveThumbnailWork = useCallback(() => activeWorkers.current > 0 || isDraining.current, []);
 
     const getAlbumThumbnailForVideos = useCallback(
-        (albumVideos: VideoMedia[], sortToUse: VideoSortConfig) => {
+        (albumVideos: VideoData[], sortToUse: VideoSortConfig) => {
             if (albumVideos.length === 0) return undefined;
 
             const sortedVideos = [...albumVideos].sort((a, b) => compareByVideoSort(a, b, sortToUse));
@@ -133,7 +134,7 @@ export const useMediaThumbnailGeneration = ({
     );
 
     const sortByPriority = useCallback(
-        (a: VideoMedia, b: VideoMedia): number => {
+        (a: VideoData, b: VideoData): number => {
             const albumRank = albumRankRef.current;
             const priorityAlbumId = thumbnailGenerationPriorityAlbumIdRef.current;
 
@@ -150,10 +151,10 @@ export const useMediaThumbnailGeneration = ({
             }
 
             const album = albumsRef.current[a.albumId];
-            const activeSort = getActiveVideoSort(album || null);
+            const activeSort = store.getAlbum(album?.id ?? "")?.videoSort ?? Video.globalSortConfig;
             return compareByVideoSort(a, b, activeSort);
         },
-        [compareByVideoSort, getActiveVideoSort, albumsRef],
+        [compareByVideoSort, albumsRef, store],
     );
 
     const finishDraining = useCallback(() => {
@@ -322,7 +323,7 @@ export const useMediaThumbnailGeneration = ({
             while (thumbnailQueue.current.length > 0) {
                 if (thumbnailSessionRef.current !== sessionId) break;
 
-                const sortKey = `${globalVideoSortRef.current.by}-${globalVideoSortRef.current.order}-${albumSortRef.current.by}-${albumSortRef.current.order}`;
+                const sortKey = `${Video.globalSortConfig.by}-${Video.globalSortConfig.order}-${Album.globalSortConfig.by}-${Album.globalSortConfig.order}`;
                 if (lastSortKeyRef.current !== sortKey) {
                     thumbnailQueue.current.sort((a, b) => sortByPriority(a, b));
                     lastSortKeyRef.current = sortKey;
@@ -395,7 +396,7 @@ export const useMediaThumbnailGeneration = ({
     }, [setAlbums, setAllAlbumsVideos, setLoadingTask, cancelThumbnailSession]);
 
     const regenerateVideoThumbnails = useCallback(
-        async (videos: VideoMedia[]) => {
+        async (videos: VideoData[]) => {
             if (videos.length === 0) return;
 
             try {
@@ -448,7 +449,7 @@ export const useMediaThumbnailGeneration = ({
                 });
 
                 // 3. Add to queue
-                const newToQueue: VideoMedia[] = [];
+                const newToQueue: VideoData[] = [];
                 videos.forEach((v) => {
                     const videoToQueue = mapVideoMetadata({ ...v, thumbnail: undefined });
                     if (!thumbnailQueue.current.some((p) => p.id === videoToQueue.id)) {

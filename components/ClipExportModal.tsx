@@ -1,11 +1,13 @@
 import { useTheme } from "@/context/ThemeContext";
 import { cn } from "@/lib/utils";
-import { VideoMedia, ExportOptions, TransitionStyle } from "@/types/useMedia";
+import { ExportOptions, TransitionStyle, SessionClip } from "@/types/useMedia";
+import type { Video } from "@/hooks/domain/Video";
 import { normalizeMediaDestination } from "@/utils/mediaDestination";
 import { secondsToHhmmss } from "@/utils/secondsToHhmmss";
 import * as FileSystem from "expo-file-system/legacy";
 import { Scissors, Volume2, VolumeX } from "lucide-react-native";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import type { FC } from "react";
 import { Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { toast } from "sonner-native";
 import { Icon } from "./Icon";
@@ -20,7 +22,7 @@ import { SelectDropdown } from "./SelectDropdown";
 interface ClipExportModalProps {
     visible: boolean;
     onClose: () => void;
-    video: VideoMedia;
+    video: Video | SessionClip;
     segments: { start: number; end: number }[];
     defaultName: string;
     onExport: (options: ExportOptions) => void;
@@ -136,7 +138,7 @@ const TriangleDown = ({ color = "#71717a", size = 10, className }: { color?: str
 
 // Main component
 
-export const ClipExportModal: React.FC<ClipExportModalProps> = ({
+export const ClipExportModal: FC<ClipExportModalProps> = ({
     visible,
     onClose,
     video,
@@ -540,7 +542,7 @@ export const ClipExportModal: React.FC<ClipExportModalProps> = ({
                                     <Text className="text-zinc-400 text-sm font-mono">{secondsToHhmmss(totalSec)}</Text>
                                 </View>
                                 {segments.map((seg, idx) => (
-                                    <React.Fragment key={idx}>
+                                    <Fragment key={idx}>
                                         <View className="flex-row items-center gap-2 py-1.5">
                                             <TriangleDown color={colors.primary} size={9} />
                                             <Text className="text-text text-sm font-mono">
@@ -563,7 +565,7 @@ export const ClipExportModal: React.FC<ClipExportModalProps> = ({
                                                 </Text>
                                             </View>
                                         )}
-                                    </React.Fragment>
+                                    </Fragment>
                                 ))}
                             </View>
                         );

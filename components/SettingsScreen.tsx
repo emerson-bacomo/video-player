@@ -6,6 +6,7 @@ import { LoadingStatus } from "@/components/LoadingStatus";
 import { ThemedCard, ThemedSafeAreaView } from "@/components/Themed";
 import { useTheme } from "@/context/ThemeContext";
 import { useMedia } from "@/hooks/useMedia";
+import { useMediaStore } from "@/hooks/MediaStoreBridge/MediaStoreProvider";
 import { useSettings } from "@/hooks/useSettings";
 import { cn } from "@/lib/utils";
 import { validateMediaDestination } from "@/utils/mediaDestination";
@@ -45,8 +46,9 @@ interface SettingsScreenComponentProps {
 
 export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenComponentProps) => {
     const { settings, updateSettings, loading: settingsLoading } = useSettings();
-    const { regenerateAllThumbnails, resetEverything, isSyncing, isResettingDatabase, isRegeneratingThumbnails, loadDataFromDB } =
+    const { resetEverything, isSyncing, isResettingDatabase, isRegeneratingThumbnails, loadDataFromDB } =
         useMedia();
+    const store = useMediaStore();
     const { switchPreset, activePresetId, presets } = useTheme();
     const [themeDropdownOpen, setThemeDropdownOpen] = useState(false);
     const [sensitivityInput, setSensitivityInput] = useState("");
@@ -181,7 +183,10 @@ export const SettingsScreenComponent = ({ fromPlayer = false }: SettingsScreenCo
                                 loading={isRegeneratingThumbnails}
                                 disabled={(isResettingDatabase || isSyncing) && !isRegeneratingThumbnails}
                                 onPress={async () => {
-                                    await regenerateAllThumbnails();
+                                    const all = store.getAllVideos();
+                                    for (const v of all) {
+                                        await v.regenerateThumbnail();
+                                    }
                                 }}
                             />
                             <View className="h-px bg-zinc-800 my-4" />

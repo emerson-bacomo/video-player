@@ -2,7 +2,8 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { AppState, AppStateStatus } from "react-native";
 import { requireNativeModule } from "expo-modules-core";
 import ExpoFFmpeg from "@/modules/expo-ffmpeg/src/index";
-import { ExportOptions, SessionClip, VideoMedia } from "@/types/useMedia";
+import { ExportOptions, SessionClip } from "@/types/useMedia";
+import type { VideoData } from "@/types/useMedia";
 import { useManageExternalStorageToast } from "@/hooks/useManageExternalStorageToast";
 import { resolveAndPersistDestination, alertIfDestinationInvalid } from "@/utils/mediaDestination";
 import { sanitizeFilename } from "@/utils/fileNaming";
@@ -18,10 +19,10 @@ import { savePendingMediaDataDb } from "@/utils/db";
 
 import { secondsToHhmmss } from "@/utils/secondsToHhmmss";
 
-const _ffmpegEmitter = requireNativeModule("ExpoFFmpeg");
-
-import type { MediaContextType } from "./useMedia";
 import { useSettings } from "./useSettings";
+import type { SetLoadingTask } from "./useMediaLoadingTask";
+
+const _ffmpegEmitter = requireNativeModule("ExpoFFmpeg");
 
 export interface ExportLabels {
     title: string;
@@ -37,10 +38,18 @@ export interface ExportQueueItem {
     onSuccess?: (outPathStr: string) => void;
 }
 
-export type ExportDependencies = Pick<
-    MediaContextType,
-    "setLoadingTask" | "fetchAlbums" | "registerSessionClip" | "allAlbumsVideos" | "addPendingClipAssignment"
->;
+export type ExportDependencies = {
+    setLoadingTask: SetLoadingTask;
+    fetchAlbums: () => Promise<void>;
+    registerSessionClip: (
+        video: VideoData,
+        segments: { start: number; end: number }[],
+        options: ExportOptions,
+        clipSourceUri: string,
+    ) => void;
+    allAlbumsVideos: Record<string, VideoData[]>;
+    addPendingClipAssignment: (outputUri: string, sourceUri: string) => void;
+};
 
 export function useMediaExport(deps: ExportDependencies) {
     const { settingsRef, updateSettings } = useSettings();
@@ -214,7 +223,7 @@ export function useMediaExport(deps: ExportDependencies) {
                     importance: "SHOW_POPUP",
                 });
                 updateFinalizingNotif();
-                let finalClip: VideoMedia | undefined = undefined;
+                let finalClip: VideoData | undefined = undefined;
                 try {
                     addPendingClipAssignment(`file://${outPathStr}`, inputUri);
                     await ExpoFFmpeg.scanFile(outPathStr);

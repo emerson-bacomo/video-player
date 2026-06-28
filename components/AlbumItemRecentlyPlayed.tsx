@@ -1,6 +1,6 @@
 import { useSafeNavigation } from "@/hooks/useSafeNavigation";
-import React, { useCallback } from "react";
-import { Album } from "../types/useMedia";
+import React, { memo, useCallback } from "react";
+import type { Album } from "@/hooks/domain/Album";
 import { AlbumItem } from "./AlbumItem";
 
 interface RecentlyPlayedAlbumProps {
@@ -8,7 +8,7 @@ interface RecentlyPlayedAlbumProps {
     width?: number;
 }
 
-export const RecentlyPlayedAlbum = React.memo(function RecentlyPlayedAlbum({ item, width }: RecentlyPlayedAlbumProps) {
+export const RecentlyPlayedAlbum = memo(function RecentlyPlayedAlbum({ item, width }: RecentlyPlayedAlbumProps) {
     const { safePush } = useSafeNavigation();
 
     const handlePress = useCallback(() => {

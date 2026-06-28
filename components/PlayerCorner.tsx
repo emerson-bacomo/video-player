@@ -1,6 +1,7 @@
 import * as Brightness from "expo-brightness";
 import * as Icons from "lucide-react-native";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { FC } from "react";
 import { Dimensions, FlatList, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated from "react-native-reanimated";
@@ -17,7 +18,7 @@ import { Modal } from "./Modal";
 
 let copiedOperator: Partial<PlayerOperation> | null = null;
 
-const IconItem = React.memo(function IconName({
+const IconItem = memo(function IconName({
     name,
     isSelected,
     itemSize,
@@ -48,7 +49,7 @@ interface PlayerCornerProps {
     sensitivity?: number;
 }
 
-export const PlayerCorner: React.FC<PlayerCornerProps> = ({ position, hasPermission, sensitivity = 0.3 }) => {
+export const PlayerCorner: FC<PlayerCornerProps> = ({ position, hasPermission, sensitivity = 0.3 }) => {
     const {
         showPieMenu: globalShowPieMenu,
         handleCornerModalChange,
@@ -610,7 +611,7 @@ interface PieButtonsProps {
     hasPrev: boolean;
 }
 
-const PieButtons = React.memo<PieButtonsProps>(function PieButtons({
+const PieButtons = memo<PieButtonsProps>(function PieButtons({
     ops,
     isLeft,
     isTop,
@@ -643,7 +644,7 @@ const PieButtons = React.memo<PieButtonsProps>(function PieButtons({
                 const IconComp = op ? (Icons as any)[op.iconName] || Icons.HelpCircle : Icons.Plus;
 
                 return (
-                    <React.Fragment key={index}>
+                    <Fragment key={index}>
                         <TouchableOpacity
                             onPress={() =>
                                 op ? !isDisabled && onExecuteOperation(op) : onSetConfigModal({ slotIndex: index, op: null })
@@ -684,7 +685,7 @@ const PieButtons = React.memo<PieButtonsProps>(function PieButtons({
                                 </View>
                             </View>
                         )}
-                    </React.Fragment>
+                    </Fragment>
                 );
             })}
         </>

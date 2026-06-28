@@ -2,9 +2,9 @@ import { Icon } from "@/components/Icon";
 import { VideoItem } from "@/components/VideoItem";
 import { VideoItemDetailsModal } from "@/components/VideoItemDetailsModal";
 import { useTheme } from "@/context/ThemeContext";
-import { useMedia } from "@/hooks/useMedia";
+import { useMediaStoreSearch } from "@/hooks/MediaStoreBridge/useMediaStoreSearch";
 import { useSafeNavigation } from "@/hooks/useSafeNavigation";
-import { VideoMedia } from "@/types/useMedia";
+
 import { StatusBar } from "expo-status-bar";
 import { ChevronLeft, Search, X } from "lucide-react-native";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -12,7 +12,7 @@ import { FlatList, Text, TextInput, TouchableOpacity, View } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function SearchPage() {
-    const { searchMedia } = useMedia();
+    const { searchMedia } = useMediaStoreSearch();
     const { colors } = useTheme();
     const insets = useSafeAreaInsets();
     const inputRef = useRef<TextInput>(null);
@@ -20,7 +20,7 @@ export default function SearchPage() {
 
     const [query, setQuery] = useState("");
     const [debouncedQuery, setDebouncedQuery] = useState("");
-    const [results, setResults] = useState<VideoMedia[]>([]);
+    const [results, setResults] = useState<any[]>([]);
     const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
 
     const selectedVideo = useMemo(() => results.find((v) => v.id === selectedVideoId) || null, [results, selectedVideoId]);
@@ -52,7 +52,7 @@ export default function SearchPage() {
 
     useEffect(() => {
         if (debouncedQuery.trim()) {
-            setResults(searchMedia(debouncedQuery));
+            searchMedia(debouncedQuery).then(setResults);
         } else {
             setResults([]);
         }

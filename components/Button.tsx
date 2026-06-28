@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { ActivityIndicator, Text, TouchableOpacity, TouchableOpacityProps, View } from "react-native";
 import { cva, type VariantProps } from "class-variance-authority";
 
@@ -62,12 +63,12 @@ export interface ButtonProps
     extends Omit<TouchableOpacityProps, "onPress">,
     VariantProps<typeof buttonVariants> {
     title?: string;
-    onPress: (setLoading: React.Dispatch<React.SetStateAction<boolean>>) => void;
+    onPress: (setLoading: Dispatch<SetStateAction<boolean>>) => void;
     textClassName?: string;
     textStyle?: any;
     loading?: boolean;
     putStyleOnDisabled?: boolean;
-    children?: React.ReactNode;
+    children?: ReactNode;
 }
 
 /**

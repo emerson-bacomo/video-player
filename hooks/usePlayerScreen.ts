@@ -3,7 +3,8 @@ import * as Brightness from "expo-brightness";
 import * as NavigationBar from "expo-navigation-bar";
 import { useRouter } from "expo-router";
 import { useSafeNavigation } from "@/hooks/useSafeNavigation";
-import { useMedia } from "@/hooks/useMedia";
+import { useMediaStoreUnfilteredVideos } from "@/hooks/MediaStoreBridge/useMediaStoreUnfilteredVideos";
+import { useLoadingTask } from "@/context/LoadingTaskContext";
 import { useSettings } from "@/hooks/useSettings";
 import { toast } from "sonner-native";
 import { usePlayerContext } from "@/context/PlayerContext";
@@ -13,7 +14,8 @@ export const usePlayerScreen = () => {
     const { safeBack } = useSafeNavigation();
     const { settings } = useSettings();
     const router = useRouter();
-    const { getUnfilteredVideosForAlbum, setLoadingTask } = useMedia();
+    const { getUnfilteredVideosForAlbum } = useMediaStoreUnfilteredVideos();
+    const { setLoadingTask } = useLoadingTask();
 
     const {
         videoId,
@@ -68,13 +70,13 @@ export const usePlayerScreen = () => {
     // Check if video is missing
     useEffect(() => {
         if (videoId && albumId) {
-            const albumVids = getUnfilteredVideosForAlbum(albumId);
-            const activeVid = albumVids.find((v) => v.id === videoId);
-
-            if (!activeVid && !isReadyForDisplay) {
-                toast.error("Video not found.");
-                safeBack();
-            }
+            getUnfilteredVideosForAlbum(albumId).then((albumVids) => {
+                const activeVid = albumVids.find((v) => v.id === videoId);
+                if (!activeVid && !isReadyForDisplay) {
+                    toast.error("Video not found.");
+                    safeBack();
+                }
+            });
         }
     }, [videoId, albumId, safeBack, isReadyForDisplay, getUnfilteredVideosForAlbum]);
 
